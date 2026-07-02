@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import ThreePanelLayout from "../components/ThreePanelLayout";
 
 const WORKSPACE_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard", active: false },
@@ -1605,122 +1606,136 @@ export default function SampleBriefs() {
     </>
   );
 
-  return (
-    <>
-      <div className="hidden h-screen overflow-hidden md:flex">
-        <aside className="flex h-screen w-[260px] shrink-0 flex-col overflow-y-auto border-r border-border-dark bg-card">
-          <div className="p-5">
-            <div className="flex items-center gap-1 font-display text-lg font-bold">
-              <span>🧵</span>
-              <span className="text-white">Fab</span>
-              <span className="text-primary">Verify</span>
-            </div>
+  const leftPanel = (
+    <div className="flex min-h-full flex-col">
+      <div className="p-5">
+        <div className="flex items-center gap-1 font-display text-lg font-bold">
+          <span>🧵</span>
+          <span className="text-white">Fab</span>
+          <span className="text-primary">Verify</span>
+        </div>
 
-            <p className="mt-5 text-sm text-white">
-              Good morning, Siddharth 👋
-            </p>
-            <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-              Brand Builder
-            </span>
-          </div>
-
-          <div className="mt-4">
-            <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-              Workspace
-            </p>
-            <nav className="mt-2 flex flex-col">
-              {WORKSPACE_NAV.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                    item.active
-                      ? "border-primary bg-primary/[0.08] text-primary"
-                      : "border-transparent text-text-secondary hover:text-text-primary"
-                  }`}
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          <div className="mt-6">
-            <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-              Tools
-            </p>
-            <nav className="mt-2 flex flex-col">
-              {TOOLS_NAV.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                    item.active
-                      ? "border-primary bg-primary/[0.08] text-primary"
-                      : "border-transparent text-text-secondary hover:text-text-primary"
-                  }`}
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          <div className="mt-auto border-t border-border-dark p-5">
-            <p className="text-xs text-text-secondary">Your FabScore</p>
-            <p className="mt-1 font-display text-2xl font-bold text-primary">
-              —
-            </p>
-            <p className="mt-1 text-[11px] text-text-secondary">
-              Complete verification to unlock
-            </p>
-            <button
-              type="button"
-              className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-            >
-              Get Verified
-            </button>
-          </div>
-        </aside>
-
-        <main className="flex h-screen flex-1 flex-col overflow-hidden">
-          <div className="flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6">
-            <h1 className="font-display text-xl font-bold text-white">
-              Sample Briefs
-            </h1>
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                aria-label="Notifications"
-                className="text-lg text-text-primary"
-              >
-                🔔
-              </button>
-              <button
-                type="button"
-                onClick={startNewBrief}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
-              >
-                Post New Brief
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            {tabsBar}
-            {activeTab === "my-briefs" ? myBriefsContent : postBriefContent}
-          </div>
-        </main>
-
-        <aside className="scrollbar-hide flex h-screen w-[280px] shrink-0 flex-col overflow-y-auto border-l border-border-dark bg-card p-5">
-          {activeTab === "my-briefs" ? howItWorksPanel : tipsForBriefPanel}
-        </aside>
+        <p className="mt-5 text-sm text-white">
+          Good morning, Siddharth 👋
+        </p>
+        <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+          Brand Builder
+        </span>
       </div>
 
-      <div className="flex min-h-screen flex-col pb-20 md:hidden">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border-dark bg-card px-4">
+      <div className="mt-4">
+        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Workspace
+        </p>
+        <nav className="mt-2 flex flex-col">
+          {WORKSPACE_NAV.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
+                item.active
+                  ? "border-primary bg-primary/[0.08] text-primary"
+                  : "border-transparent text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              <span>{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+
+      <div className="mt-6">
+        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Tools
+        </p>
+        <nav className="mt-2 flex flex-col">
+          {TOOLS_NAV.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
+                item.active
+                  ? "border-primary bg-primary/[0.08] text-primary"
+                  : "border-transparent text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              <span>{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+
+      <div className="mt-auto border-t border-border-dark p-5">
+        <p className="text-xs text-text-secondary">Your FabScore</p>
+        <p className="mt-1 font-display text-2xl font-bold text-primary">
+          —
+        </p>
+        <p className="mt-1 text-[11px] text-text-secondary">
+          Complete verification to unlock
+        </p>
+        <button
+          type="button"
+          className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
+        >
+          Get Verified
+        </button>
+      </div>
+    </div>
+  );
+
+  const centrePanel = (
+    <>
+      <div
+        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
+        style={{ backgroundColor: "#07122a" }}
+      >
+        <h1 className="font-display text-xl font-bold text-white">
+          Sample Briefs
+        </h1>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            aria-label="Notifications"
+            className="text-lg text-text-primary"
+          >
+            🔔
+          </button>
+          <button
+            type="button"
+            onClick={startNewBrief}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
+          >
+            Post New Brief
+          </button>
+        </div>
+      </div>
+
+      <div className="px-6 py-6">
+        {tabsBar}
+        {activeTab === "my-briefs" ? myBriefsContent : postBriefContent}
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <ThreePanelLayout
+        left={leftPanel}
+        centre={centrePanel}
+        right={
+          <div style={{ padding: "20px" }}>
+            {activeTab === "my-briefs" ? howItWorksPanel : tipsForBriefPanel}
+          </div>
+        }
+      />
+
+      <div
+        className="flex flex-col pb-20 md:hidden"
+        style={{ height: "100vh", overflowY: "auto", scrollbarWidth: "none" }}
+      >
+        <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-border-dark bg-card px-4">
           <div className="flex items-center gap-1 font-display text-base font-bold">
             <span>🧵</span>
             <span className="text-white">Fab</span>

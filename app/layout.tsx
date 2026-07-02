@@ -29,7 +29,12 @@ export default function RootLayout({
       lang="en"
       className={`${montserrat.variable} ${inter.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body
+        className="flex flex-col font-sans"
+        style={{ height: "100vh", overflow: "hidden" }}
+      >
+        {children}
+      </body>
     </html>
   );
 }

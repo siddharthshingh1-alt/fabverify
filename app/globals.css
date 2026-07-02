@@ -1,6 +1,27 @@
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#__next {
+  height: 100%;
+  overflow: hidden;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
 body {
   background-color: #07122a;
   color: #d9e2ff;
@@ -34,6 +55,15 @@ body {
 }
 
 .scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
