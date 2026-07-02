@@ -17,7 +17,6 @@ export default function ThreePanelLayout({
     <div
       className="hidden md:flex"
       style={{
-        display: 'flex',
         flexDirection: 'row',
         position: 'fixed',
         top: 0,
