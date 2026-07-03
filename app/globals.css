@@ -81,3 +81,18 @@ body {
 .field-fade-in {
   animation: field-fade-in 200ms ease-out;
 }
+
+@keyframes scale-in {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.scale-in {
+  animation: scale-in 400ms ease-out;
+}
