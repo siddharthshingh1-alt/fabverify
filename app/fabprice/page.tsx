@@ -1,22 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { Fragment, useId, useMemo, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
-
-const WORKSPACE_NAV = [
-  { icon: "🏠", label: "Home", href: "/dashboard", active: false },
-  { icon: "📦", label: "My Orders", href: "/orders", active: false },
-  { icon: "🧵", label: "Find Manufacturers", href: "/manufacturers", active: false },
-  { icon: "👔", label: "FabMerch", href: "/fabmerch", active: false },
-  { icon: "💳", label: "FabScore & Credit", href: "/credit", active: false },
-];
-
-const TOOLS_NAV = [
-  { icon: "📋", label: "Sample Briefs", href: "/samples", active: false },
-  { icon: "💰", label: "FabPrice", href: "/fabprice", active: true },
-  { icon: "📊", label: "Analytics", href: "/analytics", active: false },
-];
+import {
+  fabricPrices,
+  makingCharges,
+  trimPrices,
+} from "../data/fabprice";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -84,295 +74,62 @@ type TrimRow = {
 
 const HISTORY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 
-const FABRIC_ROWS: FabricRow[] = [
-  {
-    id: "cotton-lawn-80-gsm",
-    name: "Cotton Lawn 80 GSM",
-    tags: ["Printed", "Plain"],
-    city: "Delhi NCR",
-    price50: [120, 140],
-    price200: [105, 125],
-    price500: [95, 110],
-    trend: "up",
-    trendLabel: "Up 3% this month",
-    updatedDaysAgo: 2,
-    history: [98, 102, 105, 108, 112, 118],
-  },
-  {
-    id: "cotton-poplin",
-    name: "Cotton Poplin",
-    tags: ["Solid", "Striped"],
-    city: "Surat",
-    price50: [100, 120],
-    price200: [88, 105],
-    price500: [80, 95],
-    trend: "stable",
-    trendLabel: "Stable",
-    updatedDaysAgo: 1,
-    history: [95, 98, 96, 97, 99, 98],
-  },
-  {
-    id: "silk-crepe",
-    name: "Silk Crepe",
-    tags: ["Luxury", "Occasion"],
-    city: "Surat",
-    price50: [380, 450],
-    price200: [320, 400],
-    price500: [280, 360],
-    trend: "up",
-    trendLabel: "Up 5% this month",
-    updatedDaysAgo: 3,
-    history: [310, 320, 335, 345, 358, 370],
-  },
-  {
-    id: "linen-plain",
-    name: "Linen Plain",
-    tags: ["Sustainable", "Summer"],
-    city: "Kolkata",
-    price50: [220, 280],
-    price200: [190, 250],
-    price500: [180, 230],
-    trend: "down",
-    trendLabel: "Down 2% this month",
-    updatedDaysAgo: 0,
-    history: [265, 258, 252, 248, 245, 242],
-  },
-  {
-    id: "polyester-georgette",
-    name: "Polyester Georgette",
-    tags: ["Lightweight", "Drape"],
-    city: "Surat",
-    price50: [80, 95],
-    price200: [68, 82],
-    price500: [60, 75],
-    trend: "stable",
-    trendLabel: "Stable",
-    updatedDaysAgo: 0,
-    history: [75, 76, 74, 75, 73, 74],
-  },
-  {
-    id: "mul-mul-cotton",
-    name: "Mul Mul Cotton",
-    tags: ["Lightweight", "Ethnic"],
-    city: "Jaipur",
-    price50: [65, 85],
-    price200: [55, 72],
-    price500: [48, 65],
-    trend: "up",
-    trendLabel: "Up 2% this month",
-    updatedDaysAgo: 2,
-    history: [58, 60, 61, 63, 64, 66],
-  },
-  {
-    id: "rayon-slub",
-    name: "Rayon Slub",
-    tags: ["Casual", "Drapey"],
-    city: "Surat",
-    price50: [90, 115],
-    price200: [78, 98],
-    price500: [68, 88],
-    trend: "stable",
-    trendLabel: "Stable",
-    updatedDaysAgo: 1,
-    history: [85, 86, 87, 86, 88, 87],
-  },
-  {
-    id: "pure-chanderi",
-    name: "Pure Chanderi",
-    tags: ["Ethnic", "Luxury"],
-    city: "Chanderi MP",
-    price50: [450, 650],
-    price200: [400, 580],
-    price500: [380, 520],
-    trend: "up",
-    trendLabel: "Up 8% this month",
-    updatedDaysAgo: 4,
-    history: [420, 435, 448, 462, 475, 490],
-  },
-];
+function parsePriceRange(range: string): PriceRange {
+  const numbers = (range.match(/[\d,]+/g) ?? ["0"]).map((n) =>
+    parseInt(n.replace(/,/g, ""), 10)
+  );
+  return [numbers[0] ?? 0, numbers[1] ?? numbers[0] ?? 0];
+}
 
-const MAKING_ROWS: MakingRow[] = [
-  {
-    id: "kurta-basic",
-    category: "Kurta — Basic",
-    city: "Jaipur",
-    price50: [380, 480],
-    price100: [320, 420],
-    price500: [280, 360],
-    complexity: "Simple",
-    updatedDaysAgo: 0,
-    history: [340, 345, 348, 352, 358, 362],
-  },
-  {
-    id: "kurta-complex",
-    category: "Kurta — Complex",
-    note: "With embroidery or print",
-    city: "Delhi NCR",
-    price50: [550, 720],
-    price100: [460, 620],
-    price500: [400, 540],
-    complexity: "Complex",
-    updatedDaysAgo: 1,
-    history: [480, 490, 500, 510, 525, 535],
-  },
-  {
-    id: "tshirt-round-neck",
-    category: "T-Shirt Round Neck",
-    city: "Tirupur",
-    price50: [160, 220],
-    price100: [130, 180],
-    price500: [110, 150],
-    complexity: "Simple",
-    updatedDaysAgo: 0,
-    history: [145, 148, 146, 150, 152, 150],
-  },
-  {
-    id: "trouser-casual",
-    category: "Trouser — Casual",
-    city: "Delhi NCR",
-    price50: [420, 560],
-    price100: [360, 480],
-    price500: [320, 420],
-    complexity: "Medium",
-    updatedDaysAgo: 2,
-    history: [400, 405, 410, 415, 420, 418],
-  },
-  {
-    id: "palazzo-pants",
-    category: "Palazzo Pants",
-    city: "Jaipur",
-    price50: [280, 380],
-    price100: [240, 320],
-    price500: [210, 280],
-    complexity: "Simple",
-    updatedDaysAgo: 0,
-    history: [260, 262, 265, 268, 270, 272],
-  },
-  {
-    id: "anarkali-suit",
-    category: "Anarkali Suit",
-    city: "Delhi NCR",
-    price50: [680, 920],
-    price100: [580, 780],
-    price500: [520, 680],
-    complexity: "Complex",
-    updatedDaysAgo: 3,
-    history: [620, 635, 650, 665, 680, 695],
-  },
-  {
-    id: "kids-tshirt",
-    category: "Kids T-Shirt",
-    city: "Tirupur",
-    price50: [100, 140],
-    price100: [85, 120],
-    price500: [75, 105],
-    complexity: "Simple",
-    updatedDaysAgo: 0,
-    history: [98, 100, 99, 102, 104, 103],
-  },
-  {
-    id: "denim-jeans",
-    category: "Denim Jeans",
-    city: "Ahmedabad",
-    price50: [520, 720],
-    price100: [440, 620],
-    price500: [380, 520],
-    complexity: "Complex",
-    updatedDaysAgo: 1,
-    history: [480, 490, 495, 505, 512, 520],
-  },
-];
+function parseUpdatedDays(updated: string): number {
+  if (/^today$/i.test(updated)) return 0;
+  const match = updated.match(/(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
 
-const TRIM_ROWS: TrimRow[] = [
-  {
-    id: "button-4-hole-15mm",
-    name: "Button — 4 hole 15mm",
-    material: "Metal",
-    price: [12, 22],
-    priceUnit: "per piece",
-    moq: "100 pieces",
-    city: "Delhi NCR",
-    updatedDaysAgo: 0,
-    history: [15, 15, 16, 16, 17, 17],
-  },
-  {
-    id: "invisible-zip-20cm",
-    name: "Invisible Zip 20cm",
-    material: "Nylon",
-    price: [8, 18],
-    priceUnit: "per piece",
-    moq: "50 pieces",
-    city: "Mumbai",
-    updatedDaysAgo: 1,
-    history: [12, 12, 13, 13, 14, 14],
-  },
-  {
-    id: "elastic-1-inch",
-    name: "Elastic 1 inch",
-    material: "Woven",
-    price: [6, 12],
-    priceUnit: "per metre",
-    moq: "50 metres",
-    city: "Surat",
-    updatedDaysAgo: 0,
-    history: [8, 8, 9, 9, 9, 10],
-  },
-  {
-    id: "woven-label",
-    name: "Woven Label",
-    material: "Fabric",
-    price: [4, 9],
-    priceUnit: "per piece",
-    moq: "200 pieces",
-    city: "Delhi NCR",
-    updatedDaysAgo: 2,
-    history: [6, 6, 6, 7, 7, 7],
-  },
-  {
-    id: "chikankari-embroidery-neckline",
-    name: "Chikankari Embroidery — Neckline",
-    material: "Thread on fabric",
-    price: [85, 140],
-    priceUnit: "per piece",
-    moq: "30 pieces",
-    city: "Lucknow",
-    updatedDaysAgo: 0,
-    history: [105, 108, 112, 115, 120, 125],
-  },
-  {
-    id: "block-print-per-metre",
-    name: "Block Print per metre",
-    material: "Pigment/Reactive dye",
-    price: [45, 90],
-    priceUnit: "per metre",
-    moq: "50 metres",
-    city: "Jaipur",
-    updatedDaysAgo: 1,
-    history: [62, 64, 65, 67, 68, 70],
-  },
-  {
-    id: "lining-fabric",
-    name: "Lining Fabric",
-    material: "Polyester",
-    price: [28, 45],
-    priceUnit: "per metre",
-    moq: "50 metres",
-    city: "Surat",
-    updatedDaysAgo: 0,
-    history: [34, 35, 35, 36, 36, 37],
-  },
-  {
-    id: "care-label-printed",
-    name: "Care Label printed",
-    material: "Satin ribbon",
-    price: [2, 5],
-    priceUnit: "per piece",
-    moq: "500 pieces",
-    city: "Delhi NCR",
-    updatedDaysAgo: 3,
-    history: [3, 3, 3, 4, 4, 4],
-  },
-];
+function parsePriceUnit(range: string): string {
+  const match = range.match(/₹[\d,]+–₹[\d,]+\s*(.*)$/);
+  return match ? match[1] : "";
+}
+
+const FABRIC_ROWS: FabricRow[] = fabricPrices.map((row) => ({
+  id: row.id,
+  name: row.name,
+  tags: row.tags,
+  city: row.city,
+  price50: parsePriceRange(row.prices.small),
+  price200: parsePriceRange(row.prices.medium),
+  price500: parsePriceRange(row.prices.large),
+  trend: row.trend,
+  trendLabel: row.trendText,
+  updatedDaysAgo: parseUpdatedDays(row.updated),
+  history: row.history,
+}));
+
+const MAKING_ROWS: MakingRow[] = makingCharges.map((row) => ({
+  id: row.id,
+  category: row.name,
+  note: row.description || undefined,
+  city: row.city,
+  price50: parsePriceRange(row.prices.small),
+  price100: parsePriceRange(row.prices.medium),
+  price500: parsePriceRange(row.prices.large),
+  complexity: row.complexity === "simple" ? "Simple" : "Complex",
+  updatedDaysAgo: parseUpdatedDays(row.updated),
+  history: row.history,
+}));
+
+const TRIM_ROWS: TrimRow[] = trimPrices.map((row) => ({
+  id: row.id,
+  name: row.name,
+  material: row.material,
+  price: parsePriceRange(row.price),
+  priceUnit: parsePriceUnit(row.price),
+  moq: row.moq,
+  city: row.city,
+  updatedDaysAgo: parseUpdatedDays(row.updated),
+  history: row.history,
+}));
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "fabric", label: "Fabric" },
@@ -1319,81 +1076,6 @@ export default function FabPrice() {
         ? MAKING_ROWS.map((row) => row.category)
         : TRIM_ROWS.map((row) => row.name);
 
-  const leftPanel = (
-    <div className="flex min-h-full flex-col">
-      <div className="p-5">
-        <div className="flex items-center gap-1 font-display text-lg font-bold">
-          <span>🧵</span>
-          <span className="text-white">Fab</span>
-          <span className="text-primary">Verify</span>
-        </div>
-
-        <p className="mt-5 text-sm text-white">Good morning, Siddharth 👋</p>
-        <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-          Brand Builder
-        </span>
-      </div>
-
-      <div className="mt-4">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Workspace
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {WORKSPACE_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                item.active
-                  ? "border-primary bg-primary/[0.08] text-primary"
-                  : "border-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-6">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Tools
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {TOOLS_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                item.active
-                  ? "border-primary bg-primary/[0.08] text-primary"
-                  : "border-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-auto border-t border-border-dark p-5">
-        <p className="text-xs text-text-secondary">Your FabScore</p>
-        <p className="mt-1 font-display text-2xl font-bold text-primary">—</p>
-        <p className="mt-1 text-[11px] text-text-secondary">
-          Complete verification to unlock
-        </p>
-        <button
-          type="button"
-          className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-        >
-          Get Verified
-        </button>
-      </div>
-    </div>
-  );
-
   const centrePanel = (
     <>
       <div
@@ -1534,7 +1216,6 @@ export default function FabPrice() {
   return (
     <>
       <ThreePanelLayout
-        left={leftPanel}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />

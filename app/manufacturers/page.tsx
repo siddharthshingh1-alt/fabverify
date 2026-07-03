@@ -1,27 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
-
-const WORKSPACE_NAV = [
-  { icon: "🏠", label: "Home", href: "/dashboard", active: false },
-  { icon: "📦", label: "My Orders", href: "/orders", active: false },
-  {
-    icon: "🧵",
-    label: "Find Manufacturers",
-    href: "/manufacturers",
-    active: true,
-  },
-  { icon: "👔", label: "FabMerch", href: "/fabmerch", active: false },
-  { icon: "💳", label: "FabScore & Credit", href: "/credit", active: false },
-];
-
-const TOOLS_NAV = [
-  { icon: "📋", label: "Sample Briefs", href: "/samples" },
-  { icon: "💰", label: "FabPrice", href: "/fabprice" },
-  { icon: "📊", label: "Analytics", href: "/analytics" },
-];
+import { manufacturers } from "../data/manufacturers";
+import type { Tier } from "../data/manufacturers";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -41,121 +23,7 @@ const CATEGORY_PILLS = [
   "Luxury",
 ];
 
-type Tier = "gold" | "silver" | "bronze";
-
-type Manufacturer = {
-  id: string;
-  name: string;
-  city: string;
-  state: string;
-  tier: Tier;
-  tags: string[];
-  rating: number;
-  orders: number;
-  delivery: number;
-  moq: string;
-};
-
-const MANUFACTURERS: Manufacturer[] = [
-  {
-    id: "jaipur-ethnic-works",
-    name: "Jaipur Ethnic Works",
-    city: "Jaipur",
-    state: "Rajasthan",
-    tier: "gold",
-    tags: ["Ethnic Wear", "Cotton", "Hand Block Print"],
-    rating: 4.9,
-    orders: 287,
-    delivery: 99,
-    moq: "50 pieces",
-  },
-  {
-    id: "surat-cotton-mills",
-    name: "Surat Cotton Mills",
-    city: "Surat",
-    state: "Gujarat",
-    tier: "gold",
-    tags: ["Cotton Fabric", "Lawn", "Printed"],
-    rating: 4.8,
-    orders: 412,
-    delivery: 98,
-    moq: "100 metres",
-  },
-  {
-    id: "lucknow-chikankari-house",
-    name: "Lucknow Chikankari House",
-    city: "Lucknow",
-    state: "UP",
-    tier: "gold",
-    tags: ["Chikankari", "Ethnic Wear", "Hand Embroidery"],
-    rating: 4.9,
-    orders: 156,
-    delivery: 97,
-    moq: "30 pieces",
-  },
-  {
-    id: "tirupur-knits",
-    name: "Tirupur Knits",
-    city: "Tirupur",
-    state: "Tamil Nadu",
-    tier: "silver",
-    tags: ["Knitwear", "T-shirts", "Casual Wear"],
-    rating: 4.7,
-    orders: 334,
-    delivery: 96,
-    moq: "100 pieces",
-  },
-  {
-    id: "delhi-woven-works",
-    name: "Delhi Woven Works",
-    city: "Delhi NCR",
-    state: "",
-    tier: "silver",
-    tags: ["Woven", "Western Wear", "Trousers"],
-    rating: 4.6,
-    orders: 198,
-    delivery: 95,
-    moq: "50 pieces",
-  },
-  {
-    id: "mumbai-denim-studio",
-    name: "Mumbai Denim Studio",
-    city: "Mumbai",
-    state: "Maharashtra",
-    tier: "silver",
-    tags: ["Denim", "Western Wear", "Jeans"],
-    rating: 4.5,
-    orders: 167,
-    delivery: 94,
-    moq: "100 pieces",
-  },
-  {
-    id: "ahmedabad-silk-house",
-    name: "Ahmedabad Silk House",
-    city: "Ahmedabad",
-    state: "Gujarat",
-    tier: "bronze",
-    tags: ["Silk", "Ethnic Wear", "Sarees"],
-    rating: 4.4,
-    orders: 89,
-    delivery: 93,
-    moq: "20 pieces",
-  },
-  {
-    id: "kolkata-handloom",
-    name: "Kolkata Handloom",
-    city: "Kolkata",
-    state: "West Bengal",
-    tier: "bronze",
-    tags: ["Handloom", "Cotton", "Ethnic"],
-    rating: 4.3,
-    orders: 67,
-    delivery: 92,
-    moq: "25 pieces",
-  },
-];
-
-const CITY_OPTIONS = MANUFACTURERS.map((m) => m.city);
+const CITY_OPTIONS = manufacturers.map((m) => m.city);
 
 const TIER_STYLES: Record<Tier, string> = {
   gold: "border-primary/40 bg-primary/15 text-primary",
@@ -183,10 +51,6 @@ const SELECT_STYLE = {
 
 const SELECT_CLASSNAME =
   "appearance-none rounded-[6px] border border-border-dark bg-card py-2 pl-3 pr-8 text-xs text-text-primary outline-none transition-colors focus:border-primary";
-
-function moqValue(moq: string) {
-  return parseInt(moq, 10) || 0;
-}
 
 export default function Manufacturers() {
   const [searchText, setSearchText] = useState("");
@@ -242,7 +106,7 @@ export default function Manufacturers() {
     setMoqTo("");
   };
 
-  const filteredManufacturers = MANUFACTURERS.filter((manufacturer) => {
+  const filteredManufacturers = manufacturers.filter((manufacturer) => {
     const query = searchText.trim().toLowerCase();
     const matchesSearch =
       !query ||
@@ -289,87 +153,12 @@ export default function Manufacturers() {
       case "Fastest Delivery":
         return b.delivery - a.delivery;
       case "Lowest MOQ":
-        return moqValue(a.moq) - moqValue(b.moq);
+        return a.moq - b.moq;
       case "Top Rated":
       default:
         return b.rating - a.rating;
     }
   });
-
-  const leftPanel = (
-    <div className="flex min-h-full flex-col">
-      <div className="p-5">
-        <div className="flex items-center gap-1 font-display text-lg font-bold">
-          <span>🧵</span>
-          <span className="text-white">Fab</span>
-          <span className="text-primary">Verify</span>
-        </div>
-
-        <p className="mt-5 text-sm text-white">
-          Good morning, Siddharth 👋
-        </p>
-        <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-          Brand Builder
-        </span>
-      </div>
-
-      <div className="mt-4">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Workspace
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {WORKSPACE_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                item.active
-                  ? "border-primary bg-primary/[0.08] text-primary"
-                  : "border-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-6">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Tools
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {TOOLS_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className="flex items-center gap-3 border-l-2 border-transparent px-5 py-2.5 text-left text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-auto border-t border-border-dark p-5">
-        <p className="text-xs text-text-secondary">Your FabScore</p>
-        <p className="mt-1 font-display text-2xl font-bold text-primary">
-          —
-        </p>
-        <p className="mt-1 text-[11px] text-text-secondary">
-          Complete verification to unlock
-        </p>
-        <button
-          type="button"
-          className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-        >
-          Get Verified
-        </button>
-      </div>
-    </div>
-  );
 
   const centrePanel = (
     <>
@@ -541,7 +330,7 @@ export default function Manufacturers() {
 
               <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-text-secondary">
-                  Min. {manufacturer.moq}
+                  Min. {manufacturer.moq} {manufacturer.moqUnit}
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -712,7 +501,6 @@ export default function Manufacturers() {
   return (
     <>
       <ThreePanelLayout
-        left={leftPanel}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />
@@ -843,7 +631,7 @@ export default function Manufacturers() {
 
                 <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3">
                   <p className="text-xs text-text-secondary">
-                    Min. {manufacturer.moq}
+                    Min. {manufacturer.moq} {manufacturer.moqUnit}
                   </p>
                   <div className="flex gap-2">
                     <button

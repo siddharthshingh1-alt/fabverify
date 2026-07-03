@@ -1,15 +1,16 @@
 'use client'
 
 import React from 'react'
+import LeftPanel from './LeftPanel'
 
 interface ThreePanelLayoutProps {
-  left: React.ReactNode
+  left?: React.ReactNode
   centre: React.ReactNode
   right: React.ReactNode
 }
 
 export default function ThreePanelLayout({
-  left,
+  left = <LeftPanel />,
   centre,
   right
 }: ThreePanelLayoutProps) {

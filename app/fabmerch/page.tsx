@@ -1,22 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
-
-const WORKSPACE_NAV = [
-  { icon: "🏠", label: "Home", href: "/dashboard", active: false },
-  { icon: "📦", label: "My Orders", href: "/orders", active: false },
-  { icon: "🧵", label: "Find Manufacturers", href: "/manufacturers", active: false },
-  { icon: "👔", label: "FabMerch", href: "/fabmerch", active: true },
-  { icon: "💳", label: "FabScore & Credit", href: "/credit", active: false },
-];
-
-const TOOLS_NAV = [
-  { icon: "📋", label: "Sample Briefs", href: "/samples", active: false },
-  { icon: "💰", label: "FabPrice", href: "/fabprice", active: false },
-  { icon: "📊", label: "Analytics", href: "/analytics", active: false },
-];
+import {
+  merchandisers as MERCHANDISER_DATA,
+  designers as DESIGNER_DATA,
+  masters as MASTER_DATA,
+} from "../data/professionals";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -74,230 +64,48 @@ const ALL_STAGES = [
   "Dispatch",
 ];
 
-const MERCHANDISERS: Professional[] = [
-  {
-    id: "meera-sharma",
-    name: "Meera Sharma",
-    city: "Delhi NCR",
-    fabScore: 9.8,
-    tags: ["Ethnic Wear", "Luxury", "Sustainable"],
-    years: 12,
-    countLabel: "89 projects",
-    qualityLabel: "99% on time",
-    extraPills: ["Design", "Sourcing", "Sampling", "Production", "QC", "Dispatch"],
-    rateRange: "₹12,000 – ₹20,000 per stage",
-  },
-  {
-    id: "rahul-verma",
-    name: "Rahul Verma",
-    city: "Mumbai",
-    fabScore: 9.5,
-    tags: ["Western Wear", "Denim", "Activewear"],
-    years: 8,
-    countLabel: "67 projects",
-    qualityLabel: "98% on time",
-    extraPills: ["Sourcing", "Sampling", "Production", "QC"],
-    rateRange: "₹8,000 – ₹15,000 per stage",
-  },
-  {
-    id: "priya-nair",
-    name: "Priya Nair",
-    city: "Tirupur",
-    fabScore: 9.3,
-    tags: ["Knitwear", "Activewear", "Kids Wear"],
-    years: 6,
-    countLabel: "54 projects",
-    qualityLabel: "97% on time",
-    extraPills: ["Sourcing", "Production", "QC", "Dispatch"],
-    rateRange: "₹6,000 – ₹12,000 per stage",
-  },
-  {
-    id: "arjun-mehta",
-    name: "Arjun Mehta",
-    city: "Jaipur",
-    fabScore: 9.6,
-    tags: ["Ethnic Wear", "Block Print", "Artisan"],
-    years: 10,
-    countLabel: "78 projects",
-    qualityLabel: "98% on time",
-    extraPills: ["Design", "Sourcing", "Sampling", "Production", "QC"],
-    rateRange: "₹10,000 – ₹18,000 per stage",
-  },
-  {
-    id: "fatima-sheikh",
-    name: "Fatima Sheikh",
-    city: "Surat",
-    fabScore: 9.1,
-    tags: ["Luxury", "Western Wear", "Export"],
-    years: 7,
-    countLabel: "43 projects",
-    qualityLabel: "96% on time",
-    extraPills: ["Sourcing", "Sampling", "Production", "QC", "Dispatch"],
-    rateRange: "₹8,000 – ₹14,000 per stage",
-  },
-  {
-    id: "vikram-singh",
-    name: "Vikram Singh",
-    city: "Ahmedabad",
-    fabScore: 9.4,
-    tags: ["Cotton", "Ethnic Wear", "Sustainable"],
-    years: 9,
-    countLabel: "61 projects",
-    qualityLabel: "97% on time",
-    extraPills: ["Design", "Sourcing", "Sampling", "Production"],
-    rateRange: "₹9,000 – ₹16,000 per stage",
-  },
-];
+function formatRate(rateMin: number, rateMax: number, rateUnit: string) {
+  return `₹${rateMin.toLocaleString("en-IN")} – ₹${rateMax.toLocaleString("en-IN")} ${rateUnit}`;
+}
 
-const DESIGNERS: Professional[] = [
-  {
-    id: "ananya-kapoor",
-    name: "Ananya Kapoor",
-    city: "Mumbai",
-    fabScore: 9.7,
-    tags: ["Ethnic Wear", "Luxury", "Fusion"],
-    years: 9,
-    countLabel: "234 tech packs",
-    qualityLabel: "99% accuracy",
-    extraPills: ["Illustrator", "Hand Sketch", "CLO 3D"],
-    rateRange: "₹3,500 – ₹6,000 per tech pack",
-  },
-  {
-    id: "rohit-das",
-    name: "Rohit Das",
-    city: "Delhi NCR",
-    fabScore: 9.4,
-    tags: ["Western Wear", "Denim", "Streetwear"],
-    years: 6,
-    countLabel: "178 tech packs",
-    qualityLabel: "97% accuracy",
-    extraPills: ["Illustrator", "CAD", "Photoshop"],
-    rateRange: "₹2,500 – ₹4,500 per tech pack",
-  },
-  {
-    id: "kavya-menon",
-    name: "Kavya Menon",
-    city: "Bangalore",
-    fabScore: 9.2,
-    tags: ["Activewear", "Sustainable", "Kids Wear"],
-    years: 5,
-    countLabel: "143 tech packs",
-    qualityLabel: "96% accuracy",
-    extraPills: ["CLO 3D", "Illustrator", "Hand Sketch"],
-    rateRange: "₹2,000 – ₹4,000 per tech pack",
-  },
-  {
-    id: "zara-khan",
-    name: "Zara Khan",
-    city: "Jaipur",
-    fabScore: 9.6,
-    tags: ["Ethnic Wear", "Block Print", "Artisan Craft"],
-    years: 8,
-    countLabel: "198 tech packs",
-    qualityLabel: "98% accuracy",
-    extraPills: ["Illustrator", "Hand Sketch", "Photoshop"],
-    rateRange: "₹3,000 – ₹5,500 per tech pack",
-  },
-  {
-    id: "aditya-rao",
-    name: "Aditya Rao",
-    city: "Chennai",
-    fabScore: 9.0,
-    tags: ["Menswear", "Formal", "Western"],
-    years: 4,
-    countLabel: "112 tech packs",
-    qualityLabel: "95% accuracy",
-    extraPills: ["CAD", "Illustrator"],
-    rateRange: "₹2,000 – ₹3,500 per tech pack",
-  },
-  {
-    id: "pooja-iyer",
-    name: "Pooja Iyer",
-    city: "Hyderabad",
-    fabScore: 9.3,
-    tags: ["Luxury", "Fusion", "Bridal"],
-    years: 7,
-    countLabel: "167 tech packs",
-    qualityLabel: "97% accuracy",
-    extraPills: ["Illustrator", "CLO 3D", "Hand Sketch"],
-    rateRange: "₹3,500 – ₹6,500 per tech pack",
-  },
-];
+const MERCHANDISERS: Professional[] = MERCHANDISER_DATA.map((person) => ({
+  id: person.id,
+  name: person.name,
+  city: person.city,
+  fabScore: person.fabscore,
+  tags: person.tags,
+  years: person.experience,
+  countLabel: `${person.projects} projects`,
+  qualityLabel: `${person.onTime}% on time`,
+  extraPills: person.stages,
+  rateRange: formatRate(person.rateMin, person.rateMax, person.rateUnit),
+}));
 
-const MASTERS: Professional[] = [
-  {
-    id: "ramesh-kumar",
-    name: "Ramesh Kumar",
-    city: "Delhi NCR",
-    fabScore: 9.9,
-    tags: ["Ethnic Wear", "Luxury", "Complex Construction"],
-    years: 20,
-    countLabel: "312 samples",
-    qualityLabel: "99% first attempt",
-    extraPills: ["Pattern Making", "Draping", "Grading"],
-    rateRange: "₹2,500 – ₹5,000 per sample",
-  },
-  {
-    id: "suresh-pillai",
-    name: "Suresh Pillai",
-    city: "Mumbai",
-    fabScore: 9.7,
-    tags: ["Western Wear", "Tailored", "Menswear"],
-    years: 15,
-    countLabel: "267 samples",
-    qualityLabel: "98% first attempt",
-    extraPills: ["Pattern Making", "Tailoring"],
-    rateRange: "₹2,000 – ₹4,500 per sample",
-  },
-  {
-    id: "mohan-lal",
-    name: "Mohan Lal",
-    city: "Jaipur",
-    fabScore: 9.5,
-    tags: ["Ethnic Wear", "Block Print", "Lightweight Fabrics"],
-    years: 12,
-    countLabel: "198 samples",
-    qualityLabel: "97% first attempt",
-    extraPills: ["Pattern Making", "Draping"],
-    rateRange: "₹1,500 – ₹3,500 per sample",
-  },
-  {
-    id: "krishnan-nair",
-    name: "Krishnan Nair",
-    city: "Tirupur",
-    fabScore: 9.6,
-    tags: ["Knitwear", "Activewear", "Stretch Fabrics"],
-    years: 14,
-    countLabel: "223 samples",
-    qualityLabel: "98% first attempt",
-    extraPills: ["Pattern Making", "Grading"],
-    rateRange: "₹1,500 – ₹3,000 per sample",
-  },
-  {
-    id: "abdul-karim",
-    name: "Abdul Karim",
-    city: "Lucknow",
-    fabScore: 9.4,
-    tags: ["Chikankari", "Embroidered", "Delicate Fabrics"],
-    years: 18,
-    countLabel: "189 samples",
-    qualityLabel: "97% first attempt",
-    extraPills: ["Draping", "Pattern Making"],
-    rateRange: "₹2,000 – ₹4,000 per sample",
-  },
-  {
-    id: "ganesh-rao",
-    name: "Ganesh Rao",
-    city: "Bangalore",
-    fabScore: 9.3,
-    tags: ["Western Wear", "Denim", "Casual"],
-    years: 10,
-    countLabel: "156 samples",
-    qualityLabel: "96% first attempt",
-    extraPills: ["Pattern Making", "Grading"],
-    rateRange: "₹1,500 – ₹3,000 per sample",
-  },
-];
+const DESIGNERS: Professional[] = DESIGNER_DATA.map((person) => ({
+  id: person.id,
+  name: person.name,
+  city: person.city,
+  fabScore: person.fabscore,
+  tags: person.tags,
+  years: person.experience,
+  countLabel: `${person.techPacks} tech packs`,
+  qualityLabel: `${person.accuracy}% accuracy`,
+  extraPills: person.software,
+  rateRange: formatRate(person.rateMin, person.rateMax, person.rateUnit),
+}));
+
+const MASTERS: Professional[] = MASTER_DATA.map((person) => ({
+  id: person.id,
+  name: person.name,
+  city: person.city,
+  fabScore: person.fabscore,
+  tags: person.tags,
+  years: person.experience,
+  countLabel: `${person.samples} samples`,
+  qualityLabel: `${person.firstAttempt}% first attempt`,
+  extraPills: person.speciality,
+  rateRange: formatRate(person.rateMin, person.rateMax, person.rateUnit),
+}));
 
 const TABS: {
   id: TabId;
@@ -765,81 +573,6 @@ export default function FabMerch() {
     </>
   );
 
-  const leftPanel = (
-    <div className="flex min-h-full flex-col">
-      <div className="p-5">
-        <div className="flex items-center gap-1 font-display text-lg font-bold">
-          <span>🧵</span>
-          <span className="text-white">Fab</span>
-          <span className="text-primary">Verify</span>
-        </div>
-
-        <p className="mt-5 text-sm text-white">
-          Good morning, Siddharth 👋
-        </p>
-        <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-          Brand Builder
-        </span>
-      </div>
-
-      <div className="mt-4">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Workspace
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {WORKSPACE_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                item.active
-                  ? "border-primary bg-primary/[0.08] text-primary"
-                  : "border-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-6">
-        <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-          Tools
-        </p>
-        <nav className="mt-2 flex flex-col">
-          {TOOLS_NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className="flex items-center gap-3 border-l-2 border-transparent px-5 py-2.5 text-left text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="mt-auto border-t border-border-dark p-5">
-        <p className="text-xs text-text-secondary">Your FabScore</p>
-        <p className="mt-1 font-display text-2xl font-bold text-primary">
-          —
-        </p>
-        <p className="mt-1 text-[11px] text-text-secondary">
-          Complete verification to unlock
-        </p>
-        <button
-          type="button"
-          className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-        >
-          Get Verified
-        </button>
-      </div>
-    </div>
-  );
-
   const centrePanel = (
     <>
       <div
@@ -1226,7 +959,6 @@ export default function FabMerch() {
   return (
     <>
       <ThreePanelLayout
-        left={leftPanel}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />

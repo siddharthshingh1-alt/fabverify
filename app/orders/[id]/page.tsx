@@ -3,20 +3,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-
-const WORKSPACE_NAV = [
-  { icon: "🏠", label: "Home", href: "/dashboard", active: false },
-  { icon: "📦", label: "My Orders", href: "/orders", active: true },
-  { icon: "🧵", label: "Find Manufacturers", href: "/manufacturers", active: false },
-  { icon: "👔", label: "FabMerch", href: "/fabmerch", active: false },
-  { icon: "💳", label: "FabScore & Credit", href: "/credit", active: false },
-];
-
-const TOOLS_NAV = [
-  { icon: "📋", label: "Sample Briefs", href: "/samples", active: false },
-  { icon: "💰", label: "FabPrice", href: "/fabprice", active: false },
-  { icon: "📊", label: "Analytics", href: "/analytics", active: false },
-];
+import ThreePanelLayout from "../../components/ThreePanelLayout";
 
 type MilestoneStatus = "complete" | "active" | "pending";
 
@@ -610,172 +597,103 @@ export default function OrderDetail() {
     </>
   );
 
+  const centrePanel = (
+    <>
+      <div
+        className="sticky top-0 z-10 flex h-16 shrink-0 items-center border-b border-border-dark px-6"
+        style={{ backgroundColor: "#07122a" }}
+      >
+        <Link
+          href="/orders"
+          className="text-sm font-medium text-text-secondary hover:text-text-primary"
+        >
+          ← Back to Orders
+        </Link>
+      </div>
+
+      <div className="px-6 py-6">{centerContent}</div>
+    </>
+  );
+
+  const rightPanel = order && (
+    <>
+      <div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
+          🏭
+        </div>
+        <p className="mt-2 text-sm font-bold text-white">
+          {order.manufacturer}
+        </p>
+        <p className="text-xs text-text-secondary">
+          {order.manufacturerRating}
+        </p>
+        <span className="mt-2 inline-block rounded-[20px] border border-primary/40 bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
+          {order.manufacturerTier}
+        </span>
+        <Link
+          href="/manufacturers"
+          className="mt-2 block text-xs font-medium text-primary"
+        >
+          View Full Profile →
+        </Link>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Actions</p>
+      <div className="mt-3 flex flex-col gap-2">
+        <button
+          type="button"
+          className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
+        >
+          📸 Request Production Update
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
+        >
+          🔍 Request QC Inspection
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
+        >
+          💬 Message Manufacturer
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-red-500/60 px-3 py-2 text-xs font-semibold text-red-400"
+        >
+          ⚠️ Raise Dispute
+        </button>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Delivery Info</p>
+      <div className="mt-3 flex flex-col gap-2 text-xs text-text-secondary">
+        <p>
+          <span className="text-text-primary">Shipping address:</span>{" "}
+          {order.shippingAddress}
+        </p>
+        <p>
+          <span className="text-text-primary">Courier:</span>{" "}
+          {order.courier}
+        </p>
+        <p>
+          <span className="text-text-primary">Tracking number:</span>{" "}
+          {order.trackingNumber}
+        </p>
+      </div>
+    </>
+  );
+
   return (
     <>
-      <div className="hidden h-screen overflow-hidden md:flex">
-        <aside className="flex h-screen w-[260px] shrink-0 flex-col overflow-y-auto border-r border-border-dark bg-card">
-          <div className="p-5">
-            <div className="flex items-center gap-1 font-display text-lg font-bold">
-              <span>🧵</span>
-              <span className="text-white">Fab</span>
-              <span className="text-primary">Verify</span>
-            </div>
-
-            <p className="mt-5 text-sm text-white">
-              Good morning, Siddharth 👋
-            </p>
-            <span className="mt-2 inline-block rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-              Brand Builder
-            </span>
-          </div>
-
-          <div className="mt-4">
-            <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-              Workspace
-            </p>
-            <nav className="mt-2 flex flex-col">
-              {WORKSPACE_NAV.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center gap-3 border-l-2 px-5 py-2.5 text-left text-sm font-medium transition-colors ${
-                    item.active
-                      ? "border-primary bg-primary/[0.08] text-primary"
-                      : "border-transparent text-text-secondary hover:text-text-primary"
-                  }`}
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          <div className="mt-6">
-            <p className="px-5 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-              Tools
-            </p>
-            <nav className="mt-2 flex flex-col">
-              {TOOLS_NAV.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className="flex items-center gap-3 border-l-2 border-transparent px-5 py-2.5 text-left text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-
-          <div className="mt-auto border-t border-border-dark p-5">
-            <p className="text-xs text-text-secondary">Your FabScore</p>
-            <p className="mt-1 font-display text-2xl font-bold text-primary">
-              —
-            </p>
-            <p className="mt-1 text-[11px] text-text-secondary">
-              Complete verification to unlock
-            </p>
-            <button
-              type="button"
-              className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-            >
-              Get Verified
-            </button>
-          </div>
-        </aside>
-
-        <main className="flex h-screen flex-1 flex-col overflow-hidden">
-          <div className="flex h-16 shrink-0 items-center border-b border-border-dark px-6">
-            <Link
-              href="/orders"
-              className="text-sm font-medium text-text-secondary hover:text-text-primary"
-            >
-              ← Back to Orders
-            </Link>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            {centerContent}
-          </div>
-        </main>
-
-        <aside className="scrollbar-hide flex h-screen w-[280px] shrink-0 flex-col overflow-y-auto border-l border-border-dark bg-card p-5">
-          {order && (
-            <>
-              <div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
-                  🏭
-                </div>
-                <p className="mt-2 text-sm font-bold text-white">
-                  {order.manufacturer}
-                </p>
-                <p className="text-xs text-text-secondary">
-                  {order.manufacturerRating}
-                </p>
-                <span className="mt-2 inline-block rounded-[20px] border border-primary/40 bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                  {order.manufacturerTier}
-                </span>
-                <Link
-                  href="/manufacturers"
-                  className="mt-2 block text-xs font-medium text-primary"
-                >
-                  View Full Profile →
-                </Link>
-              </div>
-
-              <div className="my-5 h-px bg-border-dark" />
-
-              <p className="text-base font-bold text-white">Actions</p>
-              <div className="mt-3 flex flex-col gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
-                >
-                  📸 Request Production Update
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
-                >
-                  🔍 Request QC Inspection
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
-                >
-                  💬 Message Manufacturer
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-red-500/60 px-3 py-2 text-xs font-semibold text-red-400"
-                >
-                  ⚠️ Raise Dispute
-                </button>
-              </div>
-
-              <div className="my-5 h-px bg-border-dark" />
-
-              <p className="text-base font-bold text-white">Delivery Info</p>
-              <div className="mt-3 flex flex-col gap-2 text-xs text-text-secondary">
-                <p>
-                  <span className="text-text-primary">Shipping address:</span>{" "}
-                  {order.shippingAddress}
-                </p>
-                <p>
-                  <span className="text-text-primary">Courier:</span>{" "}
-                  {order.courier}
-                </p>
-                <p>
-                  <span className="text-text-primary">Tracking number:</span>{" "}
-                  {order.trackingNumber}
-                </p>
-              </div>
-            </>
-          )}
-        </aside>
-      </div>
+      <ThreePanelLayout
+        centre={centrePanel}
+        right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+      />
 
       <div
         className="flex flex-col md:hidden"
