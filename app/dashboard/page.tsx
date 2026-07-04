@@ -1,40 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import ThreePanelLayout from "../components/ThreePanelLayout";
-
-const QUICK_ACTIONS = [
-  {
-    icon: "🔍",
-    title: "Find a Manufacturer",
-    description: "Browse 200+ verified manufacturers",
-    href: "/manufacturers",
-  },
-  {
-    icon: "📋",
-    title: "Post Sample Brief",
-    description: "Get samples from multiple vendors",
-    href: "/samples",
-  },
-  {
-    icon: "👔",
-    title: "Hire a Merchandiser",
-    description: "Get expert help per stage",
-    href: "/fabmerch",
-  },
-  {
-    icon: "💰",
-    title: "Check Market Prices",
-    description: "See current fabric and making rates",
-    href: "/fabprice",
-  },
-];
-
-type OnboardingStepStatus = "pending" | "complete";
-
-const ONBOARDING_STEPS: { title: string; status: OnboardingStepStatus }[] = [
-  { title: "Complete verification", status: "pending" },
-  { title: "Browse manufacturers", status: "pending" },
-  { title: "Post your first sample brief", status: "pending" },
-];
+import { useUser } from "../context/UserContext";
+import screenConfig from "../config/screens";
 
 const TODAY_STATS = [
   { label: "Active Orders", value: 0 },
@@ -61,23 +30,7 @@ const SUGGESTED_MANUFACTURERS = [
   },
 ];
 
-const MOBILE_TASK_CARDS = [
-  {
-    title: "Complete your verification",
-    description: "Get your Bronze badge to start transacting",
-    cta: "Start verification →",
-  },
-  {
-    title: "Browse manufacturers",
-    description: "Find verified manufacturers for your category",
-    cta: "Browse →",
-  },
-  {
-    title: "Post a sample brief",
-    description: "Get samples from multiple manufacturers at once",
-    cta: "Post brief →",
-  },
-];
+const TIER_ORDER = ["unverified", "bronze", "silver", "gold", "platinum"] as const;
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: true },
@@ -88,6 +41,12 @@ const BOTTOM_NAV = [
 ];
 
 export default function Dashboard() {
+  const { user, greeting } = useUser();
+  const config = screenConfig.dashboard[user.userType];
+
+  const tierIndex = TIER_ORDER.indexOf(user.verificationTier);
+  const nextTier = TIER_ORDER[tierIndex + 1];
+
   const centrePanel = (
     <>
       <div
@@ -95,7 +54,7 @@ export default function Dashboard() {
         style={{ backgroundColor: "#07122a" }}
       >
         <h1 className="font-display text-xl font-bold text-white">
-          Dashboard
+          {config.title}
         </h1>
         <div className="flex items-center gap-4">
           <button
@@ -118,29 +77,11 @@ export default function Dashboard() {
       <div className="px-6 py-6">
         <div className="border-l-[3px] border-primary bg-card p-5">
           <h2 className="text-lg font-bold text-white">
-            Welcome to FabVerify, Siddharth! 🎉
+            {greeting}, {user.name}
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            You are 3 steps away from placing your first order.
+            {config.welcomeMessage}
           </p>
-
-          <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:gap-6">
-            {ONBOARDING_STEPS.map((step, index) => (
-              <div key={step.title} className="flex flex-1 items-center gap-3">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9999px] border border-border-dark text-xs font-bold text-text-secondary">
-                  {index + 1}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-text-primary">
-                    {step.title}
-                  </p>
-                  <p className="text-xs text-text-secondary">
-                    {step.status === "complete" ? "Complete" : "Pending"}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
         <div className="mt-8">
@@ -148,7 +89,7 @@ export default function Dashboard() {
             What do you want to do today?
           </h2>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {QUICK_ACTIONS.map((action) => (
+            {config.quickActions.map((action) => (
               <Link
                 key={action.title}
                 href={action.href}
@@ -159,7 +100,7 @@ export default function Dashboard() {
                   {action.title}
                 </h3>
                 <p className="mt-1 text-xs text-text-secondary">
-                  {action.description}
+                  {action.desc}
                 </p>
               </Link>
             ))}
@@ -173,13 +114,7 @@ export default function Dashboard() {
           <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
             <div className="text-5xl">📭</div>
             <p className="mt-4 text-[15px] text-text-primary">
-              No activity yet
-            </p>
-            <p className="mt-1 text-[13px] text-text-secondary">
-              Your orders, samples, and approvals will appear here
-            </p>
-            <p className="mt-1 text-[13px] text-text-secondary">
-              Place your first order to get started
+              {config.emptyActivity}
             </p>
           </div>
         </div>
@@ -187,77 +122,157 @@ export default function Dashboard() {
     </>
   );
 
-  const rightPanel = (
-    <>
-      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-        Today
-      </p>
-      <div className="mt-3 flex flex-col gap-2">
-        {TODAY_STATS.map((stat) => (
-          <div
-            key={stat.label}
-            className="flex items-center justify-between text-sm"
+  const rightPanel =
+    config.rightPanel === "verification_status" ? (
+      <>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Verification Status
+        </p>
+        <div className="mt-3 rounded-[6px] border border-border-dark bg-background p-3">
+          <p className="text-sm font-bold capitalize text-primary">
+            {user.verificationTier}
+          </p>
+          <p className="mt-1 text-[11px] text-text-secondary">
+            {nextTier
+              ? `Complete verification to unlock ${nextTier} tier and more visibility`
+              : "You have reached the highest verification tier"}
+          </p>
+        </div>
+        {nextTier && (
+          <Link
+            href="/verification"
+            className="mt-3 block rounded-lg bg-primary py-2 text-center text-xs font-bold text-navy"
           >
-            <span className="text-text-secondary">{stat.label}</span>
-            <span className="font-bold text-primary">{stat.value}</span>
-          </div>
-        ))}
-      </div>
+            Get {nextTier[0].toUpperCase() + nextTier.slice(1)} Verified
+          </Link>
+        )}
 
-      <div className="my-5 h-px bg-border-dark" />
+        <div className="my-5 h-px bg-border-dark" />
 
-      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-        Market Prices
-      </p>
-      <div className="mt-3 flex flex-col gap-2">
-        {PRICE_ROWS.map((row) => (
-          <div
-            key={row.item}
-            className="flex items-center justify-between gap-3 text-xs"
-          >
-            <span className="text-text-secondary">{row.item}</span>
-            <span className="whitespace-nowrap font-semibold text-primary">
-              {row.price}
-            </span>
-          </div>
-        ))}
-      </div>
-      <p className="mt-3 text-[11px] text-text-secondary">
-        Updated daily from verified transactions
-      </p>
-
-      <div className="my-5 h-px bg-border-dark" />
-
-      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
-        Suggested For You
-      </p>
-      <div className="mt-3 flex flex-col gap-3">
-        {SUGGESTED_MANUFACTURERS.map((manufacturer) => (
-          <div
-            key={manufacturer.name}
-            className="rounded-[6px] border border-border-dark bg-background p-2.5"
-          >
-            <div className="text-xl">🏭</div>
-            <p className="mt-1 text-xs font-bold text-text-primary">
-              {manufacturer.name}
-            </p>
-            <p className="text-[11px] text-text-secondary">
-              {manufacturer.tag}
-            </p>
-            <p className="mt-0.5 text-[11px] text-primary">
-              {manufacturer.rating}
-            </p>
-            <a
-              href="#"
-              className="mt-1 inline-block text-[11px] font-medium text-primary"
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Market Prices
+        </p>
+        <div className="mt-3 flex flex-col gap-2">
+          {PRICE_ROWS.map((row) => (
+            <div
+              key={row.item}
+              className="flex items-center justify-between gap-3 text-xs"
             >
-              View Profile
-            </a>
-          </div>
-        ))}
-      </div>
-    </>
-  );
+              <span className="text-text-secondary">{row.item}</span>
+              <span className="whitespace-nowrap font-semibold text-primary">
+                {row.price}
+              </span>
+            </div>
+          ))}
+        </div>
+      </>
+    ) : config.rightPanel === "fabscore" ? (
+      <>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          FabScore
+        </p>
+        <div className="mt-3 rounded-[6px] border border-border-dark bg-background p-3 text-center">
+          <p className="font-display text-3xl font-bold text-primary">
+            {user.fabscore > 0 ? user.fabscore : "—"}
+          </p>
+          <p className="mt-1 text-[11px] text-text-secondary">
+            {user.fabscore > 0
+              ? "Keep completing projects to improve your score"
+              : "Complete your first project to unlock your FabScore"}
+          </p>
+        </div>
+        <Link
+          href="/credit"
+          className="mt-3 block rounded-lg bg-primary py-2 text-center text-xs font-bold text-navy"
+        >
+          View FabScore Details
+        </Link>
+
+        <div className="my-5 h-px bg-border-dark" />
+
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Verification
+        </p>
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span className="text-text-secondary capitalize">
+            {user.verificationTier}
+          </span>
+          <Link href="/verification" className="text-xs font-medium text-primary">
+            Upgrade
+          </Link>
+        </div>
+      </>
+    ) : (
+      <>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Today
+        </p>
+        <div className="mt-3 flex flex-col gap-2">
+          {TODAY_STATS.map((stat) => (
+            <div
+              key={stat.label}
+              className="flex items-center justify-between text-sm"
+            >
+              <span className="text-text-secondary">{stat.label}</span>
+              <span className="font-bold text-primary">{stat.value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="my-5 h-px bg-border-dark" />
+
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Market Prices
+        </p>
+        <div className="mt-3 flex flex-col gap-2">
+          {PRICE_ROWS.map((row) => (
+            <div
+              key={row.item}
+              className="flex items-center justify-between gap-3 text-xs"
+            >
+              <span className="text-text-secondary">{row.item}</span>
+              <span className="whitespace-nowrap font-semibold text-primary">
+                {row.price}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] text-text-secondary">
+          Updated daily from verified transactions
+        </p>
+
+        <div className="my-5 h-px bg-border-dark" />
+
+        <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+          Suggested For You
+        </p>
+        <div className="mt-3 flex flex-col gap-3">
+          {SUGGESTED_MANUFACTURERS.map((manufacturer) => (
+            <div
+              key={manufacturer.name}
+              className="rounded-[6px] border border-border-dark bg-background p-2.5"
+            >
+              <div className="text-xl">🏭</div>
+              <p className="mt-1 text-xs font-bold text-text-primary">
+                {manufacturer.name}
+              </p>
+              <p className="text-[11px] text-text-secondary">
+                {manufacturer.tag}
+              </p>
+              <p className="mt-0.5 text-[11px] text-primary">
+                {manufacturer.rating}
+              </p>
+              <a
+                href="#"
+                className="mt-1 inline-block text-[11px] font-medium text-primary"
+              >
+                View Profile
+              </a>
+            </div>
+          ))}
+        </div>
+      </>
+    );
 
   return (
     <>
@@ -286,28 +301,27 @@ export default function Dashboard() {
         </div>
 
         <div className="flex-1 px-4 py-5">
-          <h2 className="text-sm font-bold uppercase tracking-wide text-text-secondary">
-            Things to do today
+          <h2 className="text-lg font-bold text-white">
+            {greeting}, {user.name}
           </h2>
-          <div className="mt-4 flex flex-col gap-3">
-            {MOBILE_TASK_CARDS.map((card) => (
-              <div
-                key={card.title}
-                className="rounded-xl border-l-2 border-primary bg-card p-4"
+          <p className="mt-1 text-sm text-text-secondary">
+            {config.welcomeMessage}
+          </p>
+
+          <div className="mt-5 flex flex-col gap-3">
+            {config.quickActions.map((action) => (
+              <Link
+                key={action.title}
+                href={action.href}
+                className="block rounded-xl border-l-2 border-primary bg-card p-4"
               >
                 <p className="text-sm font-bold text-text-primary">
-                  {card.title}
+                  {action.icon} {action.title}
                 </p>
                 <p className="mt-1 text-xs text-text-secondary">
-                  {card.description}
+                  {action.desc}
                 </p>
-                <button
-                  type="button"
-                  className="mt-3 text-sm font-semibold text-primary"
-                >
-                  {card.cta}
-                </button>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

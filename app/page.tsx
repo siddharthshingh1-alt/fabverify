@@ -159,9 +159,12 @@ export default function Home() {
             </p>
 
             <div className="mt-8 flex w-full max-w-md flex-col gap-4 sm:mx-auto sm:w-auto sm:flex-row">
-              <button className="rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-on-primary transition-colors hover:brightness-110">
+              <Link
+                href="/signup"
+                className="rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-on-primary transition-colors hover:brightness-110"
+              >
                 Start for free
-              </button>
+              </Link>
               <button className="rounded-lg border border-primary px-6 py-3 text-sm font-semibold text-primary transition-colors hover:bg-primary/10">
                 See how it works
               </button>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import {
@@ -7,6 +8,10 @@ import {
   designers as DESIGNER_DATA,
   masters as MASTER_DATA,
 } from "../data/professionals";
+import { qcInspectors as QC_INSPECTOR_DATA } from "../data/qcInspectors";
+import { useUser } from "../context/UserContext";
+import screenConfig from "../config/screens";
+import type { FabMerchTabId } from "../config/screens";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -40,7 +45,7 @@ const REQUIREMENT_CATEGORIES = [
   "Other",
 ];
 
-type TabId = "merchandisers" | "designers" | "masters";
+type TabId = FabMerchTabId;
 
 type Professional = {
   id: string;
@@ -53,6 +58,7 @@ type Professional = {
   qualityLabel: string;
   extraPills: string[];
   rateRange: string;
+  citiesCovered?: string[];
 };
 
 const ALL_STAGES = [
@@ -107,6 +113,20 @@ const MASTERS: Professional[] = MASTER_DATA.map((person) => ({
   rateRange: formatRate(person.rateMin, person.rateMax, person.rateUnit),
 }));
 
+const QC_INSPECTORS: Professional[] = QC_INSPECTOR_DATA.map((person) => ({
+  id: person.id,
+  name: person.name,
+  city: person.city,
+  fabScore: person.fabscore,
+  tags: person.tags,
+  years: person.experience,
+  countLabel: `${person.inspectionsCount} inspections`,
+  qualityLabel: `${person.accuracy}% report accuracy`,
+  extraPills: person.inspectionTypes,
+  citiesCovered: person.citiesCovered,
+  rateRange: formatRate(person.rateMin, person.rateMax, "per inspection"),
+}));
+
 const TABS: {
   id: TabId;
   label: string;
@@ -139,11 +159,21 @@ const TABS: {
     data: MASTERS,
     stageQuestion: "Which speciality do you need?",
   },
+  {
+    id: "qc-inspectors",
+    label: "QC Inspectors",
+    singular: "QC inspector",
+    extraLabel: "Types:",
+    data: QC_INSPECTORS,
+    stageQuestion: "Which inspection type do you need?",
+  },
 ];
 
 const ALL_CITIES = Array.from(
   new Set(
-    [...MERCHANDISERS, ...DESIGNERS, ...MASTERS].map((person) => person.city)
+    [...MERCHANDISERS, ...DESIGNERS, ...MASTERS, ...QC_INSPECTORS].map(
+      (person) => person.city
+    )
   )
 );
 
@@ -230,26 +260,25 @@ function ProfessionalCard({
         <span>✅ {professional.qualityLabel}</span>
       </div>
 
-      <div className="mt-3 border-t border-border-dark pt-3">
-        <p className="text-[11px] text-text-secondary">{tab.extraLabel}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {tab.id === "merchandisers"
-            ? ALL_STAGES.map((stage) => {
-                const covered = professional.extraPills.includes(stage);
-                return (
-                  <span
-                    key={stage}
-                    className={`rounded-[20px] border px-2 py-[3px] text-[10px] ${
-                      covered
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border-dark text-text-secondary"
-                    }`}
-                  >
-                    {stage}
-                  </span>
-                );
-              })
-            : professional.extraPills.map((pill) => (
+      {tab.id === "qc-inspectors" ? (
+        <div className="mt-3 flex flex-col gap-2 border-t border-border-dark pt-3">
+          <div>
+            <p className="text-[11px] text-text-secondary">Inspects:</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(professional.citiesCovered ?? []).map((city) => (
+                <span
+                  key={city}
+                  className="rounded-[20px] border border-border-dark bg-background px-2 py-[3px] text-[10px] text-text-secondary"
+                >
+                  {city}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] text-text-secondary">Types:</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {professional.extraPills.map((pill) => (
                 <span
                   key={pill}
                   className="rounded-[20px] border border-primary bg-primary/10 px-2 py-[3px] text-[10px] text-primary"
@@ -257,8 +286,40 @@ function ProfessionalCard({
                   {pill}
                 </span>
               ))}
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="mt-3 border-t border-border-dark pt-3">
+          <p className="text-[11px] text-text-secondary">{tab.extraLabel}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {tab.id === "merchandisers"
+              ? ALL_STAGES.map((stage) => {
+                  const covered = professional.extraPills.includes(stage);
+                  return (
+                    <span
+                      key={stage}
+                      className={`rounded-[20px] border px-2 py-[3px] text-[10px] ${
+                        covered
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border-dark text-text-secondary"
+                      }`}
+                    >
+                      {stage}
+                    </span>
+                  );
+                })
+              : professional.extraPills.map((pill) => (
+                  <span
+                    key={pill}
+                    className="rounded-[20px] border border-primary bg-primary/10 px-2 py-[3px] text-[10px] text-primary"
+                  >
+                    {pill}
+                  </span>
+                ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm font-bold text-primary">
@@ -284,7 +345,135 @@ function ProfessionalCard({
   );
 }
 
+const TIER_COLORS: Record<string, string> = {
+  unverified: "#7A8FA8",
+  bronze: "#CD7F32",
+  silver: "#94a3b8",
+  gold: "#f2ca50",
+  platinum: "#e2e8f0",
+};
+
+function TalentFabMerchProfile() {
+  const { user, userLabel } = useUser();
+  const profileConfig = screenConfig.profile[user.userType];
+
+  const centrePanel = (
+    <>
+      <div
+        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
+        style={{ backgroundColor: "#07122a" }}
+      >
+        <div>
+          <h1 className="font-display text-xl font-bold text-white">
+            My FabTalent Profile
+          </h1>
+          <p className="text-[13px] text-text-secondary">
+            Manage your listing, availability, and hire requests
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Notifications"
+          className="text-lg text-text-primary"
+        >
+          🔔
+        </button>
+      </div>
+
+      <div className="px-6 py-6">
+        <div className="rounded-xl border border-border-dark bg-card p-6">
+          <div className="flex items-center gap-4">
+            <div
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[10px] border-2 border-primary text-2xl"
+              style={{ backgroundColor: "#07122a" }}
+            >
+              {profileConfig.emoji}
+            </div>
+            <div>
+              <p className="text-lg font-bold text-white">{user.name}</p>
+              <p className="text-[13px] font-semibold text-primary">
+                {userLabel}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-4 border-t border-border-dark pt-5 sm:grid-cols-4">
+            <div>
+              <p className="text-[11px] text-text-secondary">Verification</p>
+              <span
+                className="mt-1 inline-block rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize"
+                style={{
+                  borderColor: TIER_COLORS[user.verificationTier],
+                  color: TIER_COLORS[user.verificationTier],
+                  backgroundColor: `${TIER_COLORS[user.verificationTier]}1f`,
+                }}
+              >
+                {user.verificationTier}
+              </span>
+            </div>
+            <div>
+              <p className="text-[11px] text-text-secondary">FabScore</p>
+              <p className="mt-1 text-lg font-bold text-primary">
+                {user.fabscore > 0 ? user.fabscore : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] text-text-secondary">
+                Completed Projects
+              </p>
+              <p className="mt-1 text-lg font-bold text-primary">0</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-text-secondary">Rating</p>
+              <p className="mt-1 text-lg font-bold text-text-secondary">—</p>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/profile"
+              className="flex-1 rounded-lg bg-primary py-3 text-center text-sm font-bold text-navy"
+            >
+              Edit My Profile →
+            </Link>
+            <Link
+              href="/enquiries"
+              className="flex-1 rounded-lg border border-primary py-3 text-center text-sm font-bold text-primary"
+            >
+              View Hire Requests →
+            </Link>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const rightPanel = (
+    <>
+      <p className="text-base font-bold text-white">Get More Hire Requests</p>
+      <ul className="mt-4 flex flex-col gap-3 text-sm text-text-secondary">
+        <li>💡 Complete verification to appear higher in search results</li>
+        <li>💡 Keep your portfolio and rates up to date</li>
+        <li>💡 Respond to hire requests within 4 hours</li>
+      </ul>
+    </>
+  );
+
+  return (
+    <ThreePanelLayout
+      centre={centrePanel}
+      right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+    />
+  );
+}
+
 export default function FabMerch() {
+  const { user, isTalent } = useUser();
+  const fabMerchConfig = screenConfig.fabmerch[user.userType];
+  const visibleTabList = TABS.filter((tab) =>
+    fabMerchConfig.visibleTabs.includes(tab.id)
+  );
+
   const [activeTab, setActiveTab] = useState<TabId>("merchandisers");
   const [searchText, setSearchText] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -322,6 +511,15 @@ export default function FabMerch() {
       document.body.style.overflow = "unset";
     };
   }, [showModal, showRequirementModal]);
+
+  useEffect(() => {
+    setActiveTab(fabMerchConfig.visibleTabs[0] ?? "merchandisers");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.userType]);
+
+  if (fabMerchConfig.showTalentProfile) {
+    return <TalentFabMerchProfile />;
+  }
 
   const currentTab = TABS.find((tab) => tab.id === activeTab)!;
 
@@ -408,9 +606,9 @@ export default function FabMerch() {
     setReqSubmitted(true);
   };
 
-  const tabsBar = (
+  const tabsBar = visibleTabList.length > 1 && (
     <div className="flex gap-6 border-b border-border-dark">
-      {TABS.map((tab) => (
+      {visibleTabList.map((tab) => (
         <button
           key={tab.id}
           type="button"
@@ -584,7 +782,7 @@ export default function FabMerch() {
             FabMerch
           </h1>
           <p className="text-[13px] text-text-secondary">
-            Hire verified garment professionals per stage
+            {fabMerchConfig.subtitle}
           </p>
         </div>
         <button
@@ -987,7 +1185,7 @@ export default function FabMerch() {
             FabMerch
           </h1>
           <p className="text-[13px] text-text-secondary">
-            Hire verified garment professionals per stage
+            {fabMerchConfig.subtitle}
           </p>
 
           <div className="mt-4">{tabsBar}</div>

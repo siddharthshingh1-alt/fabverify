@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
 
 export default function SignUp() {
+  const router = useRouter();
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
+  const [isVerifying, setIsVerifying] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
@@ -44,13 +47,19 @@ export default function SignUp() {
 
   const handleOtpChange = (index: number, value: string) => {
     const digit = value.replace(/\D/g, "").slice(-1);
-    setOtp((current) => {
-      const next = [...current];
-      next[index] = digit;
-      return next;
-    });
+    const next = [...otp];
+    next[index] = digit;
+    setOtp(next);
+
     if (digit && index < OTP_LENGTH - 1) {
       otpRefs.current[index + 1]?.focus();
+    }
+
+    if (next.every((d) => d !== "") && !isVerifying) {
+      setIsVerifying(true);
+      setTimeout(() => {
+        router.push("/onboarding/type");
+      }, 800);
     }
   };
 
@@ -64,8 +73,11 @@ export default function SignUp() {
   };
 
   const handleVerify = () => {
-    if (!isOtpComplete) return;
-    // No backend wired up yet — UI flow only.
+    if (!isOtpComplete || isVerifying) return;
+    setIsVerifying(true);
+    setTimeout(() => {
+      router.push("/onboarding/type");
+    }, 1500);
   };
 
   return (
@@ -134,7 +146,8 @@ export default function SignUp() {
                     handleOtpChange(index, event.target.value)
                   }
                   onKeyDown={(event) => handleOtpKeyDown(index, event)}
-                  className="h-14 w-12 rounded-lg border border-border-dark bg-navy text-center text-2xl font-bold text-text-primary outline-none focus:border-gold"
+                  disabled={isVerifying}
+                  className="h-14 w-12 rounded-lg border border-border-dark bg-navy text-center text-2xl font-bold text-text-primary outline-none focus:border-gold disabled:opacity-60"
                 />
               ))}
             </div>
@@ -147,7 +160,8 @@ export default function SignUp() {
               ) : (
                 <button
                   onClick={handleResendOtp}
-                  className="font-medium text-gold hover:underline"
+                  disabled={isVerifying}
+                  className="font-medium text-gold hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Resend OTP
                 </button>
@@ -156,10 +170,23 @@ export default function SignUp() {
 
             <button
               onClick={handleVerify}
-              disabled={!isOtpComplete}
-              className="mt-6 w-full rounded-lg bg-gold py-3.5 font-bold text-navy transition-colors hover:bg-[#dc9420] disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
+              disabled={!isOtpComplete || isVerifying}
+              className={`mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3.5 font-bold transition-colors ${
+                isVerifying
+                  ? "cursor-not-allowed bg-gold/80 text-navy"
+                  : isOtpComplete
+                    ? "bg-gold text-navy hover:bg-[#dc9420]"
+                    : "cursor-not-allowed bg-gray-700 text-gray-400"
+              }`}
             >
-              Verify OTP
+              {isVerifying ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-navy/30 border-t-navy" />
+                  Verifying...
+                </>
+              ) : (
+                "Verify OTP"
+              )}
             </button>
           </>
         )}

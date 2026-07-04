@@ -9,7 +9,6 @@ type UserTypeCard = {
   title: string;
   description: string;
   tag?: string;
-  route: string;
 };
 
 const USER_TYPES: UserTypeCard[] = [
@@ -19,65 +18,89 @@ const USER_TYPES: UserTypeCard[] = [
     title: "Brand / Buyer",
     description: "I buy garments for my brand or business",
     tag: "Beginner friendly",
-    route: "/onboarding/brand-builder",
   },
   {
     id: "manufacturer",
     emoji: "🏭",
     title: "Manufacturer",
     description: "I make garments in my factory or unit",
-    route: "/onboarding/manufacturer",
   },
   {
     id: "fabric-mill",
     emoji: "🏗️",
     title: "Fabric Mill",
     description: "I produce or sell fabric",
-    route: "/onboarding/supplier",
   },
   {
     id: "trim-supplier",
     emoji: "🧷",
     title: "Trim Supplier",
     description: "I supply buttons, zips, thread, labels",
-    route: "/onboarding/supplier",
   },
   {
     id: "artisan",
     emoji: "🎨",
     title: "Artisan",
     description: "I do hand craft — embroidery, block print, weaving",
-    route: "/onboarding/artisan",
   },
   {
     id: "job-worker",
     emoji: "🔧",
     title: "Job Worker",
     description: "I do specific work — printing, washing, embroidery",
-    route: "/onboarding/supplier",
   },
   {
     id: "freelance-designer",
     emoji: "✏️",
     title: "Freelance Designer",
     description: "I create designs, tech packs, flat sketches",
-    route: "/onboarding/talent",
   },
   {
     id: "master",
     emoji: "✂️",
     title: "Master",
     description: "I make samples and do pattern work",
-    route: "/onboarding/talent",
   },
   {
     id: "merchandiser",
     emoji: "👔",
     title: "Merchandiser",
     description: "I manage production between buyer and manufacturer",
-    route: "/onboarding/talent",
+  },
+  {
+    id: "qc-inspector",
+    emoji: "🔍",
+    title: "QC Inspector",
+    description: "I inspect garment quality at factories before dispatch",
+    tag: "FabTalent Verified",
   },
 ];
+
+const ROUTE_BY_TYPE: Record<string, string> = {
+  "brand-buyer": "/onboarding/brand-builder",
+  manufacturer: "/onboarding/manufacturer",
+  "fabric-mill": "/onboarding/supplier",
+  "trim-supplier": "/onboarding/supplier",
+  "job-worker": "/onboarding/supplier",
+  artisan: "/onboarding/artisan",
+  "freelance-designer": "/onboarding/talent",
+  master: "/onboarding/talent",
+  merchandiser: "/onboarding/talent",
+  "qc-inspector": "/onboarding/talent",
+};
+
+const STORAGE_TYPE_BY_ID: Record<string, string> = {
+  "brand-buyer": "buyer",
+  manufacturer: "manufacturer",
+  "fabric-mill": "fabric_mill",
+  "trim-supplier": "trim_supplier",
+  "job-worker": "job_worker",
+  artisan: "artisan",
+  "freelance-designer": "designer",
+  master: "master",
+  merchandiser: "merchandiser",
+  "qc-inspector": "qc_inspector",
+};
 
 export default function UserTypeSelection() {
   const router = useRouter();
@@ -87,13 +110,23 @@ export default function UserTypeSelection() {
 
   const handleContinue = () => {
     if (!selectedCard) return;
-    localStorage.setItem("fabverify_user_type", selectedCard.id);
-    router.push(selectedCard.route);
+    localStorage.setItem("userType", STORAGE_TYPE_BY_ID[selectedCard.id]);
+    router.push(ROUTE_BY_TYPE[selectedCard.id] ?? "/dashboard");
   };
 
   return (
-    <div className="min-h-screen bg-navy pb-28 md:pb-10">
-      <div className="mx-auto max-w-[800px] px-5 py-10">
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#07122a",
+        backgroundImage:
+          "linear-gradient(to right, rgba(212,175,55,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(212,175,55,0.06) 1px, transparent 1px)",
+        backgroundSize: "40px 40px",
+        overflowY: "auto",
+        paddingBottom: "60px",
+      }}
+    >
+      <div style={{ maxWidth: "860px", margin: "0 auto", padding: "32px 20px" }}>
         <div className="flex items-center gap-1 text-lg">
           <span>🧵</span>
           <span className="font-bold text-white">Fab</span>
@@ -161,12 +194,12 @@ export default function UserTypeSelection() {
           </button>
         </p>
 
-        <div className="mt-8 hidden md:flex md:justify-center">
+        <div className="mt-8 flex justify-center">
           <button
             type="button"
             onClick={handleContinue}
             disabled={!selectedCard}
-            className={`w-[320px] rounded-lg py-3.5 font-bold transition-colors ${
+            className={`w-full rounded-lg py-3.5 font-bold transition-colors sm:w-[320px] ${
               selectedCard
                 ? "cursor-pointer bg-gold text-navy"
                 : "cursor-not-allowed bg-border-dark text-text-secondary"
@@ -175,21 +208,6 @@ export default function UserTypeSelection() {
             Continue →
           </button>
         </div>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-0 border-t border-border-dark bg-navy p-4 md:hidden">
-        <button
-          type="button"
-          onClick={handleContinue}
-          disabled={!selectedCard}
-          className={`w-full rounded-lg py-3.5 font-bold transition-colors ${
-            selectedCard
-              ? "cursor-pointer bg-gold text-navy"
-              : "cursor-not-allowed bg-border-dark text-text-secondary"
-          }`}
-        >
-          Continue →
-        </button>
       </div>
     </div>
   );

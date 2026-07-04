@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import { useUser } from "../context/UserContext";
+import screenConfig from "../config/screens";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -25,6 +27,8 @@ type StatusColor = "gold" | "blue" | "green";
 type Order = {
   id: string;
   manufacturer: string;
+  counterpartyPrefix?: string;
+  counterpartyLabel?: string;
   status: string;
   statusColor: StatusColor;
   product: string;
@@ -32,12 +36,12 @@ type Order = {
   expectedDate: string;
   milestones: Milestone[];
   orderValue: number;
-  releasedAmount: number;
-  releasedPercent: number;
-  escrowAmount: number;
-  escrowPercent: number;
-  photosCount: number;
-  messagesCount: number;
+  releasedAmount?: number;
+  releasedPercent?: number;
+  escrowAmount?: number;
+  escrowPercent?: number;
+  photosCount?: number;
+  messagesCount?: number;
   rating?: number;
 };
 
@@ -120,6 +124,47 @@ const COMPLETED_ORDERS: Order[] = [
   },
 ];
 
+const SUPPLY_ORDERS: Order[] = [
+  {
+    id: "SUP-2024-001",
+    manufacturer: "Jaipur Ethnic Works",
+    counterpartyPrefix: "Buyer",
+    counterpartyLabel: "Manufacturer",
+    status: "Processing",
+    statusColor: "blue",
+    product: "Metal Buttons 4-hole 15mm Silver — 5,000 pieces",
+    orderedDate: "20 June 2026",
+    expectedDate: "10 July 2026",
+    milestones: [
+      { name: "Order Confirmed", status: "complete", date: "Jun 20" },
+      { name: "In Production", status: "active" },
+      { name: "Delivered", status: "pending" },
+    ],
+    orderValue: 85000,
+    releasedAmount: 17000,
+    releasedPercent: 20,
+    escrowAmount: 68000,
+    escrowPercent: 80,
+  },
+  {
+    id: "SUP-2024-002",
+    manufacturer: "Delhi Woven Works",
+    counterpartyPrefix: "Buyer",
+    counterpartyLabel: "Manufacturer",
+    status: "Ready to Ship",
+    statusColor: "green",
+    product: "Invisible Zip 20cm Black — 2,000 pieces",
+    orderedDate: "15 June 2026",
+    expectedDate: "5 July 2026",
+    milestones: [
+      { name: "Order Confirmed", status: "complete", date: "Jun 15" },
+      { name: "Packed", status: "complete", date: "Jul 2" },
+      { name: "Pending Dispatch", status: "pending" },
+    ],
+    orderValue: 32000,
+  },
+];
+
 const STATUS_PILL_STYLES: Record<StatusColor, string> = {
   gold: "border-primary bg-primary/15 text-primary",
   blue: "border-secondary bg-secondary/15 text-secondary",
@@ -196,7 +241,9 @@ function OrderCard({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-bold text-primary">{order.id}</span>
         <span className="text-[15px] font-bold text-white">
+          {order.counterpartyPrefix && `${order.counterpartyPrefix}: `}
           {order.manufacturer}
+          {order.counterpartyLabel && ` — ${order.counterpartyLabel}`}
         </span>
         <span
           className={`rounded-[20px] border px-3 py-1 text-xs font-semibold ${STATUS_PILL_STYLES[order.statusColor]}`}
@@ -218,28 +265,40 @@ function OrderCard({
         <p className="text-[13px] text-text-primary">
           Order Value: ₹{order.orderValue.toLocaleString("en-IN")}
         </p>
-        <p className="text-xs text-text-secondary">Escrow Protected 🔒</p>
-        <p className="text-[11px] text-text-secondary">
-          Released: ₹{order.releasedAmount.toLocaleString("en-IN")} (
-          {order.releasedPercent}%) • In Escrow: ₹
-          {order.escrowAmount.toLocaleString("en-IN")} ({order.escrowPercent}%)
-        </p>
+        {order.releasedAmount !== undefined &&
+          order.releasedPercent !== undefined &&
+          order.escrowAmount !== undefined &&
+          order.escrowPercent !== undefined && (
+            <>
+              <p className="text-xs text-text-secondary">Escrow Protected 🔒</p>
+              <p className="text-[11px] text-text-secondary">
+                Released: ₹{order.releasedAmount.toLocaleString("en-IN")} (
+                {order.releasedPercent}%) • In Escrow: ₹
+                {order.escrowAmount.toLocaleString("en-IN")} ({order.escrowPercent}%)
+              </p>
+            </>
+          )}
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          onClick={() => setShowPhotos((current) => !current)}
-          className="text-left text-xs text-text-secondary"
-        >
-          📸 {order.photosCount} production photos uploaded
-        </button>
-        <Link
-          href={`/orders/${order.id}`}
-          className="text-xs font-medium text-primary"
-        >
-          💬 {order.messagesCount} messages
-        </Link>
+      {(order.photosCount !== undefined || order.messagesCount !== undefined) && (
+        <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
+          {order.photosCount !== undefined && (
+            <button
+              type="button"
+              onClick={() => setShowPhotos((current) => !current)}
+              className="text-left text-xs text-text-secondary"
+            >
+              📸 {order.photosCount} production photos uploaded
+            </button>
+          )}
+          {order.messagesCount !== undefined && (
+            <Link
+              href={`/orders/${order.id}`}
+              className="text-xs font-medium text-primary"
+            >
+              💬 {order.messagesCount} messages
+            </Link>
+          )}
         <div className="flex flex-wrap gap-2">
           {isCompleted && (
             <button
@@ -264,11 +323,12 @@ function OrderCard({
             </Link>
           )}
         </div>
-      </div>
+        </div>
+      )}
 
       {showPhotos && (
         <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border-dark pt-3 sm:grid-cols-4">
-          {Array.from({ length: order.photosCount }).map((_, index) => (
+          {Array.from({ length: order.photosCount ?? 0 }).map((_, index) => (
             <div
               key={index}
               className="flex aspect-square items-center justify-center rounded-[6px] border border-border-dark bg-navy text-xl text-text-secondary"
@@ -288,10 +348,31 @@ function OrderCard({
   );
 }
 
+function EmptyOrdersState({ message }: { message: string }) {
+  return (
+    <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+      <div className="text-5xl">📭</div>
+      <p className="mt-4 max-w-[420px] text-[13px] text-text-secondary">
+        {message}
+      </p>
+    </div>
+  );
+}
+
 export default function Orders() {
+  const { user } = useUser();
+  const config = screenConfig.orders[user.userType];
   const [activeTab, setActiveTab] = useState<
     "active" | "completed" | "cancelled"
   >("active");
+
+  const activeOrders =
+    config.mode === "buyer-demo"
+      ? ACTIVE_ORDERS
+      : config.mode === "supply-demo"
+        ? SUPPLY_ORDERS
+        : [];
+  const completedOrders = config.mode === "buyer-demo" ? COMPLETED_ORDERS : [];
 
   const tabs: { id: typeof activeTab; label: string }[] = [
     { id: "active", label: "Active Orders" },
@@ -320,17 +401,25 @@ export default function Orders() {
 
   const tabContent =
     activeTab === "active" ? (
-      <div className="mt-6">
-        {ACTIVE_ORDERS.map((order) => (
-          <OrderCard key={order.id} order={order} />
-        ))}
-      </div>
+      activeOrders.length > 0 ? (
+        <div className="mt-6">
+          {activeOrders.map((order) => (
+            <OrderCard key={order.id} order={order} />
+          ))}
+        </div>
+      ) : (
+        <EmptyOrdersState message={config.emptyState} />
+      )
     ) : activeTab === "completed" ? (
-      <div className="mt-6">
-        {COMPLETED_ORDERS.map((order) => (
-          <OrderCard key={order.id} order={order} isCompleted />
-        ))}
-      </div>
+      completedOrders.length > 0 ? (
+        <div className="mt-6">
+          {completedOrders.map((order) => (
+            <OrderCard key={order.id} order={order} isCompleted />
+          ))}
+        </div>
+      ) : (
+        <EmptyOrdersState message="No completed orders yet." />
+      )
     ) : (
       <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
         <div className="text-5xl">🚫</div>
@@ -343,7 +432,7 @@ export default function Orders() {
       </div>
     );
 
-  const orderSummaryPanel = (
+  const defaultSummaryPanel = (
     <>
       <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
         Order Summary
@@ -352,13 +441,13 @@ export default function Orders() {
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-secondary">Active</span>
           <span className="font-bold text-primary">
-            {ACTIVE_ORDERS.length}
+            {activeOrders.length}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-secondary">Completed</span>
           <span className="font-bold text-primary">
-            {COMPLETED_ORDERS.length}
+            {completedOrders.length}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
@@ -380,6 +469,130 @@ export default function Orders() {
     </>
   );
 
+  const supplySummaryPanel = (
+    <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Supply Summary
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Active Supply Orders</span>
+          <span className="font-bold text-primary">
+            {SUPPLY_ORDERS.length}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Total Value</span>
+          <span className="font-bold text-primary">
+            ₹
+            {SUPPLY_ORDERS.reduce((sum, order) => sum + order.orderValue, 0).toLocaleString(
+              "en-IN"
+            )}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">In Escrow</span>
+          <span className="font-bold text-primary">
+            ₹
+            {SUPPLY_ORDERS.reduce(
+              (sum, order) => sum + (order.escrowAmount ?? 0),
+              0
+            ).toLocaleString("en-IN")}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Completed This Month</span>
+          <span className="font-bold text-primary">0</span>
+        </div>
+      </div>
+    </>
+  );
+
+  const projectSummaryPanel = (
+    <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Project Summary
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Active Projects</span>
+          <span className="font-bold text-primary">0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Completed Projects</span>
+          <span className="font-bold text-primary">0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Total Earned</span>
+          <span className="font-bold text-primary">₹0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Pending Payment</span>
+          <span className="font-bold text-primary">₹0</span>
+        </div>
+      </div>
+    </>
+  );
+
+  const inspectionSummaryPanel = (
+    <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Inspection Summary
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Scheduled Inspections</span>
+          <span className="font-bold text-primary">0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Completed This Month</span>
+          <span className="font-bold text-primary">0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Total Earned</span>
+          <span className="font-bold text-primary">₹0</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Average Rating</span>
+          <span className="font-bold text-text-secondary">—</span>
+        </div>
+      </div>
+    </>
+  );
+
+  const orderSummaryPanel =
+    config.rightPanel === "supply"
+      ? supplySummaryPanel
+      : config.rightPanel === "project"
+        ? projectSummaryPanel
+        : config.rightPanel === "inspection"
+          ? inspectionSummaryPanel
+          : defaultSummaryPanel;
+
+  const headerButton = config.showCreateButton ? (
+    <button
+      type="button"
+      className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
+    >
+      Create New Order
+    </button>
+  ) : config.altButton ? (
+    config.altButton.href ? (
+      <Link
+        href={config.altButton.href}
+        className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
+      >
+        {config.altButton.label}
+      </Link>
+    ) : (
+      <button
+        type="button"
+        className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
+      >
+        {config.altButton.label}
+      </button>
+    )
+  ) : null;
 
   const centrePanel = (
     <>
@@ -388,7 +601,7 @@ export default function Orders() {
         style={{ backgroundColor: "#07122a" }}
       >
         <h1 className="font-display text-xl font-bold text-white">
-          My Orders
+          {config.title}
         </h1>
         <div className="flex items-center gap-4">
           <button
@@ -398,16 +611,16 @@ export default function Orders() {
           >
             🔔
           </button>
-          <button
-            type="button"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
-          >
-            Create New Order
-          </button>
+          {headerButton}
         </div>
       </div>
 
       <div className="px-6 py-6">
+        {config.subtitle && (
+          <p className="-mt-2 mb-4 text-sm text-text-secondary">
+            {config.subtitle}
+          </p>
+        )}
         {tabsBar}
         {tabContent}
       </div>
@@ -443,15 +656,15 @@ export default function Orders() {
         <div className="flex-1 px-4 py-5">
           <div className="flex items-center justify-between">
             <h1 className="font-display text-lg font-bold text-white">
-              My Orders
+              {config.title}
             </h1>
-            <button
-              type="button"
-              className="rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-            >
-              Create New Order
-            </button>
+            {headerButton}
           </div>
+          {config.subtitle && (
+            <p className="mt-1 text-xs text-text-secondary">
+              {config.subtitle}
+            </p>
+          )}
 
           <div className="mt-4">{tabsBar}</div>
           {tabContent}

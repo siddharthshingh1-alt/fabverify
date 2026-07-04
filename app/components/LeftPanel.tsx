@@ -3,23 +3,40 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import theme from '../theme'
 import content from '../content'
+import { useUser } from '../context/UserContext'
+import screenConfig from '../config/screens'
 
 export default function LeftPanel() {
   const pathname = usePathname()
+  const { user, userLabel, greeting, isSupplySide, isTalent } = useUser()
+  const nav = screenConfig.nav[user.userType]
+
+  const analyticsLabel = isSupplySide
+    ? 'Business Analytics'
+    : isTalent
+      ? 'Performance'
+      : content.nav.analytics
 
   const navItems = [
     { href: '/dashboard', label: content.nav.home, icon: '🏠' },
-    { href: '/orders', label: content.nav.orders, icon: '📦' },
-    { href: '/manufacturers', label: content.nav.manufacturers, icon: '🔍' },
-    { href: '/fabmerch', label: content.nav.fabmerch, icon: '👔' },
+    ...(isSupplySide
+      ? [{ href: '/enquiries', label: 'Enquiries', icon: '📬' }]
+      : isTalent
+        ? [{ href: '/enquiries', label: 'Hire Requests', icon: '📬' }]
+        : []),
+    { href: '/orders', label: nav.ordersLabel, icon: '📦' },
+    { href: '/manufacturers', label: nav.findLabel, icon: '🔍' },
+    { href: '/fabmerch', label: nav.fabMerchLabel, icon: '👔' },
     { href: '/credit', label: content.nav.credit, icon: '💳' },
   ]
 
   const toolItems = [
-    { href: '/samples', label: content.nav.samples, icon: '📋' },
+    { href: '/samples', label: nav.samplesLabel, icon: '📋' },
     { href: '/fabprice', label: content.nav.fabprice, icon: '💰' },
-    { href: '/analytics', label: content.nav.analytics, icon: '📊' },
+    { href: '/analytics', label: analyticsLabel, icon: '📊' },
   ]
+
+  const fabscoreTitle = isTalent ? 'Your FabTalent Score' : content.fabscore.title
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`)
@@ -78,7 +95,7 @@ export default function LeftPanel() {
           fontWeight: 600,
           marginBottom: '6px',
         }}>
-          Good morning, Siddharth 👋
+          {greeting}, {user.name} 👋
         </div>
         <span style={{
           display: 'inline-block',
@@ -90,7 +107,7 @@ export default function LeftPanel() {
           fontSize: '11px',
           fontWeight: 600,
         }}>
-          Brand Builder
+          {userLabel}
         </span>
       </div>
 
@@ -145,7 +162,7 @@ export default function LeftPanel() {
             fontSize: '11px',
             marginBottom: '4px',
           }}>
-            {content.fabscore.title}
+            {fabscoreTitle}
           </div>
           <div style={{
             color: theme.colors.primary,

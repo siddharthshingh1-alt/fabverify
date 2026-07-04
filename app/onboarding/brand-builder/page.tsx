@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUser } from "../../context/UserContext";
 
 const TOTAL_STEPS = 5;
 
@@ -51,6 +52,7 @@ const BUDGETS = [
 
 export default function BrandBuilderOnboarding() {
   const router = useRouter();
+  const { setUser } = useUser();
   const [currentStep, setCurrentStep] = useState(1);
   const [categories, setCategories] = useState<string[]>([]);
   const [customer, setCustomer] = useState<string | null>(null);
@@ -111,6 +113,13 @@ export default function BrandBuilderOnboarding() {
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep((step) => step + 1);
     } else {
+      setUser({
+        name: name || "User",
+        userType: "buyer",
+        verificationTier: "bronze",
+        fabscore: 0,
+        city: "",
+      });
       setIsComplete(true);
     }
   };
@@ -132,8 +141,18 @@ export default function BrandBuilderOnboarding() {
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
 
   return (
-    <div className="min-h-screen pb-28 md:pb-10">
-      <div className="mx-auto max-w-[680px] px-5 py-5 md:px-10 md:py-10">
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#07122a",
+        backgroundImage:
+          "linear-gradient(to right, rgba(212,175,55,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(212,175,55,0.06) 1px, transparent 1px)",
+        backgroundSize: "40px 40px",
+        overflowY: "auto",
+        paddingBottom: "60px",
+      }}
+    >
+      <div style={{ maxWidth: "860px", margin: "0 auto", padding: "32px 20px" }}>
         <div className="flex items-center gap-1 font-display text-lg font-bold">
           <span>🧵</span>
           <span className="text-white">Fab</span>
@@ -378,7 +397,7 @@ export default function BrandBuilderOnboarding() {
           </div>
         )}
 
-        <div className="mt-10 hidden md:block">
+        <div className="mt-10">
           <div
             className={`flex items-center ${
               currentStep > 1 ? "justify-between" : "justify-end"
@@ -408,38 +427,6 @@ export default function BrandBuilderOnboarding() {
                 : "Continue →"}
             </button>
           </div>
-        </div>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-0 border-t border-border-dark bg-card p-4 md:hidden">
-        <div
-          className={`flex items-center ${
-            currentStep > 1 ? "justify-between" : "justify-end"
-          }`}
-        >
-          {currentStep > 1 && (
-            <button
-              type="button"
-              onClick={handleBack}
-              className="text-sm font-medium text-text-secondary"
-            >
-              ← Back
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleContinue}
-            disabled={!isStepValid}
-            className={`rounded-lg px-8 py-3.5 font-bold transition-colors ${
-              isStepValid
-                ? "cursor-pointer bg-primary text-navy"
-                : "cursor-not-allowed bg-border-dark text-text-secondary"
-            }`}
-          >
-            {currentStep === TOTAL_STEPS
-              ? "Start Building My Brand →"
-              : "Continue →"}
-          </button>
         </div>
       </div>
     </div>

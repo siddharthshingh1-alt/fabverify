@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import { useUser } from "../context/UserContext";
+import screenConfig from "../config/screens";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -560,8 +562,10 @@ const INITIAL_FORM_DATA = {
 type FormDataState = typeof INITIAL_FORM_DATA;
 
 export default function SampleBriefs() {
-  const [activeTab, setActiveTab] = useState<"my-briefs" | "post-brief">(
-    "my-briefs"
+  const { user } = useUser();
+  const config = screenConfig.samples[user.userType];
+  const [activeTab, setActiveTab] = useState<"primary" | "secondary">(
+    "primary"
   );
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedSampleTypes, setSelectedSampleTypes] = useState<string[]>(
@@ -720,7 +724,7 @@ export default function SampleBriefs() {
 
   const startNewBrief = () => {
     resetWizard();
-    setActiveTab("post-brief");
+    setActiveTab("secondary");
   };
 
   const isStep1Valid = selectedSampleTypes.length > 0;
@@ -745,25 +749,25 @@ export default function SampleBriefs() {
     <div className="flex gap-6 border-b border-border-dark">
       <button
         type="button"
-        onClick={() => setActiveTab("my-briefs")}
+        onClick={() => setActiveTab("primary")}
         className={`pb-3 text-sm font-semibold transition-colors ${
-          activeTab === "my-briefs"
+          activeTab === "primary"
             ? "border-b-2 border-primary text-white"
             : "text-text-secondary"
         }`}
       >
-        My Briefs
+        {config.tabs[0]}
       </button>
       <button
         type="button"
-        onClick={() => setActiveTab("post-brief")}
+        onClick={() => setActiveTab("secondary")}
         className={`pb-3 text-sm font-semibold transition-colors ${
-          activeTab === "post-brief"
+          activeTab === "secondary"
             ? "border-b-2 border-primary text-white"
             : "text-text-secondary"
         }`}
       >
-        Post a Brief
+        {config.tabs[1]}
       </button>
     </div>
   );
@@ -771,20 +775,28 @@ export default function SampleBriefs() {
   const myBriefsContent = (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <div className="text-5xl">📋</div>
-      <p className="mt-4 text-base font-bold text-white">
-        No sample briefs yet
-      </p>
       <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">
-        Post your first brief and get samples from multiple verified
-        manufacturers simultaneously
+        {config.emptyState}
       </p>
-      <button
-        type="button"
-        onClick={startNewBrief}
-        className="mt-5 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
-      >
-        Post Your First Brief →
-      </button>
+      {config.showPostForm && (
+        <button
+          type="button"
+          onClick={startNewBrief}
+          className="mt-5 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
+        >
+          Post Your First Brief →
+        </button>
+      )}
+    </div>
+  );
+
+  const secondaryTabContent = (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="text-5xl">🗂️</div>
+      <p className="mt-4 text-base font-bold text-white">Nothing here yet</p>
+      <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">
+        {config.tabs[1]} will show up here once available.
+      </p>
     </div>
   );
 
@@ -1376,7 +1388,7 @@ export default function SampleBriefs() {
         type="button"
         onClick={() => {
           resetWizard();
-          setActiveTab("my-briefs");
+          setActiveTab("primary");
         }}
         className="mt-6 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
       >
@@ -1559,6 +1571,18 @@ export default function SampleBriefs() {
     </div>
   );
 
+  const tipsForRespondingPanel = (
+    <>
+      <p className="text-base font-bold text-white">Tips for Responding</p>
+      <ul className="mt-4 flex flex-col gap-3 text-sm text-text-secondary">
+        <li>• Respond within 24 hours to improve your match rate</li>
+        <li>• Be specific about pricing and lead time</li>
+        <li>• Complete verification to appear higher in matches</li>
+        <li>• A complete profile gets more requests</li>
+      </ul>
+    </>
+  );
+
   const tipsForBriefPanel = (
     <>
       <p className="text-base font-bold text-white">Tips for a Great Brief</p>
@@ -1598,7 +1622,7 @@ export default function SampleBriefs() {
         style={{ backgroundColor: "#07122a" }}
       >
         <h1 className="font-display text-xl font-bold text-white">
-          Sample Briefs
+          {config.title}
         </h1>
         <div className="flex items-center gap-4">
           <button
@@ -1608,19 +1632,28 @@ export default function SampleBriefs() {
           >
             🔔
           </button>
-          <button
-            type="button"
-            onClick={startNewBrief}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
-          >
-            Post New Brief
-          </button>
+          {config.showPostForm && (
+            <button
+              type="button"
+              onClick={startNewBrief}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
+            >
+              Post New Brief
+            </button>
+          )}
         </div>
       </div>
 
       <div className="px-6 py-6">
+        <p className="-mt-2 mb-4 text-sm text-text-secondary">
+          {config.subtitle}
+        </p>
         {tabsBar}
-        {activeTab === "my-briefs" ? myBriefsContent : postBriefContent}
+        {activeTab === "primary"
+          ? myBriefsContent
+          : config.showPostForm
+            ? postBriefContent
+            : secondaryTabContent}
       </div>
     </>
   );
@@ -1631,7 +1664,11 @@ export default function SampleBriefs() {
         centre={centrePanel}
         right={
           <div style={{ padding: "20px" }}>
-            {activeTab === "my-briefs" ? howItWorksPanel : tipsForBriefPanel}
+            {!config.showPostForm
+              ? tipsForRespondingPanel
+              : activeTab === "primary"
+                ? howItWorksPanel
+                : tipsForBriefPanel}
           </div>
         }
       />
@@ -1658,19 +1695,26 @@ export default function SampleBriefs() {
         <div className="flex-1 px-4 py-5">
           <div className="flex items-center justify-between">
             <h1 className="font-display text-lg font-bold text-white">
-              Sample Briefs
+              {config.title}
             </h1>
-            <button
-              type="button"
-              onClick={startNewBrief}
-              className="rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
-            >
-              Post New Brief
-            </button>
+            {config.showPostForm && (
+              <button
+                type="button"
+                onClick={startNewBrief}
+                className="rounded-lg bg-primary px-3 py-2 text-xs font-bold text-navy"
+              >
+                Post New Brief
+              </button>
+            )}
           </div>
+          <p className="mt-1 text-xs text-text-secondary">{config.subtitle}</p>
 
           <div className="mt-4">{tabsBar}</div>
-          {activeTab === "my-briefs" ? myBriefsContent : postBriefContent}
+          {activeTab === "primary"
+            ? myBriefsContent
+            : config.showPostForm
+              ? postBriefContent
+              : secondaryTabContent}
         </div>
 
         <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">

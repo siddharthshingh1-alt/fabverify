@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Montserrat, Inter } from "next/font/google";
 import "./globals.css";
+import { UserProvider } from "./context/UserContext";
 
 const montserrat = Montserrat({
   variable: "--font-montserrat",
@@ -33,7 +34,7 @@ export default function RootLayout({
         className="flex flex-col font-sans"
         style={{ height: "100vh", overflow: "hidden" }}
       >
-        {children}
+        <UserProvider>{children}</UserProvider>
       </body>
     </html>
   );

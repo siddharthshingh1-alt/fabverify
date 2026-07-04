@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import ThreePanelLayout from "../../components/ThreePanelLayout";
+import { qcInspectors } from "../../data/qcInspectors";
 
 type MilestoneStatus = "complete" | "active" | "pending";
 
@@ -30,6 +31,7 @@ type OrderDetailData = {
   manufacturer: string;
   manufacturerRating: string;
   manufacturerTier: string;
+  factoryCity: string;
   product: string;
   fabricInfo: string;
   orderDate: string;
@@ -56,6 +58,7 @@ const ORDER_DETAILS: Record<string, OrderDetailData> = {
     manufacturer: "Jaipur Ethnic Works",
     manufacturerRating: "⭐ 4.9 • 287 orders",
     manufacturerTier: "Gold Verified",
+    factoryCity: "Jaipur",
     product: "Cotton Block Print Kurta — 200 pieces",
     fabricInfo: "Fabric: Cotton Block Print",
     orderDate: "15 June 2026",
@@ -165,6 +168,7 @@ const ORDER_DETAILS: Record<string, OrderDetailData> = {
     manufacturer: "Tirupur Knits",
     manufacturerRating: "⭐ 4.7 • 334 orders",
     manufacturerTier: "Silver Verified",
+    factoryCity: "Tirupur",
     product: "Cotton T-shirt — 500 pieces",
     fabricInfo: "Fabric: Cotton Jersey",
     orderDate: "1 June 2026",
@@ -312,6 +316,37 @@ export default function OrderDetail() {
     order?.initialMessages ?? []
   );
   const [draftMessage, setDraftMessage] = useState("");
+
+  const [showQcModal, setShowQcModal] = useState(false);
+  const [qcInspectionType, setQcInspectionType] = useState("Pre-production");
+  const [qcFactoryAddress, setQcFactoryAddress] = useState("");
+  const [qcDate, setQcDate] = useState("");
+  const [qcPieces, setQcPieces] = useState("");
+  const [qcRequirements, setQcRequirements] = useState("");
+  const [qcBookedInspector, setQcBookedInspector] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (showQcModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [showQcModal]);
+
+  const openQcModal = () => {
+    setQcInspectionType("Pre-production");
+    setQcFactoryAddress("");
+    setQcDate("");
+    setQcPieces("");
+    setQcRequirements("");
+    setQcBookedInspector(null);
+    setShowQcModal(true);
+  };
+
+  const closeQcModal = () => setShowQcModal(false);
 
   useEffect(() => {
     setMessages(order?.initialMessages ?? []);
@@ -650,6 +685,7 @@ export default function OrderDetail() {
         </button>
         <button
           type="button"
+          onClick={openQcModal}
           className="rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
         >
           🔍 Request QC Inspection
@@ -688,6 +724,191 @@ export default function OrderDetail() {
     </>
   );
 
+  const qcModal = showQcModal && order && (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={closeQcModal}
+    >
+      <div
+        className="hide-scrollbar relative w-full max-w-[560px] rounded-xl border border-border-dark bg-card p-8"
+        style={{ maxHeight: "90vh", overflowY: "auto" }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={closeQcModal}
+          aria-label="Close"
+          className="absolute right-4 top-4 text-lg text-text-secondary hover:text-text-primary"
+        >
+          ✕
+        </button>
+
+        {qcBookedInspector ? (
+          <div className="flex flex-col items-center py-8 text-center">
+            <div className="text-5xl">✅</div>
+            <p className="mt-4 text-lg font-bold text-white">
+              Inspector booked. They will confirm within 2 hours.
+            </p>
+            <p className="mt-2 text-sm text-text-secondary">
+              You will receive {qcBookedInspector}&apos;s contact details on
+              WhatsApp.
+            </p>
+            <button
+              type="button"
+              onClick={closeQcModal}
+              className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-bold text-navy"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-lg font-bold text-white">
+              Book QC Inspector
+            </h2>
+            <p className="mt-2 text-[13px] text-text-secondary">
+              A verified FabVerify QC Inspector will visit the factory and
+              provide a detailed inspection report before dispatch.
+            </p>
+
+            <div className="mt-5">
+              <p className="text-sm font-medium text-text-primary">
+                Inspection type
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {["Pre-production", "In-line", "Pre-dispatch"].map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setQcInspectionType(type)}
+                    className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                      qcInspectionType === type
+                        ? "border-primary bg-primary text-navy"
+                        : "border-border-dark bg-background text-text-secondary"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                  Factory city
+                </label>
+                <input
+                  type="text"
+                  value={order.factoryCity}
+                  disabled
+                  className="w-full rounded-[6px] border border-border-dark bg-navy px-3 py-2.5 text-sm text-text-secondary outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                  Factory address
+                </label>
+                <input
+                  type="text"
+                  value={qcFactoryAddress}
+                  onChange={(event) => setQcFactoryAddress(event.target.value)}
+                  placeholder="Unit address"
+                  className="w-full rounded-[6px] border border-border-dark bg-background px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary focus:border-primary"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                  Preferred date
+                </label>
+                <input
+                  type="date"
+                  value={qcDate}
+                  onChange={(event) => setQcDate(event.target.value)}
+                  className="w-full rounded-[6px] border border-border-dark bg-background px-3 py-2.5 text-sm text-text-primary outline-none transition-colors focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                  Number of pieces to inspect
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={qcPieces}
+                  onChange={(event) => setQcPieces(event.target.value)}
+                  placeholder="e.g. 200"
+                  className="w-full rounded-[6px] border border-border-dark bg-background px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary focus:border-primary"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                Special requirements (optional)
+              </label>
+              <textarea
+                value={qcRequirements}
+                onChange={(event) => setQcRequirements(event.target.value)}
+                rows={3}
+                className="w-full rounded-[6px] border border-border-dark bg-background p-3 text-sm text-text-primary outline-none transition-colors focus:border-primary"
+              />
+            </div>
+
+            <p className="mb-3 mt-6 text-sm font-medium text-text-primary">
+              Available inspectors near {order.factoryCity}
+            </p>
+            <div className="flex flex-col gap-3">
+              {qcInspectors.slice(0, 2).map((inspector) => (
+                <div
+                  key={inspector.id}
+                  className="rounded-[10px] border border-border-dark bg-background p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-white">
+                        {inspector.name}
+                      </p>
+                      <p className="text-xs text-text-secondary">
+                        {inspector.city} • ⭐ {inspector.fabscore}
+                      </p>
+                    </div>
+                    <p className="text-right text-xs font-semibold text-primary">
+                      ₹{inspector.rateMin.toLocaleString("en-IN")}–₹
+                      {inspector.rateMax.toLocaleString("en-IN")}
+                      <br />
+                      <span className="font-normal text-text-secondary">
+                        {inspector.availability}
+                      </span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQcBookedInspector(inspector.name)}
+                    className="mt-3 w-full rounded-lg border border-primary py-2 text-xs font-semibold text-primary"
+                  >
+                    Book This Inspector
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setQcBookedInspector("your assigned inspector")}
+              className="mt-4 w-full rounded-lg bg-primary py-3 text-sm font-bold text-navy"
+            >
+              Auto-assign nearest available →
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <ThreePanelLayout
@@ -709,6 +930,8 @@ export default function OrderDetail() {
         </div>
         <div className="flex-1 px-4 py-5">{centerContent}</div>
       </div>
+
+      {qcModal}
     </>
   );
 }
