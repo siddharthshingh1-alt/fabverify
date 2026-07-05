@@ -4,36 +4,68 @@ import { usePathname } from 'next/navigation'
 import theme from '../theme'
 import content from '../content'
 import { useUser } from '../context/UserContext'
-import screenConfig from '../config/screens'
 
 export default function LeftPanel() {
   const pathname = usePathname()
-  const { user, userLabel, greeting, isSupplySide, isTalent } = useUser()
-  const nav = screenConfig.nav[user.userType]
-
-  const analyticsLabel = isSupplySide
-    ? 'Business Analytics'
-    : isTalent
-      ? 'Performance'
-      : content.nav.analytics
+  const { user, userLabel, greeting, isSupplySide, isBuyer, isTalent } = useUser()
 
   const navItems = [
-    { href: '/dashboard', label: content.nav.home, icon: '🏠' },
-    ...(isSupplySide
-      ? [{ href: '/enquiries', label: 'Enquiries', icon: '📬' }]
-      : isTalent
-        ? [{ href: '/enquiries', label: 'Hire Requests', icon: '📬' }]
-        : []),
-    { href: '/orders', label: nav.ordersLabel, icon: '📦' },
-    { href: '/manufacturers', label: nav.findLabel, icon: '🔍' },
-    { href: '/fabmerch', label: nav.fabMerchLabel, icon: '👔' },
-    { href: '/credit', label: content.nav.credit, icon: '💳' },
+    { href: '/dashboard', icon: '🏠', label: content.nav.home },
+    ...(isSupplySide || isTalent
+      ? [{ href: '/enquiries', icon: '📬', label: 'Enquiries' }]
+      : []),
+    {
+      href: '/orders',
+      icon: '📦',
+      label: isBuyer
+        ? 'My Orders'
+        : isTalent
+          ? 'My Projects'
+          : isSupplySide
+            ? 'Supply Orders'
+            : 'My Orders',
+    },
+    {
+      href: '/manufacturers',
+      icon: '🔍',
+      label: isBuyer
+        ? 'Find Manufacturers'
+        : isSupplySide
+          ? 'Find Buyers'
+          : 'Find Clients',
+    },
+    {
+      href: '/fabmerch',
+      icon: '👔',
+      label: isTalent
+        ? 'My FabTalent'
+        : isSupplySide
+          ? 'Book QC Inspector'
+          : 'FabMerch',
+    },
+    { href: '/credit', icon: '💳', label: content.nav.credit },
   ]
 
   const toolItems = [
-    { href: '/samples', label: nav.samplesLabel, icon: '📋' },
-    { href: '/fabprice', label: content.nav.fabprice, icon: '💰' },
-    { href: '/analytics', label: analyticsLabel, icon: '📊' },
+    {
+      href: '/samples',
+      icon: '📋',
+      label: isBuyer
+        ? 'Sample Briefs'
+        : isTalent
+          ? 'Hire Requests'
+          : 'Brief Requests',
+    },
+    { href: '/fabprice', icon: '💰', label: content.nav.fabprice },
+    {
+      href: '/analytics',
+      icon: '📊',
+      label: isSupplySide
+        ? 'Business Analytics'
+        : isTalent
+          ? 'Performance'
+          : 'Analytics',
+    },
   ]
 
   const fabscoreTitle = isTalent ? 'Your FabTalent Score' : content.fabscore.title

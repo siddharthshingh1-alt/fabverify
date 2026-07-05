@@ -23,7 +23,7 @@ export interface User {
 
 interface UserContextType {
   user: User
-  setUser: (user: User) => void
+  setUser: (user: Partial<User>) => void
   isSupplySide: boolean
   isBuyer: boolean
   isTalent: boolean
@@ -36,7 +36,7 @@ const defaultUser: User = {
   userType: 'buyer',
   verificationTier: 'bronze',
   fabscore: 0,
-  city: 'Delhi NCR'
+  city: ''
 }
 
 const USER_LABELS: Record<UserType, string> = {
@@ -50,6 +50,19 @@ const USER_LABELS: Record<UserType, string> = {
   master: 'Master',
   merchandiser: 'Merchandiser',
   qc_inspector: 'QC Inspector'
+}
+
+const LEGACY_TYPE_LABELS: Record<string, UserType> = {
+  'Brand / Buyer': 'buyer',
+  'Manufacturer': 'manufacturer',
+  'Fabric Mill': 'fabric_mill',
+  'Trim Supplier': 'trim_supplier',
+  'Artisan': 'artisan',
+  'Job Worker': 'job_worker',
+  'Freelance Designer': 'designer',
+  'Master': 'master',
+  'Merchandiser': 'merchandiser',
+  'QC Inspector': 'qc_inspector'
 }
 
 const SUPPLY_SIDE_TYPES: UserType[] = [
@@ -84,15 +97,25 @@ export function UserProvider({ children }: {
   const [user, setUserState] = useState<User>(defaultUser)
 
   useEffect(() => {
-    const stored = localStorage.getItem('fabverify_user')
-    if (stored) {
-      setUserState(JSON.parse(stored))
-    }
+    try {
+      const stored = localStorage.getItem('fabverify_user')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        setUserState({ ...defaultUser, ...parsed })
+      } else {
+        const type = localStorage.getItem('userType')
+        if (type) {
+          const userType = (LEGACY_TYPE_LABELS[type] || type) as UserType
+          setUserState((prev) => ({ ...prev, userType }))
+        }
+      }
+    } catch {}
   }, [])
 
-  const setUser = (newUser: User) => {
-    setUserState(newUser)
-    localStorage.setItem('fabverify_user', JSON.stringify(newUser))
+  const setUser = (updates: Partial<User>) => {
+    const updated = { ...user, ...updates }
+    setUserState(updated)
+    localStorage.setItem('fabverify_user', JSON.stringify(updated))
   }
 
   const isSupplySide = SUPPLY_SIDE_TYPES.includes(user.userType)
@@ -106,7 +129,7 @@ export function UserProvider({ children }: {
       isSupplySide,
       isBuyer,
       isTalent,
-      userLabel: USER_LABELS[user.userType],
+      userLabel: USER_LABELS[user.userType] || 'Member',
       greeting: getGreeting()
     }}>
       {children}

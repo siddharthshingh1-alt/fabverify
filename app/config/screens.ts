@@ -56,13 +56,6 @@ export type OrdersScreenConfig = {
   rightPanel: OrdersRightPanel
 }
 
-export type NavScreenConfig = {
-  ordersLabel: string
-  findLabel: string
-  samplesLabel: string
-  fabMerchLabel: string
-}
-
 export type FabMerchTabId = 'merchandisers' | 'designers' | 'masters' | 'qc-inspectors'
 
 export type FabMerchScreenConfig = {
@@ -78,7 +71,6 @@ type ScreenConfig = {
   profile: Record<UserType, ProfileScreenConfig>
   enquiries: Record<UserType, EnquiriesScreenConfig>
   orders: Record<UserType, OrdersScreenConfig>
-  nav: Record<UserType, NavScreenConfig>
   fabmerch: Record<UserType, FabMerchScreenConfig>
 }
 
@@ -103,7 +95,7 @@ const screenConfig: ScreenConfig = {
       quickActions: [
         { icon: '✅', title: 'Complete Verification', desc: 'Get more orders with Gold badge', href: '/verification' },
         { icon: '📋', title: 'Browse Sample Briefs', desc: 'Respond to buyer requests', href: '/samples' },
-        { icon: '📊', title: 'View Enquiries', desc: '0 new enquiries', href: '/enquiries' },
+        { icon: '📦', title: 'View Active Orders', desc: '0 active orders', href: '/orders' },
         { icon: '💳', title: 'Check FabScore', desc: 'Build your credit history', href: '/credit' },
       ],
       emptyActivity: 'No orders yet. Complete verification to appear in search results.',
@@ -114,9 +106,9 @@ const screenConfig: ScreenConfig = {
       welcomeMessage: 'Connect with brands sourcing your fabrics',
       quickActions: [
         { icon: '📋', title: 'Browse Sample Requests', desc: 'Buyers looking for fabric', href: '/samples' },
-        { icon: '💰', title: 'List Your Fabrics', desc: 'Update your catalogue', href: '/profile' },
+        { icon: '📬', title: 'View Enquiries', desc: '3 new enquiries', href: '/enquiries' },
         { icon: '✅', title: 'Get Verified', desc: 'Build buyer trust', href: '/verification' },
-        { icon: '📊', title: 'View Enquiries', desc: '0 new enquiries', href: '/enquiries' },
+        { icon: '💰', title: 'FabPrice Benchmarks', desc: 'See current fabric rates', href: '/fabprice' },
       ],
       emptyActivity: 'No enquiries yet. Complete your profile to attract buyers.',
       rightPanel: 'market_prices'
@@ -125,10 +117,10 @@ const screenConfig: ScreenConfig = {
       title: 'Dashboard',
       welcomeMessage: 'Connect with manufacturers sourcing your trims',
       quickActions: [
-        { icon: '📋', title: 'Browse Sample Requests', desc: 'Manufacturers looking for trims', href: '/samples' },
-        { icon: '🧷', title: 'List Your Products', desc: 'Update your catalogue', href: '/profile' },
-        { icon: '✅', title: 'Get Verified', desc: 'Build trust with buyers', href: '/verification' },
-        { icon: '📊', title: 'View Enquiries', desc: '0 new enquiries', href: '/enquiries' },
+        { icon: '📋', title: 'Browse Trim Requests', desc: 'Manufacturers needing trims', href: '/samples' },
+        { icon: '📬', title: 'View Enquiries', desc: '3 new enquiries', href: '/enquiries' },
+        { icon: '✅', title: 'Get Verified', desc: 'Build manufacturer trust', href: '/verification' },
+        { icon: '👤', title: 'My Profile', desc: 'List your products', href: '/profile' },
       ],
       emptyActivity: 'No enquiries yet.',
       rightPanel: 'market_prices'
@@ -137,11 +129,10 @@ const screenConfig: ScreenConfig = {
       title: 'Dashboard',
       welcomeMessage: 'Showcase your craft to brands across India',
       quickActions: [
-        { icon: '🎨', title: 'Complete Your Profile', desc: 'Add your craft portfolio', href: '/profile' },
+        { icon: '🎨', title: 'Complete Profile', desc: 'Showcase your craft', href: '/profile' },
         { icon: '📋', title: 'Browse Craft Orders', desc: 'Find brands needing your work', href: '/samples' },
-        { icon: '💼', title: 'Join FabTalent', desc: 'Get hired per project', href: '/fabmerch' },
         { icon: '✅', title: 'Get GI Verified', desc: 'Unlock premium buyers', href: '/verification' },
-        { icon: '📊', title: 'View Enquiries', desc: '0 new enquiries', href: '/enquiries' },
+        { icon: '📬', title: 'View Enquiries', desc: 'Brands interested in your craft', href: '/enquiries' },
       ],
       emptyActivity: 'No orders yet. Complete your profile to attract buyers.',
       rightPanel: 'verification_status'
@@ -150,10 +141,10 @@ const screenConfig: ScreenConfig = {
       title: 'Dashboard',
       welcomeMessage: 'Connect with manufacturers needing your services',
       quickActions: [
-        { icon: '📋', title: 'Browse Job Requests', desc: 'Find work that matches your skills', href: '/samples' },
+        { icon: '📋', title: 'Browse Job Requests', desc: 'Find work matching your skills', href: '/samples' },
+        { icon: '📬', title: 'View Enquiries', desc: 'Manufacturers needing your work', href: '/enquiries' },
         { icon: '✅', title: 'Get Verified', desc: 'Build trust with manufacturers', href: '/verification' },
         { icon: '💳', title: 'Check FabScore', desc: 'Build credit history', href: '/credit' },
-        { icon: '📊', title: 'View Enquiries', desc: '0 new enquiries', href: '/enquiries' },
       ],
       emptyActivity: 'No jobs yet.',
       rightPanel: 'verification_status'
@@ -162,10 +153,10 @@ const screenConfig: ScreenConfig = {
       title: 'FabTalent Dashboard',
       welcomeMessage: 'Brands are looking for your design expertise',
       quickActions: [
-        { icon: '📋', title: 'Browse Hire Requests', desc: 'Find brands needing designs', href: '/samples' },
-        { icon: '✅', title: 'Complete Verification', desc: 'Get the FabTalent badge', href: '/verification' },
-        { icon: '💼', title: 'View Active Projects', desc: '0 active projects', href: '/orders' },
-        { icon: '⭐', title: 'Build Your FabScore', desc: 'Complete projects to improve score', href: '/credit' },
+        { icon: '📋', title: 'Browse Hire Requests', desc: 'Brands needing designs', href: '/samples' },
+        { icon: '✅', title: 'Complete Verification', desc: 'Get FabTalent badge', href: '/verification' },
+        { icon: '💼', title: 'Active Projects', desc: '0 active projects', href: '/orders' },
+        { icon: '⭐', title: 'Your FabScore', desc: 'Build your reputation', href: '/credit' },
       ],
       emptyActivity: 'No hire requests yet. Complete verification to get more visibility.',
       rightPanel: 'fabscore'
@@ -174,9 +165,9 @@ const screenConfig: ScreenConfig = {
       title: 'FabTalent Dashboard',
       welcomeMessage: 'Brands need your expert sample making skills',
       quickActions: [
-        { icon: '📋', title: 'Browse Sample Requests', desc: 'Find brands needing samples', href: '/samples' },
+        { icon: '📋', title: 'Browse Sample Requests', desc: 'Brands needing samples made', href: '/samples' },
         { icon: '✅', title: 'Complete Verification', desc: 'Get skill-verified badge', href: '/verification' },
-        { icon: '💼', title: 'View Active Projects', desc: '0 active projects', href: '/orders' },
+        { icon: '💼', title: 'Active Projects', desc: '0 active projects', href: '/orders' },
         { icon: '⭐', title: 'Your FabScore', desc: 'Build your reputation', href: '/credit' },
       ],
       emptyActivity: 'No requests yet. Complete verification to appear in search.',
@@ -186,10 +177,10 @@ const screenConfig: ScreenConfig = {
       title: 'FabTalent Dashboard',
       welcomeMessage: 'Brands need your merchandising expertise',
       quickActions: [
-        { icon: '📋', title: 'Browse Hire Requests', desc: 'Find brands needing help', href: '/samples' },
+        { icon: '📋', title: 'Browse Hire Requests', desc: 'Brands needing merchandising help', href: '/samples' },
         { icon: '✅', title: 'Complete Verification', desc: 'Get interview-verified badge', href: '/verification' },
         { icon: '💼', title: 'Active Projects', desc: '0 active projects', href: '/orders' },
-        { icon: '⭐', title: 'Your FabScore', desc: '— Complete first project', href: '/credit' },
+        { icon: '⭐', title: 'Your FabScore', desc: 'Build your reputation', href: '/credit' },
       ],
       emptyActivity: 'No hire requests yet.',
       rightPanel: 'fabscore'
@@ -198,9 +189,9 @@ const screenConfig: ScreenConfig = {
       title: 'QC Inspector Dashboard',
       welcomeMessage: 'Brands and manufacturers need your inspection expertise',
       quickActions: [
-        { icon: '🔍', title: 'Browse Inspection Requests', desc: 'Find factories needing QC', href: '/samples' },
+        { icon: '🔍', title: 'Browse Inspection Requests', desc: 'Factories needing QC', href: '/samples' },
         { icon: '✅', title: 'Complete Verification', desc: 'Get skill-tested badge', href: '/verification' },
-        { icon: '📅', title: 'Set Availability', desc: 'Update your calendar', href: '/credit' },
+        { icon: '📅', title: 'Set Availability', desc: 'Update your schedule', href: '/profile' },
         { icon: '📊', title: 'Inspection History', desc: '0 completed', href: '/orders' },
       ],
       emptyActivity: 'No inspection requests yet. Complete verification to get bookings.',
@@ -490,69 +481,6 @@ const screenConfig: ScreenConfig = {
       emptyState: 'No inspection jobs yet. Complete verification and set your availability to start receiving bookings.',
       mode: 'empty',
       rightPanel: 'inspection'
-    }
-  },
-
-  nav: {
-    buyer: {
-      ordersLabel: 'My Orders',
-      findLabel: 'Find Manufacturers',
-      samplesLabel: 'Sample Briefs',
-      fabMerchLabel: 'FabMerch'
-    },
-    manufacturer: {
-      ordersLabel: 'Production Orders',
-      findLabel: 'Find Suppliers',
-      samplesLabel: 'Brief Requests',
-      fabMerchLabel: 'Book QC Inspector'
-    },
-    fabric_mill: {
-      ordersLabel: 'Supply Orders',
-      findLabel: 'Find Buyers',
-      samplesLabel: 'Fabric Requests',
-      fabMerchLabel: 'Book QC Inspector'
-    },
-    trim_supplier: {
-      ordersLabel: 'Supply Orders',
-      findLabel: 'Find Buyers',
-      samplesLabel: 'Trim Requests',
-      fabMerchLabel: 'Book QC Inspector'
-    },
-    artisan: {
-      ordersLabel: 'Craft Orders',
-      findLabel: 'Find Buyers',
-      samplesLabel: 'Craft Requests',
-      fabMerchLabel: 'Get Help / Book QC'
-    },
-    job_worker: {
-      ordersLabel: 'Job Orders',
-      findLabel: 'Find Clients',
-      samplesLabel: 'Job Requests',
-      fabMerchLabel: 'Book QC Inspector'
-    },
-    designer: {
-      ordersLabel: 'My Projects',
-      findLabel: 'Find Clients',
-      samplesLabel: 'Hire Requests',
-      fabMerchLabel: 'My FabTalent'
-    },
-    master: {
-      ordersLabel: 'My Projects',
-      findLabel: 'Find Clients',
-      samplesLabel: 'Sample Requests',
-      fabMerchLabel: 'My FabTalent'
-    },
-    merchandiser: {
-      ordersLabel: 'My Projects',
-      findLabel: 'Find Clients',
-      samplesLabel: 'Hire Requests',
-      fabMerchLabel: 'My FabTalent'
-    },
-    qc_inspector: {
-      ordersLabel: 'Inspection Jobs',
-      findLabel: 'Find Jobs',
-      samplesLabel: 'Inspection Requests',
-      fabMerchLabel: 'My FabTalent'
     }
   },
 
