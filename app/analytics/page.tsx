@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import { useUser } from "../context/UserContext";
+import screenConfig from "../config/screens";
 
 type TabId = "overview" | "season" | "vendors" | "finance";
 
@@ -562,7 +565,7 @@ function StatusText({ status }: { status: StyleStatus }) {
   );
 }
 
-export default function Analytics() {
+function BuyerAnalytics() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [selectedSeason, setSelectedSeason] = useState(SEASON_OPTIONS[0]);
 
@@ -1329,4 +1332,602 @@ export default function Analytics() {
       </div>
     </>
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Supply-side analytics (manufacturer, fabric_mill, trim_supplier,
+// artisan, job_worker)
+// ─────────────────────────────────────────────────────────────
+
+type SupplyTabId = "overview" | "orders" | "enquiries";
+
+const SUPPLY_TABS: { id: SupplyTabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "orders", label: "Orders" },
+  { id: "enquiries", label: "Enquiries" },
+];
+
+type SupplyOrderStatus = "On Track" | "Delivered";
+
+type SupplyOrderRow = {
+  id: string;
+  buyer: string;
+  product: string;
+  stage: string;
+  value: number;
+  delivery: string;
+  status: SupplyOrderStatus;
+};
+
+const ACTIVE_SUPPLY_ORDERS: SupplyOrderRow[] = [
+  {
+    id: "SUP-2024-001",
+    buyer: "Jaipur Ethnic Works",
+    product: "Metal Buttons 5,000 pcs",
+    stage: "Processing",
+    value: 85000,
+    delivery: "Jul 10",
+    status: "On Track",
+  },
+  {
+    id: "SUP-2024-002",
+    buyer: "Delhi Woven Works",
+    product: "Invisible Zip 2,000 pcs",
+    stage: "Ready to Ship",
+    value: 32000,
+    delivery: "Jul 5",
+    status: "On Track",
+  },
+];
+
+const COMPLETED_SUPPLY_ORDERS: SupplyOrderRow[] = [
+  {
+    id: "SUP-2024-098",
+    buyer: "Mumbai Denim Studio",
+    product: "Zips 20cm 1,500 pcs",
+    stage: "Delivered",
+    value: 24000,
+    delivery: "Jun 20",
+    status: "Delivered",
+  },
+  {
+    id: "SUP-2024-097",
+    buyer: "Tirupur Knits",
+    product: "Elastic 50m x 200",
+    stage: "Delivered",
+    value: 18000,
+    delivery: "Jun 12",
+    status: "Delivered",
+  },
+];
+
+const RECENT_ENQUIRIES_SUMMARY = [
+  { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago" },
+  { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday" },
+  { name: "Ahmedabad Silk House", detail: "Thread", time: "2 days ago" },
+];
+
+const TOP_PRODUCTS = [
+  { name: "Metal Buttons 4-hole 15mm", orders: 12, revenue: 340000 },
+  { name: "Invisible Zip 20cm", orders: 8, revenue: 180000 },
+  { name: "Woven Labels", orders: 6, revenue: 80000 },
+];
+
+type EnquiryStatus = "New" | "Replied" | "Converted to Order" | "Declined";
+
+const ALL_SUPPLY_ENQUIRIES: {
+  name: string;
+  detail: string;
+  time: string;
+  status: EnquiryStatus;
+}[] = [
+  { name: "Jaipur Ethnic Works", detail: "Metal Buttons 5,000 pcs", time: "2 hours ago", status: "Converted to Order" },
+  { name: "Delhi Woven Works", detail: "Invisible Zip 2,000 pcs", time: "5 hours ago", status: "Converted to Order" },
+  { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago", status: "New" },
+  { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday", status: "Replied" },
+  { name: "Ahmedabad Silk House", detail: "Thread", time: "2 days ago", status: "Declined" },
+];
+
+const ENQUIRY_STATUS_STYLES: Record<EnquiryStatus, string> = {
+  New: "border-secondary/40 bg-secondary/15 text-secondary",
+  Replied: "border-primary/40 bg-primary/15 text-primary",
+  "Converted to Order": "border-green-500/40 bg-green-500/15 text-green-400",
+  Declined: "border-border-dark bg-background text-text-secondary",
+};
+
+function rupeesShort(value: number) {
+  return `₹${value.toLocaleString("en-IN")}`;
+}
+
+const SUPPLY_ORDER_GRID_COLS = "1.1fr 1.3fr 1.6fr 1fr 0.9fr 0.8fr 1fr";
+
+function SupplyOrdersTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: SupplyOrderRow[];
+}) {
+  return (
+    <div>
+      <h2 className="text-base font-bold text-white">{title}</h2>
+      <div className="mt-4 overflow-x-auto rounded-[10px] border border-border-dark hide-scrollbar">
+        <div style={{ minWidth: 820 }}>
+          <div
+            className="grid gap-2 border-b border-border-dark bg-card px-4 py-3"
+            style={{ gridTemplateColumns: SUPPLY_ORDER_GRID_COLS }}
+          >
+            {["Order ID", "Buyer", "Product", "Stage", "Value", "Delivery", "Status"].map(
+              (col) => (
+                <span
+                  key={col}
+                  className="text-[11px] font-bold uppercase tracking-wide text-text-secondary"
+                >
+                  {col}
+                </span>
+              )
+            )}
+          </div>
+          {rows.map((row, index) => (
+            <div
+              key={row.id}
+              className={`grid items-center gap-2 border-b border-border-dark px-4 py-3 ${
+                index % 2 === 0 ? "bg-card" : "bg-background"
+              }`}
+              style={{ gridTemplateColumns: SUPPLY_ORDER_GRID_COLS }}
+            >
+              <span className="text-xs font-bold text-primary">{row.id}</span>
+              <span className="text-xs text-text-primary">{row.buyer}</span>
+              <span className="text-xs text-text-secondary">{row.product}</span>
+              <span className="text-xs text-text-primary">{row.stage}</span>
+              <span className="text-xs font-semibold text-primary">
+                {rupeesShort(row.value)}
+              </span>
+              <span className="text-xs text-text-secondary">{row.delivery}</span>
+              <span
+                className={`text-xs font-semibold ${
+                  row.status === "Delivered" ? "text-green-400" : "text-green-400"
+                }`}
+              >
+                {row.status === "Delivered" ? "✅ Delivered" : "On Track ✅"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SupplierAnalytics() {
+  const { user } = useUser();
+  const subtitle = screenConfig.analytics[user.userType].subtitle;
+  const [activeTab, setActiveTab] = useState<SupplyTabId>("overview");
+
+  const tabsBar = (
+    <div className="flex gap-6 border-b border-border-dark">
+      {SUPPLY_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveTab(tab.id)}
+          className={`pb-3 text-sm font-semibold transition-colors ${
+            activeTab === tab.id
+              ? "border-b-2 border-primary text-white"
+              : "text-text-secondary"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const statCards = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">2</p>
+        <p className="text-xs font-semibold text-text-primary">Active Orders</p>
+        <p className="mt-0.5 text-[12px] text-text-secondary">
+          Supply orders in progress
+        </p>
+        <p className="mt-2 text-[11px] text-green-400">Both on track ✓</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">
+          {rupeesShort(117000)}
+        </p>
+        <p className="text-xs font-semibold text-text-primary">
+          Total Revenue This Month
+        </p>
+        <p className="mt-0.5 text-[12px] text-text-secondary">
+          Across all orders
+        </p>
+        <p className="mt-2 text-[11px] text-text-secondary">
+          {rupeesShort(68000)} in escrow
+        </p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">3</p>
+        <p className="text-xs font-semibold text-text-primary">
+          Enquiries Received
+        </p>
+        <p className="mt-0.5 text-[12px] text-text-secondary">This week</p>
+        <p className="mt-2 text-[11px] text-green-400">↑ Up from last week</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">100%</p>
+        <p className="text-xs font-semibold text-text-primary">Response Rate</p>
+        <p className="mt-0.5 text-[12px] text-text-secondary">
+          Your enquiry response rate
+        </p>
+        <p className="mt-2 text-[11px] text-green-400">
+          Average response: 2 hours
+        </p>
+      </div>
+    </div>
+  );
+
+  const overviewTab = (
+    <div className="mt-6 flex flex-col gap-8">
+      <SupplyOrdersTable title="Active Supply Orders" rows={ACTIVE_SUPPLY_ORDERS} />
+
+      <div>
+        <h2 className="text-sm font-bold text-white">Recent Enquiries</h2>
+        <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border-dark bg-card p-4">
+          {RECENT_ENQUIRIES_SUMMARY.map((enquiry, index) => (
+            <div
+              key={`${enquiry.name}-${index}`}
+              className={`flex items-center justify-between gap-3 text-xs ${
+                index > 0 ? "border-t border-border-dark pt-2" : ""
+              } ${index > 0 ? "mt-2" : ""}`}
+            >
+              <span className="text-text-primary">
+                {enquiry.name} — {enquiry.detail}
+              </span>
+              <span className="shrink-0 text-text-secondary">{enquiry.time}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-bold text-white">Your Top Products</h2>
+        <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border-dark bg-card p-4">
+          {TOP_PRODUCTS.map((product, index) => (
+            <div
+              key={product.name}
+              className={`flex items-center justify-between gap-3 text-xs ${
+                index > 0 ? "border-t border-border-dark pt-2 mt-2" : ""
+              }`}
+            >
+              <span className="text-text-primary">{product.name}</span>
+              <span className="text-text-secondary">
+                {product.orders} orders |{" "}
+                <span className="font-semibold text-primary">
+                  {rupeesShort(product.revenue)}
+                </span>{" "}
+                revenue
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const ordersTab = (
+    <div className="mt-6 flex flex-col gap-8">
+      <SupplyOrdersTable title="Active Orders" rows={ACTIVE_SUPPLY_ORDERS} />
+      <SupplyOrdersTable title="Completed Orders" rows={COMPLETED_SUPPLY_ORDERS} />
+    </div>
+  );
+
+  const enquiriesTab = (
+    <div className="mt-6">
+      <h2 className="text-base font-bold text-white">All Enquiries</h2>
+      <div className="mt-4 flex flex-col gap-3">
+        {ALL_SUPPLY_ENQUIRIES.map((enquiry, index) => (
+          <div
+            key={`${enquiry.name}-${index}`}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-border-dark bg-card p-4"
+          >
+            <div>
+              <p className="text-sm font-bold text-white">{enquiry.name}</p>
+              <p className="text-xs text-text-secondary">
+                {enquiry.detail} • {enquiry.time}
+              </p>
+            </div>
+            <span
+              className={`rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold ${ENQUIRY_STATUS_STYLES[enquiry.status]}`}
+            >
+              {enquiry.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const tabContent =
+    activeTab === "overview" ? overviewTab : activeTab === "orders" ? ordersTab : enquiriesTab;
+
+  const centrePanel = (
+    <>
+      <div
+        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
+        style={{ backgroundColor: "#07122a" }}
+      >
+        <div>
+          <h1 className="font-display text-xl font-bold text-white">
+            Business Analytics
+          </h1>
+          <p className="mt-0.5 text-[13px] text-text-secondary">{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="Notifications"
+          className="text-lg text-text-primary"
+        >
+          🔔
+        </button>
+      </div>
+
+      <div className="px-6 py-6">
+        <div className="mb-6">{statCards}</div>
+        {tabsBar}
+        {tabContent}
+      </div>
+    </>
+  );
+
+  const rightPanel = (
+    <>
+      <p className="text-base font-bold text-white">Business Health</p>
+      <p className="mt-3 font-display text-[28px] font-bold text-primary">
+        85<span className="text-lg text-text-secondary">/100</span>
+      </p>
+      <p className="text-[11px] text-text-secondary">Business score</p>
+
+      <div className="mt-4 flex flex-col gap-2 text-xs text-text-secondary">
+        <div className="flex items-center gap-2">
+          <span>🟢</span>
+          <span>Orders: 2 active, on track</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span>🟢</span>
+          <span>Revenue: {rupeesShort(117000)} this month</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span>🟢</span>
+          <span>Enquiries: 3 new this week</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span>🟡</span>
+          <span>Verification: Silver recommended</span>
+        </div>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Grow Your Business</p>
+      <ul className="mt-4 flex flex-col gap-3 text-sm text-text-secondary">
+        <li>💡 Upgrade to Silver verification to appear higher in search results</li>
+        <li>💡 Add more products to your profile to attract more enquiries</li>
+        <li>💡 Respond to enquiries within 2 hours — faster response = more orders</li>
+      </ul>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Actions</p>
+      <div className="mt-3 flex flex-col gap-2">
+        <button
+          type="button"
+          className="w-full rounded-lg border border-primary py-2.5 text-xs font-semibold text-primary"
+        >
+          📊 Download Revenue Report
+        </button>
+        <Link
+          href="/enquiries"
+          className="block w-full rounded-lg border border-primary py-2.5 text-center text-xs font-semibold text-primary"
+        >
+          📬 View All Enquiries
+        </Link>
+        <Link
+          href="/profile"
+          className="block w-full rounded-lg border border-primary py-2.5 text-center text-xs font-semibold text-primary"
+        >
+          👤 Update My Profile
+        </Link>
+      </div>
+    </>
+  );
+
+  return (
+    <ThreePanelLayout
+      centre={centrePanel}
+      right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Talent performance (designer, master, merchandiser, qc_inspector)
+// ─────────────────────────────────────────────────────────────
+
+type TalentTabId = "overview" | "projects" | "earnings";
+
+const TALENT_TABS: { id: TalentTabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "projects", label: "Projects" },
+  { id: "earnings", label: "Earnings" },
+];
+
+const TALENT_CHECKLIST_LABELS = [
+  "Basic info added",
+  "Verification completed",
+  "Portfolio uploaded",
+  "First hire request received",
+];
+
+function TalentPerformance() {
+  const { user } = useUser();
+  const subtitle = screenConfig.analytics[user.userType].subtitle;
+  const [activeTab, setActiveTab] = useState<TalentTabId>("overview");
+
+  const tabsBar = (
+    <div className="flex gap-6 border-b border-border-dark">
+      {TALENT_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveTab(tab.id)}
+          className={`pb-3 text-sm font-semibold transition-colors ${
+            activeTab === tab.id
+              ? "border-b-2 border-primary text-white"
+              : "text-text-secondary"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const statCards = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">0</p>
+        <p className="text-xs font-semibold text-text-primary">Active Projects</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">₹0</p>
+        <p className="text-xs font-semibold text-text-primary">Total Earned</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">0</p>
+        <p className="text-xs font-semibold text-text-primary">
+          Completed Projects
+        </p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-text-secondary">—</p>
+        <p className="text-xs font-semibold text-text-primary">Average Rating</p>
+      </div>
+    </div>
+  );
+
+  const emptyState = (
+    <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+      <div className="text-5xl">📭</div>
+      <p className="mt-4 text-base font-bold text-white">No projects yet</p>
+      <p className="mt-2 max-w-[380px] text-[13px] text-text-secondary">
+        Complete verification to start getting hire requests
+      </p>
+      <Link
+        href="/verification"
+        className="mt-5 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
+      >
+        Get Verified →
+      </Link>
+    </div>
+  );
+
+  const tabContent =
+    activeTab === "overview" ? (
+      emptyState
+    ) : activeTab === "projects" ? (
+      <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+        <div className="text-5xl">💼</div>
+        <p className="mt-4 text-base font-bold text-white">No projects yet</p>
+      </div>
+    ) : (
+      <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+        <div className="text-5xl">💳</div>
+        <p className="mt-4 text-base font-bold text-white">No earnings yet</p>
+      </div>
+    );
+
+  const centrePanel = (
+    <>
+      <div
+        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
+        style={{ backgroundColor: "#07122a" }}
+      >
+        <div>
+          <h1 className="font-display text-xl font-bold text-white">
+            Performance
+          </h1>
+          <p className="mt-0.5 text-[13px] text-text-secondary">{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="Notifications"
+          className="text-lg text-text-primary"
+        >
+          🔔
+        </button>
+      </div>
+
+      <div className="px-6 py-6">
+        <div className="mb-6">{statCards}</div>
+        {tabsBar}
+        {tabContent}
+      </div>
+    </>
+  );
+
+  const rightPanel = (
+    <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        FabTalent Score
+      </p>
+      <div className="mt-3 rounded-[6px] border border-border-dark bg-background p-3 text-center">
+        <p className="font-display text-2xl font-bold text-primary">
+          {user.fabscore > 0 ? user.fabscore : "—"}
+        </p>
+        <p className="mt-1 text-[11px] text-text-secondary">
+          Complete your first project to unlock your score
+        </p>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Profile Completion
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        {TALENT_CHECKLIST_LABELS.map((label, index) => (
+          <div key={label} className="flex items-center gap-2 text-sm text-text-primary">
+            <span>{index === 0 ? "✅" : "☐"}</span>
+            <span className={index === 0 ? "" : "text-text-secondary"}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Tips to Get Your First Hire</p>
+      <ul className="mt-4 flex flex-col gap-3 text-sm text-text-secondary">
+        <li>💡 Complete verification to appear in FabTalent search results</li>
+        <li>💡 Upload a strong portfolio so brands can see your work</li>
+        <li>💡 Respond to hire requests quickly to build your reputation</li>
+      </ul>
+    </>
+  );
+
+  return (
+    <ThreePanelLayout
+      centre={centrePanel}
+      right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+    />
+  );
+}
+
+export default function Analytics() {
+  const { isSupplySide, isTalent } = useUser();
+
+  if (isSupplySide) return <SupplierAnalytics />;
+  if (isTalent) return <TalentPerformance />;
+  return <BuyerAnalytics />;
 }

@@ -43,6 +43,10 @@ export type EnquiriesScreenConfig = {
   subtitle: string
 }
 
+export type AnalyticsScreenConfig = {
+  subtitle: string
+}
+
 export type OrdersMode = 'buyer-demo' | 'supply-demo' | 'empty'
 export type OrdersRightPanel = 'default' | 'supply' | 'project' | 'inspection'
 
@@ -72,6 +76,7 @@ type ScreenConfig = {
   enquiries: Record<UserType, EnquiriesScreenConfig>
   orders: Record<UserType, OrdersScreenConfig>
   fabmerch: Record<UserType, FabMerchScreenConfig>
+  analytics: Record<UserType, AnalyticsScreenConfig>
 }
 
 const screenConfig: ScreenConfig = {
@@ -519,6 +524,19 @@ const screenConfig: ScreenConfig = {
     master: { subtitle: '', visibleTabs: [], showTalentProfile: true },
     merchandiser: { subtitle: '', visibleTabs: [], showTalentProfile: true },
     qc_inspector: { subtitle: '', visibleTabs: [], showTalentProfile: true }
+  },
+
+  analytics: {
+    buyer: { subtitle: 'Real-time visibility over your entire garment business' },
+    manufacturer: { subtitle: 'Your production orders and performance' },
+    fabric_mill: { subtitle: 'Your fabric orders and revenue performance' },
+    trim_supplier: { subtitle: 'Your supply orders, enquiries, and revenue performance' },
+    artisan: { subtitle: 'Your craft orders and performance' },
+    job_worker: { subtitle: 'Your job work performance' },
+    designer: { subtitle: 'Your projects, earnings, and ratings' },
+    master: { subtitle: 'Your projects, earnings, and ratings' },
+    merchandiser: { subtitle: 'Your projects, earnings, and ratings' },
+    qc_inspector: { subtitle: 'Your projects, earnings, and ratings' }
   }
 }
 
