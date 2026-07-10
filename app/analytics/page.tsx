@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
+import type { UserType } from "../context/UserContext";
 import screenConfig from "../config/screens";
 
 type TabId = "overview" | "season" | "vendors" | "finance";
@@ -1237,26 +1239,10 @@ function BuyerAnalytics() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
-            Analytics
-          </h1>
-          <p className="mt-0.5 text-[13px] text-text-secondary">
-            Real-time visibility over your entire garment business
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="text-lg text-text-primary"
-          >
-            🔔
-          </button>
+      <TopBar
+        title="Analytics"
+        subtitle="Real-time visibility over your entire garment business"
+        rightContent={
           <select
             value={selectedSeason}
             onChange={(event) => setSelectedSeason(event.target.value)}
@@ -1269,8 +1255,8 @@ function BuyerAnalytics() {
               </option>
             ))}
           </select>
-        </div>
-      </div>
+        }
+      />
 
       <div className="px-6 py-6">
         {tabsBar}
@@ -1359,74 +1345,157 @@ type SupplyOrderRow = {
   status: SupplyOrderStatus;
 };
 
-const ACTIVE_SUPPLY_ORDERS: SupplyOrderRow[] = [
-  {
-    id: "SUP-2024-001",
-    buyer: "Jaipur Ethnic Works",
-    product: "Metal Buttons 5,000 pcs",
-    stage: "Processing",
-    value: 85000,
-    delivery: "Jul 10",
-    status: "On Track",
-  },
-  {
-    id: "SUP-2024-002",
-    buyer: "Delhi Woven Works",
-    product: "Invisible Zip 2,000 pcs",
-    stage: "Ready to Ship",
-    value: 32000,
-    delivery: "Jul 5",
-    status: "On Track",
-  },
-];
-
-const COMPLETED_SUPPLY_ORDERS: SupplyOrderRow[] = [
-  {
-    id: "SUP-2024-098",
-    buyer: "Mumbai Denim Studio",
-    product: "Zips 20cm 1,500 pcs",
-    stage: "Delivered",
-    value: 24000,
-    delivery: "Jun 20",
-    status: "Delivered",
-  },
-  {
-    id: "SUP-2024-097",
-    buyer: "Tirupur Knits",
-    product: "Elastic 50m x 200",
-    stage: "Delivered",
-    value: 18000,
-    delivery: "Jun 12",
-    status: "Delivered",
-  },
-];
-
-const RECENT_ENQUIRIES_SUMMARY = [
-  { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago" },
-  { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday" },
-  { name: "Ahmedabad Silk House", detail: "Thread", time: "2 days ago" },
-];
-
-const TOP_PRODUCTS = [
-  { name: "Metal Buttons 4-hole 15mm", orders: 12, revenue: 340000 },
-  { name: "Invisible Zip 20cm", orders: 8, revenue: 180000 },
-  { name: "Woven Labels", orders: 6, revenue: 80000 },
-];
-
 type EnquiryStatus = "New" | "Replied" | "Converted to Order" | "Declined";
 
-const ALL_SUPPLY_ENQUIRIES: {
-  name: string;
-  detail: string;
-  time: string;
-  status: EnquiryStatus;
-}[] = [
-  { name: "Jaipur Ethnic Works", detail: "Metal Buttons 5,000 pcs", time: "2 hours ago", status: "Converted to Order" },
-  { name: "Delhi Woven Works", detail: "Invisible Zip 2,000 pcs", time: "5 hours ago", status: "Converted to Order" },
-  { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago", status: "New" },
-  { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday", status: "Replied" },
-  { name: "Ahmedabad Silk House", detail: "Thread", time: "2 days ago", status: "Declined" },
-];
+type SupplyAnalyticsData = {
+  activeOrders: SupplyOrderRow[];
+  completedOrders: SupplyOrderRow[];
+  recentEnquiries: { name: string; detail: string; time: string }[];
+  topProducts: { name: string; orders: number; revenue: number }[];
+  allEnquiries: { name: string; detail: string; time: string; status: EnquiryStatus }[];
+  topProductsLabel: string;
+};
+
+const SUPPLY_ANALYTICS_BY_ROLE: Partial<Record<UserType, SupplyAnalyticsData>> = {
+  manufacturer: {
+    activeOrders: [
+      { id: "SUP-2024-101", buyer: "Studio Kavya", product: "Ethnic Kurta 500 pcs", stage: "Production", value: 210000, delivery: "Jul 10", status: "On Track" },
+      { id: "SUP-2024-102", buyer: "Urban Thread Co.", product: "Western Trousers 300 pcs", stage: "QC", value: 135000, delivery: "Jul 5", status: "On Track" },
+    ],
+    completedOrders: [
+      { id: "SUP-2024-091", buyer: "House of Nira", product: "Activewear Set 400 pcs", stage: "Delivered", value: 96000, delivery: "Jun 22", status: "Delivered" },
+      { id: "SUP-2024-090", buyer: "Little Sprout Kids", product: "Kids Kurta 250 pcs", stage: "Delivered", value: 52000, delivery: "Jun 15", status: "Delivered" },
+    ],
+    recentEnquiries: [
+      { name: "Little Sprout Kids", detail: "Kids Wear 300 pcs", time: "2 hours ago" },
+      { name: "Urban Thread Co.", detail: "Western Wear 800 pcs", time: "Yesterday" },
+      { name: "Luxe Atelier", detail: "Luxury 100 pcs", time: "2 days ago" },
+    ],
+    topProducts: [
+      { name: "Ethnic Kurta", orders: 12, revenue: 340000 },
+      { name: "Western Trousers", orders: 8, revenue: 180000 },
+      { name: "Kids Kurta Set", orders: 6, revenue: 80000 },
+    ],
+    allEnquiries: [
+      { name: "Studio Kavya", detail: "Ethnic Kurta 500 pcs", time: "2 hours ago", status: "Converted to Order" },
+      { name: "Urban Thread Co.", detail: "Western Trousers 300 pcs", time: "5 hours ago", status: "Converted to Order" },
+      { name: "Little Sprout Kids", detail: "Kids Wear 300 pcs", time: "2 hours ago", status: "New" },
+      { name: "Luxe Atelier", detail: "Luxury 100 pcs", time: "Yesterday", status: "Replied" },
+      { name: "House of Nira", detail: "Activewear", time: "2 days ago", status: "Declined" },
+    ],
+    topProductsLabel: "Your Top Products",
+  },
+  fabric_mill: {
+    activeOrders: [
+      { id: "SUP-2024-111", buyer: "Jaipur Ethnic Works", product: "Cotton Lawn 80 GSM 3,000m", stage: "Weaving", value: 315000, delivery: "Jul 8", status: "On Track" },
+      { id: "SUP-2024-112", buyer: "Delhi Woven Works", product: "Linen Blend 1,500m", stage: "Ready to Ship", value: 270000, delivery: "Jul 4", status: "On Track" },
+    ],
+    completedOrders: [
+      { id: "SUP-2024-099", buyer: "Tirupur Knits", product: "Cotton Poplin 2,000m", stage: "Delivered", value: 180000, delivery: "Jun 20", status: "Delivered" },
+      { id: "SUP-2024-096", buyer: "Mumbai Denim Studio", product: "Denim Fabric 1,000m", stage: "Delivered", value: 220000, delivery: "Jun 12", status: "Delivered" },
+    ],
+    recentEnquiries: [
+      { name: "Studio Kavya", detail: "Linen Blend 1,000m", time: "6 hours ago" },
+      { name: "Tirupur Knits", detail: "Jersey Knit 8,000m/month", time: "Yesterday" },
+      { name: "House of Nira", detail: "Organic Cotton 2,000m", time: "1 week ago" },
+    ],
+    topProducts: [
+      { name: "Cotton Lawn 80 GSM", orders: 14, revenue: 420000 },
+      { name: "Linen Blend", orders: 7, revenue: 270000 },
+      { name: "Cotton Poplin", orders: 5, revenue: 180000 },
+    ],
+    allEnquiries: [
+      { name: "Jaipur Ethnic Works", detail: "Cotton Lawn 5,000m", time: "3 hours ago", status: "Converted to Order" },
+      { name: "Delhi Woven Works", detail: "Linen Blend 1,500m", time: "5 hours ago", status: "Converted to Order" },
+      { name: "Studio Kavya", detail: "Linen Blend 1,000m", time: "6 hours ago", status: "New" },
+      { name: "Tirupur Knits", detail: "Jersey Knit 8,000m/month", time: "Yesterday", status: "Replied" },
+      { name: "House of Nira", detail: "Organic Cotton 2,000m", time: "1 week ago", status: "Declined" },
+    ],
+    topProductsLabel: "Your Top Products",
+  },
+  trim_supplier: {
+    activeOrders: [
+      { id: "SUP-2024-001", buyer: "Jaipur Ethnic Works", product: "Metal Buttons 5,000 pcs", stage: "Processing", value: 85000, delivery: "Jul 10", status: "On Track" },
+      { id: "SUP-2024-002", buyer: "Delhi Woven Works", product: "Invisible Zip 2,000 pcs", stage: "Ready to Ship", value: 32000, delivery: "Jul 5", status: "On Track" },
+    ],
+    completedOrders: [
+      { id: "SUP-2024-098", buyer: "Mumbai Denim Studio", product: "Zips 20cm 1,500 pcs", stage: "Delivered", value: 24000, delivery: "Jun 20", status: "Delivered" },
+      { id: "SUP-2024-097", buyer: "Tirupur Knits", product: "Elastic 50m x 200", stage: "Delivered", value: 18000, delivery: "Jun 12", status: "Delivered" },
+    ],
+    recentEnquiries: [
+      { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago" },
+      { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday" },
+      { name: "Surat Cotton Mills", detail: "Woven Labels", time: "2 days ago" },
+    ],
+    topProducts: [
+      { name: "Metal Buttons 4-hole 15mm", orders: 12, revenue: 340000 },
+      { name: "Invisible Zip 20cm", orders: 8, revenue: 180000 },
+      { name: "Woven Labels", orders: 6, revenue: 80000 },
+    ],
+    allEnquiries: [
+      { name: "Jaipur Ethnic Works", detail: "Metal Buttons 5,000 pcs", time: "2 hours ago", status: "Converted to Order" },
+      { name: "Delhi Woven Works", detail: "Invisible Zip 2,000 pcs", time: "5 hours ago", status: "Converted to Order" },
+      { name: "Mumbai Denim Studio", detail: "Metal Buttons", time: "2 hours ago", status: "New" },
+      { name: "Tirupur Knits", detail: "Elastic 50m", time: "Yesterday", status: "Replied" },
+      { name: "Surat Cotton Mills", detail: "Woven Labels", time: "2 days ago", status: "Declined" },
+    ],
+    topProductsLabel: "Your Top Products",
+  },
+  artisan: {
+    activeOrders: [
+      { id: "SUP-2024-121", buyer: "Studio Kavya", product: "Chikankari Embroidery Kurta 200 pcs", stage: "Embroidery Work", value: 24000, delivery: "Jul 12", status: "On Track" },
+      { id: "SUP-2024-122", buyer: "House of Nira", product: "Block Print Dupatta 150 pcs", stage: "Ready to Ship", value: 12750, delivery: "Jul 6", status: "On Track" },
+    ],
+    completedOrders: [
+      { id: "SUP-2024-089", buyer: "Urban Thread Co.", product: "Zardozi Work 80 pcs", stage: "Delivered", value: 32000, delivery: "Jun 18", status: "Delivered" },
+    ],
+    recentEnquiries: [
+      { name: "House of Nira", detail: "Block Print 150 pcs", time: "5 hours ago" },
+      { name: "Urban Thread Co.", detail: "Hand Embroidery 50 pcs", time: "Yesterday" },
+      { name: "Little Sprout Kids", detail: "Natural Dye 300 pcs", time: "1 week ago" },
+    ],
+    topProducts: [
+      { name: "Chikankari Embroidery", orders: 9, revenue: 76000 },
+      { name: "Block Print", orders: 6, revenue: 42000 },
+      { name: "Zardozi Work", orders: 3, revenue: 32000 },
+    ],
+    allEnquiries: [
+      { name: "Studio Kavya", detail: "Chikankari Embroidery 200 pcs", time: "2 hours ago", status: "Converted to Order" },
+      { name: "House of Nira", detail: "Block Print 150 pcs", time: "5 hours ago", status: "Converted to Order" },
+      { name: "Urban Thread Co.", detail: "Hand Embroidery 50 pcs", time: "Yesterday", status: "New" },
+      { name: "Luxe Atelier", detail: "Zardozi Work 80 pcs", time: "3 days ago", status: "Replied" },
+      { name: "Little Sprout Kids", detail: "Natural Dye 300 pcs", time: "1 week ago", status: "Declined" },
+    ],
+    topProductsLabel: "Your Top Craft Work",
+  },
+  job_worker: {
+    activeOrders: [
+      { id: "SUP-2024-131", buyer: "Jaipur Ethnic Works", product: "Embroidery Job Work 1,000 pcs", stage: "In Progress", value: 32000, delivery: "Jul 11", status: "On Track" },
+      { id: "SUP-2024-132", buyer: "Mumbai Denim Studio", product: "Denim Washing 2,000 pcs", stage: "Ready to Ship", value: 18000, delivery: "Jul 3", status: "On Track" },
+    ],
+    completedOrders: [
+      { id: "SUP-2024-088", buyer: "Delhi Woven Works", product: "Screen Printing 500 pcs", stage: "Delivered", value: 9000, delivery: "Jun 19", status: "Delivered" },
+    ],
+    recentEnquiries: [
+      { name: "Mumbai Denim Studio", detail: "Denim Washing 2,000 pcs/month", time: "6 hours ago" },
+      { name: "Delhi Woven Works", detail: "Screen Printing 500 pcs", time: "Yesterday" },
+      { name: "Tirupur Knits", detail: "Cutting job work — ongoing", time: "4 days ago" },
+    ],
+    topProducts: [
+      { name: "Embroidery Job Work", orders: 10, revenue: 62000 },
+      { name: "Denim Washing", orders: 6, revenue: 38000 },
+      { name: "Screen Printing", orders: 4, revenue: 15000 },
+    ],
+    allEnquiries: [
+      { name: "Jaipur Ethnic Works", detail: "Embroidery Job Work 1,000 pcs", time: "3 hours ago", status: "Converted to Order" },
+      { name: "Mumbai Denim Studio", detail: "Denim Washing 2,000 pcs/month", time: "6 hours ago", status: "New" },
+      { name: "Delhi Woven Works", detail: "Screen Printing 500 pcs", time: "Yesterday", status: "Replied" },
+      { name: "Tirupur Knits", detail: "Cutting job work — ongoing", time: "4 days ago", status: "Declined" },
+      { name: "Surat Cotton Mills", detail: "Finishing & packing 3,000 pcs", time: "1 week ago", status: "Converted to Order" },
+    ],
+    topProductsLabel: "Your Top Services",
+  },
+};
 
 const ENQUIRY_STATUS_STYLES: Record<EnquiryStatus, string> = {
   New: "border-secondary/40 bg-secondary/15 text-secondary",
@@ -1503,6 +1572,7 @@ function SupplierAnalytics() {
   const { user } = useUser();
   const subtitle = screenConfig.analytics[user.userType].subtitle;
   const [activeTab, setActiveTab] = useState<SupplyTabId>("overview");
+  const data = SUPPLY_ANALYTICS_BY_ROLE[user.userType] ?? SUPPLY_ANALYTICS_BY_ROLE.trim_supplier!;
 
   const tabsBar = (
     <div className="flex gap-6 border-b border-border-dark">
@@ -1523,13 +1593,15 @@ function SupplierAnalytics() {
     </div>
   );
 
+  const isManufacturer = user.userType === "manufacturer";
+
   const statCards = (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div className="rounded-[10px] border border-border-dark bg-card p-4">
         <p className="font-display text-2xl font-bold text-primary">2</p>
         <p className="text-xs font-semibold text-text-primary">Active Orders</p>
         <p className="mt-0.5 text-[12px] text-text-secondary">
-          Supply orders in progress
+          {isManufacturer ? "Orders in production" : "Supply orders in progress"}
         </p>
         <p className="mt-2 text-[11px] text-green-400">Both on track ✓</p>
       </div>
@@ -1547,35 +1619,63 @@ function SupplierAnalytics() {
           {rupeesShort(68000)} in escrow
         </p>
       </div>
-      <div className="rounded-[10px] border border-border-dark bg-card p-4">
-        <p className="font-display text-2xl font-bold text-primary">3</p>
-        <p className="text-xs font-semibold text-text-primary">
-          Enquiries Received
-        </p>
-        <p className="mt-0.5 text-[12px] text-text-secondary">This week</p>
-        <p className="mt-2 text-[11px] text-green-400">↑ Up from last week</p>
-      </div>
-      <div className="rounded-[10px] border border-border-dark bg-card p-4">
-        <p className="font-display text-2xl font-bold text-primary">100%</p>
-        <p className="text-xs font-semibold text-text-primary">Response Rate</p>
-        <p className="mt-0.5 text-[12px] text-text-secondary">
-          Your enquiry response rate
-        </p>
-        <p className="mt-2 text-[11px] text-green-400">
-          Average response: 2 hours
-        </p>
-      </div>
+      {isManufacturer ? (
+        <div className="rounded-[10px] border border-border-dark bg-card p-4">
+          <p className="font-display text-2xl font-bold text-primary">100%</p>
+          <p className="text-xs font-semibold text-text-primary">
+            Order Completion Rate
+          </p>
+          <p className="mt-0.5 text-[12px] text-text-secondary">
+            Orders delivered vs accepted
+          </p>
+          <p className="mt-2 text-[11px] text-green-400">All orders completed</p>
+        </div>
+      ) : (
+        <div className="rounded-[10px] border border-border-dark bg-card p-4">
+          <p className="font-display text-2xl font-bold text-primary">3</p>
+          <p className="text-xs font-semibold text-text-primary">
+            Enquiries Received
+          </p>
+          <p className="mt-0.5 text-[12px] text-text-secondary">This week</p>
+          <p className="mt-2 text-[11px] text-green-400">↑ Up from last week</p>
+        </div>
+      )}
+      {isManufacturer ? (
+        <div className="rounded-[10px] border border-border-dark bg-card p-4">
+          <p className="font-display text-2xl font-bold text-primary">96%</p>
+          <p className="text-xs font-semibold text-text-primary">
+            On-Time Delivery
+          </p>
+          <p className="mt-0.5 text-[12px] text-text-secondary">
+            Delivered by expected date
+          </p>
+          <p className="mt-2 text-[11px] text-green-400">
+            Above platform average
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-[10px] border border-border-dark bg-card p-4">
+          <p className="font-display text-2xl font-bold text-primary">100%</p>
+          <p className="text-xs font-semibold text-text-primary">Response Rate</p>
+          <p className="mt-0.5 text-[12px] text-text-secondary">
+            Your enquiry response rate
+          </p>
+          <p className="mt-2 text-[11px] text-green-400">
+            Average response: 2 hours
+          </p>
+        </div>
+      )}
     </div>
   );
 
   const overviewTab = (
     <div className="mt-6 flex flex-col gap-8">
-      <SupplyOrdersTable title="Active Supply Orders" rows={ACTIVE_SUPPLY_ORDERS} />
+      <SupplyOrdersTable title="Active Supply Orders" rows={data.activeOrders} />
 
       <div>
         <h2 className="text-sm font-bold text-white">Recent Enquiries</h2>
         <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border-dark bg-card p-4">
-          {RECENT_ENQUIRIES_SUMMARY.map((enquiry, index) => (
+          {data.recentEnquiries.map((enquiry, index) => (
             <div
               key={`${enquiry.name}-${index}`}
               className={`flex items-center justify-between gap-3 text-xs ${
@@ -1592,9 +1692,9 @@ function SupplierAnalytics() {
       </div>
 
       <div>
-        <h2 className="text-sm font-bold text-white">Your Top Products</h2>
+        <h2 className="text-sm font-bold text-white">{data.topProductsLabel}</h2>
         <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border-dark bg-card p-4">
-          {TOP_PRODUCTS.map((product, index) => (
+          {data.topProducts.map((product, index) => (
             <div
               key={product.name}
               className={`flex items-center justify-between gap-3 text-xs ${
@@ -1618,8 +1718,8 @@ function SupplierAnalytics() {
 
   const ordersTab = (
     <div className="mt-6 flex flex-col gap-8">
-      <SupplyOrdersTable title="Active Orders" rows={ACTIVE_SUPPLY_ORDERS} />
-      <SupplyOrdersTable title="Completed Orders" rows={COMPLETED_SUPPLY_ORDERS} />
+      <SupplyOrdersTable title="Active Orders" rows={data.activeOrders} />
+      <SupplyOrdersTable title="Completed Orders" rows={data.completedOrders} />
     </div>
   );
 
@@ -1627,7 +1727,7 @@ function SupplierAnalytics() {
     <div className="mt-6">
       <h2 className="text-base font-bold text-white">All Enquiries</h2>
       <div className="mt-4 flex flex-col gap-3">
-        {ALL_SUPPLY_ENQUIRIES.map((enquiry, index) => (
+        {data.allEnquiries.map((enquiry, index) => (
           <div
             key={`${enquiry.name}-${index}`}
             className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-border-dark bg-card p-4"
@@ -1654,24 +1754,7 @@ function SupplierAnalytics() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
-            Business Analytics
-          </h1>
-          <p className="mt-0.5 text-[13px] text-text-secondary">{subtitle}</p>
-        </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="text-lg text-text-primary"
-        >
-          🔔
-        </button>
-      </div>
+      <TopBar title="Business Analytics" subtitle={subtitle} />
 
       <div className="px-6 py-6">
         <div className="mb-6">{statCards}</div>
@@ -1770,10 +1853,17 @@ const TALENT_CHECKLIST_LABELS = [
   "First hire request received",
 ];
 
+function useTalentChecklist(labels: string[]) {
+  const { user } = useUser();
+  const done = [true, user.verificationTier !== "unverified", false, false];
+  return labels.map((label, index) => ({ label, done: done[index] ?? false }));
+}
+
 function TalentPerformance() {
   const { user } = useUser();
   const subtitle = screenConfig.analytics[user.userType].subtitle;
   const [activeTab, setActiveTab] = useState<TalentTabId>("overview");
+  const checklist = useTalentChecklist(TALENT_CHECKLIST_LABELS);
 
   const tabsBar = (
     <div className="flex gap-6 border-b border-border-dark">
@@ -1850,24 +1940,7 @@ function TalentPerformance() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
-            Performance
-          </h1>
-          <p className="mt-0.5 text-[13px] text-text-secondary">{subtitle}</p>
-        </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="text-lg text-text-primary"
-        >
-          🔔
-        </button>
-      </div>
+      <TopBar title="Performance" subtitle={subtitle} />
 
       <div className="px-6 py-6">
         <div className="mb-6">{statCards}</div>
@@ -1897,10 +1970,10 @@ function TalentPerformance() {
         Profile Completion
       </p>
       <div className="mt-3 flex flex-col gap-2">
-        {TALENT_CHECKLIST_LABELS.map((label, index) => (
-          <div key={label} className="flex items-center gap-2 text-sm text-text-primary">
-            <span>{index === 0 ? "✅" : "☐"}</span>
-            <span className={index === 0 ? "" : "text-text-secondary"}>{label}</span>
+        {checklist.map((item) => (
+          <div key={item.label} className="flex items-center gap-2 text-sm text-text-primary">
+            <span>{item.done ? "✅" : "☐"}</span>
+            <span className={item.done ? "" : "text-text-secondary"}>{item.label}</span>
           </div>
         ))}
       </div>
@@ -1924,10 +1997,168 @@ function TalentPerformance() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// QC Inspector performance
+// ─────────────────────────────────────────────────────────────
+
+type QcTabId = "overview" | "inspections" | "earnings";
+
+const QC_TABS: { id: QcTabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "inspections", label: "Inspections" },
+  { id: "earnings", label: "Earnings" },
+];
+
+const QC_CHECKLIST_LABELS = [
+  "Basic info added",
+  "Verification completed",
+  "Cities covered added",
+  "First inspection booking received",
+];
+
+function QcPerformance() {
+  const { user } = useUser();
+  const subtitle = screenConfig.analytics[user.userType].subtitle;
+  const [activeTab, setActiveTab] = useState<QcTabId>("overview");
+  const checklist = useTalentChecklist(QC_CHECKLIST_LABELS);
+
+  const tabsBar = (
+    <div className="flex gap-6 border-b border-border-dark">
+      {QC_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveTab(tab.id)}
+          className={`pb-3 text-sm font-semibold transition-colors ${
+            activeTab === tab.id
+              ? "border-b-2 border-primary text-white"
+              : "text-text-secondary"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const statCards = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">0</p>
+        <p className="text-xs font-semibold text-text-primary">
+          Inspections Completed
+        </p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-text-secondary">—</p>
+        <p className="text-xs font-semibold text-text-primary">Accuracy Rate</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">0</p>
+        <p className="text-xs font-semibold text-text-primary">Cities Covered</p>
+      </div>
+      <div className="rounded-[10px] border border-border-dark bg-card p-4">
+        <p className="font-display text-2xl font-bold text-primary">₹0</p>
+        <p className="text-xs font-semibold text-text-primary">Total Earned</p>
+      </div>
+    </div>
+  );
+
+  const emptyState = (
+    <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+      <div className="text-5xl">📭</div>
+      <p className="mt-4 text-base font-bold text-white">No inspections yet</p>
+      <p className="mt-2 max-w-[380px] text-[13px] text-text-secondary">
+        Complete verification to start getting inspection bookings
+      </p>
+      <Link
+        href="/verification"
+        className="mt-5 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
+      >
+        Get Verified →
+      </Link>
+    </div>
+  );
+
+  const tabContent =
+    activeTab === "overview" ? (
+      emptyState
+    ) : activeTab === "inspections" ? (
+      <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+        <div className="text-5xl">🔍</div>
+        <p className="mt-4 text-base font-bold text-white">No inspections yet</p>
+      </div>
+    ) : (
+      <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+        <div className="text-5xl">💳</div>
+        <p className="mt-4 text-base font-bold text-white">No earnings yet</p>
+      </div>
+    );
+
+  const centrePanel = (
+    <>
+      <TopBar title="Performance" subtitle={subtitle} />
+
+      <div className="px-6 py-6">
+        <div className="mb-6">{statCards}</div>
+        {tabsBar}
+        {tabContent}
+      </div>
+    </>
+  );
+
+  const rightPanel = (
+    <>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        FabTalent Score
+      </p>
+      <div className="mt-3 rounded-[6px] border border-border-dark bg-background p-3 text-center">
+        <p className="font-display text-2xl font-bold text-primary">
+          {user.fabscore > 0 ? user.fabscore : "—"}
+        </p>
+        <p className="mt-1 text-[11px] text-text-secondary">
+          Complete your first inspection to unlock your score
+        </p>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Profile Completion
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        {checklist.map((item) => (
+          <div key={item.label} className="flex items-center gap-2 text-sm text-text-primary">
+            <span>{item.done ? "✅" : "☐"}</span>
+            <span className={item.done ? "" : "text-text-secondary"}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-base font-bold text-white">Tips to Get Your First Booking</p>
+      <ul className="mt-4 flex flex-col gap-3 text-sm text-text-secondary">
+        <li>💡 Complete verification to appear in inspection search results</li>
+        <li>💡 Add all the cities you can cover for inspections</li>
+        <li>💡 Respond to booking requests quickly to build your reputation</li>
+      </ul>
+    </>
+  );
+
+  return (
+    <ThreePanelLayout
+      centre={centrePanel}
+      right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+    />
+  );
+}
+
 export default function Analytics() {
-  const { isSupplySide, isTalent } = useUser();
+  const { user, isSupplySide, isTalent } = useUser();
 
   if (isSupplySide) return <SupplierAnalytics />;
+  if (user.userType === "qc_inspector") return <QcPerformance />;
   if (isTalent) return <TalentPerformance />;
   return <BuyerAnalytics />;
 }

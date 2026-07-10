@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import {
   merchandisers as MERCHANDISER_DATA,
   designers as DESIGNER_DATA,
@@ -12,6 +13,9 @@ import { qcInspectors as QC_INSPECTOR_DATA } from "../data/qcInspectors";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
 import type { FabMerchTabId } from "../config/screens";
+import { getVisibleQcPills, qcInspectorMatchesViewer } from "../lib/qcRelevance";
+import HireModal from "../components/HireModal";
+import type { HireModalProfessional } from "../components/HireModal";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -210,10 +214,6 @@ function projectsValue(countLabel: string) {
   return parseInt(countLabel, 10) || 0;
 }
 
-type ModalProfessional = Professional & {
-  stageQuestion: string;
-};
-
 function ProfessionalCard({
   professional,
   tab,
@@ -223,6 +223,12 @@ function ProfessionalCard({
   tab: (typeof TABS)[number];
   onHire: (professional: Professional, tab: (typeof TABS)[number]) => void;
 }) {
+  const { user } = useUser();
+  const qcPills =
+    tab.id === "qc-inspectors"
+      ? getVisibleQcPills(professional.extraPills, user.userType)
+      : professional.extraPills;
+
   return (
     <div className="rounded-[10px] border border-border-dark bg-card p-4 transition-colors hover:border-primary/50">
       <div className="flex items-start gap-3">
@@ -278,7 +284,7 @@ function ProfessionalCard({
           <div>
             <p className="text-[11px] text-text-secondary">Types:</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {professional.extraPills.map((pill) => (
+              {qcPills.map((pill) => (
                 <span
                   key={pill}
                   className="rounded-[20px] border border-primary bg-primary/10 px-2 py-[3px] text-[10px] text-primary"
@@ -326,12 +332,12 @@ function ProfessionalCard({
           {professional.rateRange}
         </p>
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Link
+            href={`/fabmerch/${professional.id}`}
             className="rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary"
           >
             View Profile
-          </button>
+          </Link>
           <button
             type="button"
             onClick={() => onHire(professional, tab)}
@@ -359,26 +365,10 @@ function TalentFabMerchProfile() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
-            My FabTalent Profile
-          </h1>
-          <p className="text-[13px] text-text-secondary">
-            Manage your listing, availability, and hire requests
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="text-lg text-text-primary"
-        >
-          🔔
-        </button>
-      </div>
+      <TopBar
+        title="My FabTalent Profile"
+        subtitle="Manage your listing, availability, and hire requests"
+      />
 
       <div className="px-6 py-6">
         <div className="rounded-xl border border-border-dark bg-card p-6">
@@ -482,12 +472,9 @@ export default function FabMerch() {
     useState("Any Experience");
   const [sortBy, setSortBy] = useState("Top Rated");
 
-  const [showModal, setShowModal] = useState(false);
-  const [selectedProfessional, setSelectedProfessional] =
-    useState<ModalProfessional | null>(null);
-  const [selectedStage, setSelectedStage] = useState("");
-  const [requirementText, setRequirementText] = useState("");
-  const [timelineDate, setTimelineDate] = useState("");
+  const [hireTarget, setHireTarget] = useState<HireModalProfessional | null>(
+    null
+  );
 
   const [showRequirementModal, setShowRequirementModal] = useState(false);
   const [reqProfessionalType, setReqProfessionalType] =
@@ -502,7 +489,7 @@ export default function FabMerch() {
   const [reqSubmitted, setReqSubmitted] = useState(false);
 
   useEffect(() => {
-    if (showModal || showRequirementModal) {
+    if (showRequirementModal) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "unset";
@@ -510,7 +497,7 @@ export default function FabMerch() {
     return () => {
       document.body.style.overflow = "unset";
     };
-  }, [showModal, showRequirementModal]);
+  }, [showRequirementModal]);
 
   useEffect(() => {
     setActiveTab(fabMerchConfig.visibleTabs[0] ?? "merchandisers");
@@ -539,11 +526,16 @@ export default function FabMerch() {
       const matchesCity =
         selectedCity === "All Cities" || professional.city === selectedCity;
 
+      const matchesQcRelevance =
+        currentTab.id !== "qc-inspectors" ||
+        qcInspectorMatchesViewer(professional.extraPills, user.userType);
+
       return (
         matchesSearch &&
         matchesCategory &&
         matchesCity &&
-        matchesExperience(professional.years, selectedExperience)
+        matchesExperience(professional.years, selectedExperience) &&
+        matchesQcRelevance
       );
     })
     .sort((a, b) => {
@@ -562,19 +554,13 @@ export default function FabMerch() {
     professional: Professional,
     tab: (typeof TABS)[number]
   ) => {
-    setSelectedProfessional({
-      ...professional,
+    setHireTarget({
+      name: professional.name,
+      rateRange: professional.rateRange,
+      extraPills: professional.extraPills,
       stageQuestion: tab.stageQuestion,
+      tabId: tab.id,
     });
-    setSelectedStage(professional.extraPills[0] ?? "");
-    setRequirementText("");
-    setTimelineDate("");
-    setShowModal(true);
-  };
-
-  const closeModal = () => {
-    setShowModal(false);
-    setSelectedProfessional(null);
   };
 
   const toggleReqStage = (stage: string) => {
@@ -773,26 +759,7 @@ export default function FabMerch() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
-            FabMerch
-          </h1>
-          <p className="text-[13px] text-text-secondary">
-            {fabMerchConfig.subtitle}
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="text-lg text-text-primary"
-        >
-          🔔
-        </button>
-      </div>
+      <TopBar title="FabMerch" subtitle={fabMerchConfig.subtitle} />
 
       <div className="px-6 py-6">
         {tabsBar}
@@ -822,104 +789,6 @@ export default function FabMerch() {
         )}
       </div>
     </>
-  );
-
-  const hireModal = showModal && selectedProfessional && (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-      onClick={closeModal}
-    >
-      <div
-        className="relative w-full max-w-[480px] rounded-xl border border-border-dark bg-card p-8"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={closeModal}
-          aria-label="Close"
-          className="absolute right-4 top-4 text-lg text-text-secondary hover:text-text-primary"
-        >
-          ✕
-        </button>
-
-        <h2 className="text-xl font-bold text-white">
-          Hire {selectedProfessional.name}
-        </h2>
-
-        <div className="mt-5">
-          <p className="text-sm font-medium text-text-primary">
-            {selectedProfessional.stageQuestion}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {selectedProfessional.extraPills.map((pill) => (
-              <button
-                key={pill}
-                type="button"
-                onClick={() => setSelectedStage(pill)}
-                className={`rounded-[20px] border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  selectedStage === pill
-                    ? "border-primary bg-primary text-navy"
-                    : "border-border-dark bg-background text-text-secondary"
-                }`}
-              >
-                {pill}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <p className="text-sm font-medium text-text-primary">
-            Describe your requirement:
-          </p>
-          <textarea
-            value={requirementText}
-            onChange={(event) => setRequirementText(event.target.value)}
-            placeholder="Tell them what you need..."
-            rows={4}
-            className="mt-2 w-full rounded-[6px] border border-border-dark bg-background p-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary focus:border-primary"
-          />
-        </div>
-
-        <div className="mt-5">
-          <p className="text-sm font-medium text-text-primary">
-            When do you need this by?
-          </p>
-          <input
-            type="date"
-            value={timelineDate}
-            onChange={(event) => setTimelineDate(event.target.value)}
-            className="mt-2 w-full rounded-[6px] border border-border-dark bg-background p-3 text-sm text-text-primary outline-none transition-colors focus:border-primary"
-          />
-        </div>
-
-        <div className="mt-5 rounded-[6px] border border-border-dark bg-background p-3">
-          <p className="text-sm font-bold text-primary">
-            {selectedProfessional.rateRange}
-          </p>
-          <p className="mt-1 text-[12px] text-text-secondary">
-            Your payment will be held in escrow until work is approved
-          </p>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={closeModal}
-            className="rounded-lg border border-border-dark px-4 py-2 text-sm font-semibold text-text-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={closeModal}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
-          >
-            Send Hire Request →
-          </button>
-        </div>
-      </div>
-    </div>
   );
 
   const requirementModal = showRequirementModal && (
@@ -1231,7 +1100,11 @@ export default function FabMerch() {
         </nav>
       </div>
 
-      {hireModal}
+      <HireModal
+        professional={hireTarget}
+        viewerUserType={user.userType}
+        onClose={() => setHireTarget(null)}
+      />
       {requirementModal}
     </>
   );

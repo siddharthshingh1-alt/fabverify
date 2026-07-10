@@ -4,58 +4,26 @@ import { usePathname } from 'next/navigation'
 import theme from '../theme'
 import content from '../content'
 import { useUser } from '../context/UserContext'
+import screenConfig from '../config/screens'
 
 export default function LeftPanel() {
   const pathname = usePathname()
-  const { user, userLabel, greeting, isSupplySide, isBuyer, isTalent } = useUser()
+  const { user, userLabel, greeting, isSupplySide, isTalent, mounted } = useUser()
+  const leftNav = screenConfig.leftNav[user.userType]
 
   const navItems = [
     { href: '/dashboard', icon: '🏠', label: content.nav.home },
     ...(isSupplySide || isTalent
       ? [{ href: '/enquiries', icon: '📬', label: 'Enquiries' }]
       : []),
-    {
-      href: '/orders',
-      icon: '📦',
-      label: isBuyer
-        ? 'My Orders'
-        : isTalent
-          ? 'My Projects'
-          : isSupplySide
-            ? 'Supply Orders'
-            : 'My Orders',
-    },
-    {
-      href: '/manufacturers',
-      icon: '🔍',
-      label: isBuyer
-        ? 'Find Manufacturers'
-        : isSupplySide
-          ? 'Find Buyers'
-          : 'Find Clients',
-    },
-    {
-      href: '/fabmerch',
-      icon: '👔',
-      label: isTalent
-        ? 'My FabTalent'
-        : isSupplySide
-          ? 'Book QC Inspector'
-          : 'FabMerch',
-    },
+    { href: '/orders', icon: '📦', label: leftNav.ordersLabel },
+    { href: '/manufacturers', icon: '🔍', label: leftNav.manufacturersLabel },
+    { href: '/fabmerch', icon: '👔', label: leftNav.fabmerchLabel },
     { href: '/credit', icon: '💳', label: content.nav.credit },
   ]
 
   const toolItems = [
-    {
-      href: '/samples',
-      icon: '📋',
-      label: isBuyer
-        ? 'Sample Briefs'
-        : isTalent
-          ? 'Hire Requests'
-          : 'Brief Requests',
-    },
+    { href: '/samples', icon: '📋', label: leftNav.samplesLabel },
     { href: '/fabprice', icon: '💰', label: content.nav.fabprice },
     {
       href: '/analytics',
@@ -69,6 +37,12 @@ export default function LeftPanel() {
   ]
 
   const fabscoreTitle = isTalent ? 'Your FabTalent Score' : content.fabscore.title
+  const fabscoreLockedMessage = isTalent
+    ? 'Complete your first project to unlock'
+    : content.fabscore.lockedMessage
+  const fabscoreVerifyLabel = isTalent
+    ? 'Get FabTalent Verified'
+    : content.verification.getVerified
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`)
@@ -127,7 +101,7 @@ export default function LeftPanel() {
           fontWeight: 600,
           marginBottom: '6px',
         }}>
-          {greeting}, {user.name} 👋
+          {mounted ? greeting : 'Good morning'}, {user.name} 👋
         </div>
         <span style={{
           display: 'inline-block',
@@ -139,7 +113,7 @@ export default function LeftPanel() {
           fontSize: '11px',
           fontWeight: 600,
         }}>
-          {userLabel}
+          {mounted ? userLabel : 'Member'}
         </span>
       </div>
 
@@ -209,7 +183,7 @@ export default function LeftPanel() {
             fontSize: '11px',
             marginBottom: '10px',
           }}>
-            {content.fabscore.lockedMessage}
+            {fabscoreLockedMessage}
           </div>
           <Link href="/verification" style={{
             display: 'block',
@@ -223,7 +197,7 @@ export default function LeftPanel() {
             textDecoration: 'none',
             fontFamily: theme.fonts.heading,
           }}>
-            {content.verification.getVerified}
+            {fabscoreVerifyLabel}
           </Link>
         </div>
       </div>

@@ -29,6 +29,7 @@ interface UserContextType {
   isTalent: boolean
   userLabel: string
   greeting: string
+  mounted: boolean
 }
 
 const defaultUser: User = {
@@ -73,14 +74,6 @@ const TALENT_TYPES: UserType[] = [
   'designer', 'master', 'merchandiser', 'qc_inspector'
 ]
 
-function getGreeting() {
-  const hour = new Date().getHours()
-  if (hour >= 5 && hour < 12) return 'Good morning'
-  if (hour >= 12 && hour < 17) return 'Good afternoon'
-  if (hour >= 17 && hour < 21) return 'Good evening'
-  return 'Good night'
-}
-
 const UserContext = createContext<UserContextType>({
   user: defaultUser,
   setUser: () => {},
@@ -88,15 +81,28 @@ const UserContext = createContext<UserContextType>({
   isBuyer: true,
   isTalent: false,
   userLabel: USER_LABELS[defaultUser.userType],
-  greeting: 'Good morning'
+  greeting: 'Good morning',
+  mounted: false
 })
 
 export function UserProvider({ children }: {
   children: React.ReactNode
 }) {
   const [user, setUserState] = useState<User>(defaultUser)
+  const [greeting, setGreeting] = useState('Good morning')
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
+    const h = new Date().getHours()
+    if (h >= 5 && h < 12) setGreeting('Good morning')
+    else if (h >= 12 && h < 17) setGreeting('Good afternoon')
+    else if (h >= 17 && h < 21) setGreeting('Good evening')
+    else setGreeting('Good night')
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
     try {
       const stored = localStorage.getItem('fabverify_user')
       if (stored) {
@@ -115,7 +121,9 @@ export function UserProvider({ children }: {
   const setUser = (updates: Partial<User>) => {
     const updated = { ...user, ...updates }
     setUserState(updated)
-    localStorage.setItem('fabverify_user', JSON.stringify(updated))
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('fabverify_user', JSON.stringify(updated))
+    }
   }
 
   const isSupplySide = SUPPLY_SIDE_TYPES.includes(user.userType)
@@ -130,7 +138,8 @@ export function UserProvider({ children }: {
       isBuyer,
       isTalent,
       userLabel: USER_LABELS[user.userType] || 'Member',
-      greeting: getGreeting()
+      greeting,
+      mounted
     }}>
       {children}
     </UserContext.Provider>

@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
+import SampleRequestModal from "../components/SampleRequestModal";
+import EnquiryModal from "../components/EnquiryModal";
 import { manufacturers } from "../data/manufacturers";
-import type { Tier } from "../data/manufacturers";
+import type { Manufacturer, Tier } from "../data/manufacturers";
 import { useUser } from "../context/UserContext";
 import type { UserType } from "../context/UserContext";
 import screenConfig from "../config/screens";
@@ -210,6 +214,12 @@ export default function Manufacturers() {
   const { user, isTalent } = useUser();
   const config = screenConfig.manufacturers[user.userType];
   const talentLookingFor = TALENT_LOOKING_FOR[user.userType];
+
+  const [sampleModalManufacturer, setSampleModalManufacturer] =
+    useState<Manufacturer | null>(null);
+  const [enquiryTarget, setEnquiryTarget] = useState<{ name: string } | null>(
+    null
+  );
 
   // Mode: "manufacturers" (buyer browsing manufacturers)
   const [searchText, setSearchText] = useState("");
@@ -482,6 +492,7 @@ export default function Manufacturers() {
             </button>
             <button
               type="button"
+              onClick={() => setEnquiryTarget({ name: supplier.name })}
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
             >
               Send Enquiry
@@ -557,6 +568,7 @@ export default function Manufacturers() {
             </button>
             <button
               type="button"
+              onClick={() => setEnquiryTarget({ name: buyer.name })}
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
             >
               Send Enquiry
@@ -704,14 +716,15 @@ export default function Manufacturers() {
                 Min. {manufacturer.moq} {manufacturer.moqUnit}
               </p>
               <div className="flex gap-2">
-                <button
-                  type="button"
+                <Link
+                  href={`/manufacturers/${manufacturer.id}`}
                   className="rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary"
                 >
                   View Profile
-                </button>
+                </Link>
                 <button
                   type="button"
+                  onClick={() => setSampleModalManufacturer(manufacturer)}
                   className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
                 >
                   Request Sample
@@ -779,30 +792,7 @@ export default function Manufacturers() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <h1 className="font-display text-xl font-bold text-white">
-          {config.title}
-        </h1>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="text-lg text-text-primary"
-          >
-            🔔
-          </button>
-          <button
-            type="button"
-            aria-label="Search"
-            className="text-lg text-text-primary"
-          >
-            🔍
-          </button>
-        </div>
-      </div>
+      <TopBar title={config.title} />
 
       <div className="px-6 py-6">
         <p className="-mt-2 mb-4 text-sm text-text-secondary">
@@ -1235,6 +1225,7 @@ export default function Manufacturers() {
               </button>
               <button
                 type="button"
+                onClick={() => setEnquiryTarget({ name: supplier.name })}
                 className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-navy"
               >
                 Send Enquiry
@@ -1304,6 +1295,7 @@ export default function Manufacturers() {
               </button>
               <button
                 type="button"
+                onClick={() => setEnquiryTarget({ name: buyer.name })}
                 className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-navy"
               >
                 Send Enquiry
@@ -1453,14 +1445,15 @@ export default function Manufacturers() {
                         Min. {manufacturer.moq} {manufacturer.moqUnit}
                       </p>
                       <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="flex-1 rounded-lg border border-primary px-3 py-2 text-xs font-semibold text-primary"
+                        <Link
+                          href={`/manufacturers/${manufacturer.id}`}
+                          className="flex-1 rounded-lg border border-primary px-3 py-2 text-center text-xs font-semibold text-primary"
                         >
                           View Profile
-                        </button>
+                        </Link>
                         <button
                           type="button"
+                          onClick={() => setSampleModalManufacturer(manufacturer)}
                           className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-navy"
                         >
                           Request Sample
@@ -1512,6 +1505,15 @@ export default function Manufacturers() {
           ))}
         </nav>
       </div>
+
+      <SampleRequestModal
+        manufacturer={sampleModalManufacturer}
+        onClose={() => setSampleModalManufacturer(null)}
+      />
+      <EnquiryModal
+        manufacturer={enquiryTarget}
+        onClose={() => setEnquiryTarget(null)}
+      />
     </>
   );
 }

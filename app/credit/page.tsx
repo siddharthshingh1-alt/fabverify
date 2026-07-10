@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
+import { useUser } from "../context/UserContext";
+import type { UserType } from "../context/UserContext";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -132,12 +135,40 @@ const COMPARISON_ROWS: ComparisonRow[] = [
   { label: "Updates", traditional: "Yearly", fabscore: "After every order" },
 ];
 
-const UNLOCK_ITEMS = [
-  "FabFloat — Get paid instantly",
-  "FabPay Later — Buy now pay later",
-  "FabMaterial — Material on credit",
-  "₹2L Credit limit",
-];
+type CreditProductId = "fabfloat" | "fabpaylater" | "fabmaterial";
+
+const PRODUCT_VISIBILITY: Partial<Record<UserType, CreditProductId[]>> = {
+  buyer: ["fabfloat", "fabpaylater", "fabmaterial"],
+  manufacturer: ["fabfloat", "fabmaterial"],
+  fabric_mill: ["fabmaterial"],
+  trim_supplier: ["fabmaterial"],
+  artisan: [],
+  job_worker: [],
+};
+
+const FAB_MATERIAL_COPY: Partial<Record<UserType, { audience: string; description: string }>> = {
+  manufacturer: {
+    audience: "For Manufacturers",
+    description:
+      "Source fabric and trims on credit from verified suppliers. Auto-paid from your order escrow on completion.",
+  },
+  fabric_mill: {
+    audience: "For Suppliers",
+    description:
+      "Get working capital for raw materials on credit so you can fulfill fabric orders. Auto-paid from your order escrow on completion.",
+  },
+  trim_supplier: {
+    audience: "For Suppliers",
+    description:
+      "Get working capital for raw materials on credit so you can fulfill trim orders. Auto-paid from your order escrow on completion.",
+  },
+};
+
+const UNLOCK_ITEM_LABELS: Record<CreditProductId, string> = {
+  fabfloat: "FabFloat — Get paid instantly",
+  fabpaylater: "FabPay Later — Buy now pay later",
+  fabmaterial: "FabMaterial — Material on credit",
+};
 
 const TIPS = [
   "Complete your first order to start building your FabScore",
@@ -149,7 +180,7 @@ const RADIUS = 52;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const SCORE_PROGRESS = 0;
 
-function ScoreRing() {
+function ScoreRing({ label, message }: { label: string; message: string }) {
   return (
     <div className="flex flex-col items-center">
       <div className="relative flex h-[120px] w-[120px] items-center justify-center">
@@ -171,9 +202,9 @@ function ScoreRing() {
           <span className="font-display text-4xl font-bold text-primary">—</span>
         </div>
       </div>
-      <p className="mt-2 text-xs text-text-secondary">FabScore</p>
+      <p className="mt-2 text-xs text-text-secondary">{label}</p>
       <p className="mt-4 max-w-[140px] text-center text-xs text-text-secondary">
-        Complete your first order to unlock your FabScore
+        {message}
       </p>
     </div>
   );
@@ -251,7 +282,10 @@ function FabScoreTab() {
       <div className="rounded-xl border border-border-dark bg-card p-7">
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           <div className="flex flex-col items-center justify-center">
-            <ScoreRing />
+            <ScoreRing
+              label="FabScore"
+              message="Complete your first order to unlock your FabScore"
+            />
           </div>
 
           <div className="flex flex-col items-center justify-center gap-5">
@@ -392,78 +426,115 @@ function ProductCard({
   );
 }
 
+function NoCreditProductsYet() {
+  return (
+    <div className="rounded-xl border border-border-dark bg-card p-8 text-center">
+      <div className="text-4xl">🔒</div>
+      <p className="mt-3 text-base font-bold text-white">
+        Build your FabScore to unlock credit
+      </p>
+      <p className="mx-auto mt-2 max-w-[380px] text-[13px] text-text-secondary">
+        Credit products unlock once you reach Silver verification tier.
+      </p>
+      <Link
+        href="/verification"
+        className="mt-4 inline-block rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-navy"
+      >
+        Get Silver Verified →
+      </Link>
+    </div>
+  );
+}
+
 function CreditProductsTab() {
+  const { user } = useUser();
+  const visibleProducts = PRODUCT_VISIBILITY[user.userType] ?? [];
+  const showFabFloat = visibleProducts.includes("fabfloat");
+  const showFabPayLater = visibleProducts.includes("fabpaylater");
+  const showFabMaterial = visibleProducts.includes("fabmaterial");
+  const fabMaterialCopy = FAB_MATERIAL_COPY[user.userType] ?? FAB_MATERIAL_COPY.manufacturer!;
+
+  if (visibleProducts.length === 0) {
+    return <NoCreditProductsYet />;
+  }
+
   return (
     <>
       <div className="flex flex-col gap-4">
-        <ProductCard
-          icon="⚡"
-          name="FabFloat"
-          audience="For Manufacturers"
-          description="Get paid immediately when your order is confirmed. No more waiting 30-60 days for payment."
-          steps={["Order confirmed", "NBFC pays you instantly", "Buyer pays NBFC on due date"]}
-        >
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                You earn
-              </p>
-              <p className="mt-1 text-sm font-bold text-primary">
-                ₹0 interest cost to manufacturer
-              </p>
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Buyer pays
-              </p>
-              <p className="mt-1 text-[13px] text-text-secondary">
-                Split interest — approx ₹500 on ₹1L order
-              </p>
-            </div>
-          </div>
-        </ProductCard>
-
-        <ProductCard
-          icon="🕐"
-          name="FabPay Later"
-          audience="For Buyers"
-          description="Buy now, pay in 30, 60, or 90 days. Manufacturer gets paid immediately. You get the breathing room you need."
-          steps={["Buyer places order", "Manufacturer paid NOW by NBFC", "Buyer pays NBFC in 30/60/90 days"]}
-        >
-          <div className="mt-4 flex gap-2">
-            {["30 days", "60 days", "90 days"].map((option) => (
-              <span
-                key={option}
-                className="rounded-full border border-border-dark bg-background px-4 py-1.5 text-xs font-medium text-text-secondary opacity-60"
-              >
-                {option}
-              </span>
-            ))}
-          </div>
-          <p className="mt-3 text-[13px] text-text-secondary">
-            ~₹500 buyer + ₹500 manufacturer on ₹1L order. Split 50/50.
-          </p>
-        </ProductCard>
-
-        <ProductCard
-          icon="🧵"
-          name="FabMaterial"
-          audience="For Manufacturers"
-          description="Source fabric and trims on credit from verified suppliers. Auto-paid from your order escrow on completion."
-          steps={["Get material on credit", "Complete order", "Escrow auto-pays supplier", "You keep the margin"]}
-        >
-          <div className="mt-4 flex flex-col gap-2">
-            {MATERIAL_LIMITS.map((row) => (
-              <div
-                key={row.tier}
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-background px-3.5 py-2.5"
-              >
-                <span className="text-xs font-semibold text-text-primary">{row.tier}</span>
-                <span className="text-xs text-text-secondary">{row.limit}</span>
+        {showFabFloat && (
+          <ProductCard
+            icon="⚡"
+            name="FabFloat"
+            audience="For Manufacturers"
+            description="Get paid immediately when your order is confirmed. No more waiting 30-60 days for payment."
+            steps={["Order confirmed", "NBFC pays you instantly", "Buyer pays NBFC on due date"]}
+          >
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  You earn
+                </p>
+                <p className="mt-1 text-sm font-bold text-primary">
+                  ₹0 interest cost to you
+                </p>
               </div>
-            ))}
-          </div>
-        </ProductCard>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  Buyer pays
+                </p>
+                <p className="mt-1 text-[13px] text-text-secondary">
+                  Split interest — approx ₹500 on ₹1L order
+                </p>
+              </div>
+            </div>
+          </ProductCard>
+        )}
+
+        {showFabPayLater && (
+          <ProductCard
+            icon="🕐"
+            name="FabPay Later"
+            audience="For Buyers"
+            description="Buy now, pay in 30, 60, or 90 days. Manufacturer gets paid immediately. You get the breathing room you need."
+            steps={["Buyer places order", "Manufacturer paid NOW by NBFC", "Buyer pays NBFC in 30/60/90 days"]}
+          >
+            <div className="mt-4 flex gap-2">
+              {["30 days", "60 days", "90 days"].map((option) => (
+                <span
+                  key={option}
+                  className="rounded-full border border-border-dark bg-background px-4 py-1.5 text-xs font-medium text-text-secondary opacity-60"
+                >
+                  {option}
+                </span>
+              ))}
+            </div>
+            <p className="mt-3 text-[13px] text-text-secondary">
+              ~₹500 buyer + ₹500 manufacturer on ₹1L order. Split 50/50.
+            </p>
+          </ProductCard>
+        )}
+
+        {showFabMaterial && (
+          <ProductCard
+            icon="🧵"
+            name="FabMaterial"
+            audience={fabMaterialCopy.audience}
+            description={fabMaterialCopy.description}
+            steps={["Get material on credit", "Complete order", "Escrow auto-pays supplier", "You keep the margin"]}
+          >
+            <div className="mt-4 flex flex-col gap-2">
+              {MATERIAL_LIMITS.map((row) => (
+                <div
+                  key={row.tier}
+                  className="flex items-center justify-between rounded-lg border border-border-dark bg-background px-3.5 py-2.5"
+                >
+                  <span className="text-xs font-semibold text-text-primary">{row.tier}</span>
+                  <span className="text-xs text-text-secondary">{row.limit}</span>
+                </div>
+              ))}
+            </div>
+          </ProductCard>
+        )}
       </div>
 
       <div className="mt-4 rounded-[10px] border border-border-dark bg-card p-5">
@@ -506,6 +577,12 @@ function CreditProductsTab() {
 }
 
 function RightPanel() {
+  const { user } = useUser();
+  const unlockItems = [
+    ...(PRODUCT_VISIBILITY[user.userType] ?? []).map((id) => UNLOCK_ITEM_LABELS[id]),
+    "₹2L Credit limit",
+  ];
+
   return (
     <>
       <p className="text-sm font-bold text-white">Your Credit Status</p>
@@ -528,7 +605,7 @@ function RightPanel() {
 
       <p className="text-sm font-bold text-white">Unlock at Silver</p>
       <div className="mt-3 flex flex-col gap-2.5">
-        {UNLOCK_ITEMS.map((item) => (
+        {unlockItems.map((item) => (
           <div key={item} className="flex items-center gap-2 text-xs text-text-secondary opacity-60">
             <span>🔓</span>
             {item}
@@ -556,7 +633,7 @@ function RightPanel() {
   );
 }
 
-export default function CreditPage() {
+function CreditAndScorePage() {
   const [activeTab, setActiveTab] = useState<TabId>("fabscore");
 
   const tabsBar = (
@@ -580,24 +657,10 @@ export default function CreditPage() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-border-dark px-6 py-4"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">FabScore & Credit</h1>
-          <p className="mt-0.5 text-[13px] text-text-secondary">
-            Your garment industry credit identity
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="text-lg text-text-primary"
-        >
-          🔔
-        </button>
-      </div>
+      <TopBar
+        title="FabScore & Credit"
+        subtitle="Your garment industry credit identity"
+      />
 
       <div className="px-6 py-6">
         {tabsBar}
@@ -667,4 +730,304 @@ export default function CreditPage() {
       </div>
     </>
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// FabTalent score page (designer, master, merchandiser, qc_inspector)
+// ─────────────────────────────────────────────────────────────
+
+type TalentType = "designer" | "master" | "merchandiser" | "qc_inspector";
+
+const TALENT_SUBTITLES: Record<TalentType, string> = {
+  designer: "Your designer reputation and ranking",
+  master: "Your master reputation and ranking",
+  merchandiser: "Your merchandiser reputation",
+  qc_inspector: "Your QC inspector reputation",
+};
+
+const TALENT_SEARCH_LABEL: Record<TalentType, string> = {
+  designer: "designer",
+  master: "master",
+  merchandiser: "merchandiser",
+  qc_inspector: "QC inspector",
+};
+
+const TALENT_FACTORS = [
+  {
+    icon: "✅",
+    label: "Project Completion Rate",
+    weight: "40%",
+    progress: 0,
+    description: "Complete projects on time to improve",
+  },
+  {
+    icon: "⭐",
+    label: "Client Ratings",
+    weight: "30%",
+    progress: 0,
+    description: "5-star ratings from clients",
+  },
+  {
+    icon: "⏱️",
+    label: "Response Time",
+    weight: "10%",
+    progress: 0,
+    description: "Respond to hire requests within 2 hours",
+  },
+  {
+    icon: "📊",
+    label: "Platform Activity",
+    weight: "10%",
+    progress: 20,
+    description: "Stay active and update your profile",
+  },
+  {
+    icon: "🏅",
+    label: "Verification Level",
+    weight: "10%",
+    progress: 33,
+    description: "Silver verified = higher ranking",
+  },
+];
+
+const TALENT_IMPROVE_ITEMS = [
+  {
+    icon: "✅",
+    title: "Complete FabTalent verification",
+    description: "Get your Silver verified badge",
+    linkLabel: "Get Verified →",
+    href: "/verification",
+  },
+  {
+    icon: "📋",
+    title: "Complete your first project",
+    description: "Every completed project builds your score",
+    linkLabel: "Browse Requests →",
+    href: "/samples",
+  },
+  {
+    icon: "⚡",
+    title: "Respond quickly to requests",
+    description: "Fast response = more hire requests",
+    linkLabel: null,
+    href: null,
+  },
+  {
+    icon: "⭐",
+    title: "Get 5-star ratings",
+    description: "Deliver quality work consistently",
+    linkLabel: null,
+    href: null,
+  },
+  {
+    icon: "🔄",
+    title: "Keep profile updated",
+    description: "Add new portfolio samples regularly",
+    linkLabel: null,
+    href: null,
+  },
+];
+
+const TALENT_EARNINGS_STATS = [
+  { label: "Total Earned", value: "₹0" },
+  { label: "This Month", value: "₹0" },
+  { label: "In Escrow", value: "₹0" },
+  { label: "Completed Projects", value: "0" },
+];
+
+function TalentRightPanel() {
+  return (
+    <>
+      <p className="text-sm font-bold text-white">Your Status</p>
+      <div className="mt-4 flex flex-col items-center text-center">
+        <span className="rounded-full border border-[#CD7F32] bg-[rgba(205,127,50,0.15)] px-4 py-1.5 text-sm font-bold text-[#CD7F32]">
+          🥉 Bronze
+        </span>
+        <p className="mt-2 text-[11px] text-text-secondary">Current Tier</p>
+      </div>
+
+      <div className="mt-5">
+        <p className="text-xs text-text-secondary">Progress to Silver</p>
+        <div className="mt-2 h-1.5 w-full rounded-full bg-border-dark">
+          <div className="h-full w-[15%] rounded-full bg-primary" />
+        </div>
+        <p className="mt-1.5 text-[11px] text-text-secondary">
+          Complete your first project to unlock Silver
+        </p>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-sm font-bold text-white">Tips to Rank Higher</p>
+      <div className="mt-3 flex flex-col gap-3">
+        <p className="text-xs text-text-secondary">💡 Respond to hire requests within 2 hours</p>
+        <p className="text-xs text-text-secondary">💡 Keep your portfolio and rates up to date</p>
+        <p className="text-xs text-text-secondary">💡 Deliver 5-star work to boost your ranking</p>
+      </div>
+    </>
+  );
+}
+
+function TalentScorePage() {
+  const { user } = useUser();
+  const talentType = user.userType as TalentType;
+  const searchLabel = TALENT_SEARCH_LABEL[talentType];
+
+  const centrePanel = (
+    <>
+      <TopBar title="FabTalent Score" subtitle={TALENT_SUBTITLES[talentType]} />
+
+      <div className="px-6 py-6">
+        <div className="rounded-xl border border-border-dark bg-card p-7">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div className="flex flex-col items-center justify-center">
+              <ScoreRing
+                label="FabTalent Score"
+                message="Complete your first project to unlock your FabTalent Score"
+              />
+            </div>
+
+            <div className="flex flex-col items-center justify-center gap-3 text-center">
+              <span className="rounded-full border border-[#CD7F32] bg-[rgba(205,127,50,0.15)] px-5 py-2 font-display text-base font-bold text-[#CD7F32]">
+                🥉 Bronze
+              </span>
+              <p className="max-w-[260px] text-sm text-text-secondary">
+                Your ranking in {searchLabel} search
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-[10px] border border-border-dark bg-card p-5">
+          <h2 className="text-base font-bold text-white">
+            How Your FabTalent Score is Calculated
+          </h2>
+          <div className="mt-5 flex flex-col gap-5">
+            {TALENT_FACTORS.map((factor) => (
+              <div key={factor.label}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                    <span>{factor.icon}</span>
+                    {factor.label}
+                  </span>
+                  <span className="shrink-0 rounded-full border border-border-dark bg-background px-2.5 py-0.5 text-[11px] font-semibold text-text-secondary">
+                    {factor.weight} weightage
+                  </span>
+                </div>
+                <div className="mt-2 h-[6px] w-full rounded-full bg-border-dark">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${factor.progress}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-text-secondary">{factor.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="mt-4 rounded-lg border border-border-dark bg-card p-5"
+          style={{ borderLeft: "3px solid #f2ca50" }}
+        >
+          <h2 className="text-[15px] font-bold text-white">
+            💡 How to Improve Your FabTalent Score
+          </h2>
+          <div className="mt-4 flex flex-col gap-4">
+            {TALENT_IMPROVE_ITEMS.map((item) => (
+              <div key={item.title} className="flex items-start gap-3">
+                <span className="text-lg">{item.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-text-primary">{item.title}</p>
+                  <p className="mt-0.5 text-xs text-text-secondary">{item.description}</p>
+                  {item.href ? (
+                    <Link
+                      href={item.href}
+                      className="mt-1 inline-block text-xs font-semibold text-primary"
+                    >
+                      {item.linkLabel}
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-[10px] border border-border-dark bg-card p-5">
+          <h2 className="text-base font-bold text-white">Your Ranking</h2>
+          <p className="mt-2 text-sm text-text-secondary">
+            You appear in {searchLabel} search results
+          </p>
+          <p className="mt-1 text-sm text-text-secondary">
+            Complete Silver verification to rank higher
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[
+              { label: "Verification tier", value: "Bronze" },
+              { label: "FabTalent Score", value: "—" },
+              { label: "Response time", value: "—" },
+            ].map((item) => (
+              <span
+                key={item.label}
+                className="rounded-full border border-border-dark bg-background px-3 py-1.5 text-xs text-text-secondary"
+              >
+                {item.label}: <span className="font-semibold text-text-primary">{item.value}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-[10px] border border-border-dark bg-card p-5">
+          <h2 className="text-base font-bold text-white">Earnings</h2>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {TALENT_EARNINGS_STATS.map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-lg border border-border-dark bg-background p-3.5"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  {stat.label}
+                </p>
+                <p className="mt-1 font-display text-[20px] font-bold text-primary">
+                  {stat.value}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[13px] text-text-secondary">
+            Your earnings will appear here once you complete your first project
+          </p>
+        </div>
+
+        <div className="mt-4">
+          <h2 className="text-base font-bold text-white">Payment Protection</h2>
+          <div className="mt-4 rounded-xl border border-border-dark bg-card p-5">
+            <p className="text-sm text-text-secondary">
+              All your projects are protected by FabVerify escrow. Payment is held safely
+              and released when you complete the work.
+            </p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <ThreePanelLayout
+      centre={centrePanel}
+      right={
+        <div style={{ padding: "20px" }}>
+          <TalentRightPanel />
+        </div>
+      }
+    />
+  );
+}
+
+export default function CreditPage() {
+  const { isTalent, mounted } = useUser();
+
+  if (mounted && isTalent) return <TalentScorePage />;
+  return <CreditAndScorePage />;
 }

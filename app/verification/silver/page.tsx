@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ThreePanelLayout from "../../components/ThreePanelLayout";
 
 const STEP_LABELS = ["Documents", "References", "Video Check", "Review & Pay"];
@@ -207,7 +207,7 @@ export default function SilverVerification() {
   const [selectedTime, setSelectedTime] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
-  const daySlots = buildDaySlots();
+  const daySlots = useMemo(buildDaySlots, []);
 
   const handleUpload = (key: UploadKey, files: File[]) => {
     setUploadedFiles((current) => ({

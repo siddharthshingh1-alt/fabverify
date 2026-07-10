@@ -2,11 +2,27 @@
 
 import { Fragment, useId, useMemo, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import {
   fabricPrices,
   makingCharges,
   trimPrices,
 } from "../data/fabprice";
+import { useUser } from "../context/UserContext";
+import type { UserType } from "../context/UserContext";
+
+const SELLING_TABS: Partial<Record<UserType, Tab>> = {
+  fabric_mill: "fabric",
+  trim_supplier: "trims",
+  manufacturer: "making",
+  artisan: "making",
+  job_worker: "making",
+  master: "making",
+};
+
+function isSellerContext(userType: UserType, tab: Tab) {
+  return SELLING_TABS[userType] === tab;
+}
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", active: false },
@@ -323,16 +339,16 @@ function PriceHistoryPanel({
   const recommendation = isRising
     ? {
         className: "text-primary",
-        text: `📈 Prices are rising. Consider placing your fabric order now before further increases. Up ${Math.round(changePercent)}% in the last 6 months.`,
+        text: `📈 Prices are rising. Consider placing your order for ${name} now before further increases. Up ${Math.round(changePercent)}% in the last 6 months.`,
       }
     : isFalling
       ? {
           className: "text-[#4ade80]",
-          text: `📉 Prices are falling. You may benefit from waiting 2–4 weeks before placing your order. Down ${Math.round(Math.abs(changePercent))}% in the last 6 months.`,
+          text: `📉 Prices are falling. You may benefit from waiting 2–4 weeks before placing your order for ${name}. Down ${Math.round(Math.abs(changePercent))}% in the last 6 months.`,
         }
       : {
           className: "text-text-secondary",
-          text: "📊 Prices are stable. No urgency to buy immediately. Safe to order at current rates.",
+          text: `📊 Prices are stable for ${name}. No urgency to buy immediately. Safe to order at current rates.`,
         };
 
   return (
@@ -433,10 +449,12 @@ function FairPriceCalculator({
   items,
   getRange,
   unitLabel,
+  isSeller,
 }: {
   items: string[];
   getRange: (item: string) => PriceRange | null;
   unitLabel: string;
+  isSeller: boolean;
 }) {
   const [selectedItem, setSelectedItem] = useState(items[0] ?? "");
   const [quotedPrice, setQuotedPrice] = useState("");
@@ -450,6 +468,25 @@ function FairPriceCalculator({
     const quoted = Number(quotedPrice);
     if (!range || !quotedPrice || Number.isNaN(quoted)) return;
     const [lo, hi] = range;
+    if (isSeller) {
+      if (quoted >= lo) {
+        setResult({
+          status: "fair",
+          message: `₹${quoted} is within the competitive range of ₹${lo}–₹${hi}${unitLabel} for this item. Buyers are likely to accept this.`,
+        });
+      } else if (quoted >= lo * 0.75) {
+        setResult({
+          status: "high",
+          message: `₹${quoted} is below the market range of ₹${lo}–₹${hi}${unitLabel}. You could likely charge up to ₹${lo} without losing the order.`,
+        });
+      } else {
+        setResult({
+          status: "overpriced",
+          message: `₹${quoted} is significantly below market rate. The going rate is ₹${lo}–₹${hi}${unitLabel}. You may be underpricing your work.`,
+        });
+      }
+      return;
+    }
     if (quoted <= hi) {
       setResult({
         status: "fair",
@@ -468,30 +505,45 @@ function FairPriceCalculator({
     }
   };
 
-  const RESULT_STYLES = {
-    fair: {
-      pill: "border-green-500/60 bg-green-500/15 text-green-400",
-      label: "Fair Price",
-    },
-    high: {
-      pill: "border-yellow-500/60 bg-yellow-500/15 text-yellow-400",
-      label: "Slightly High",
-    },
-    overpriced: {
-      pill: "border-red-500/60 bg-red-500/15 text-red-400",
-      label: "Overpriced",
-    },
-  } as const;
+  const RESULT_STYLES = isSeller
+    ? ({
+        fair: {
+          pill: "border-green-500/60 bg-green-500/15 text-green-400",
+          label: "Competitive",
+        },
+        high: {
+          pill: "border-yellow-500/60 bg-yellow-500/15 text-yellow-400",
+          label: "Slightly Low",
+        },
+        overpriced: {
+          pill: "border-red-500/60 bg-red-500/15 text-red-400",
+          label: "Underpriced",
+        },
+      } as const)
+    : ({
+        fair: {
+          pill: "border-green-500/60 bg-green-500/15 text-green-400",
+          label: "Fair Price",
+        },
+        high: {
+          pill: "border-yellow-500/60 bg-yellow-500/15 text-yellow-400",
+          label: "Slightly High",
+        },
+        overpriced: {
+          pill: "border-red-500/60 bg-red-500/15 text-red-400",
+          label: "Overpriced",
+        },
+      } as const);
 
   return (
     <div className="mt-6 rounded-lg border-l-[3px] border-primary bg-card p-5">
       <p className="text-base font-bold text-white">
-        💡 Am I Being Quoted Fairly?
+        {isSeller ? "💡 Am I Pricing Competitively?" : "💡 Am I Being Quoted Fairly?"}
       </p>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-            What are you buying?
+            {isSeller ? "What are you selling?" : "What are you buying?"}
           </label>
           <select
             value={selectedItem}
@@ -509,7 +561,7 @@ function FairPriceCalculator({
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-            What price were you quoted?
+            {isSeller ? "What price are you charging?" : "What price were you quoted?"}
           </label>
           <div className="relative">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary">
@@ -540,7 +592,7 @@ function FairPriceCalculator({
             : "cursor-not-allowed bg-border-dark text-text-secondary"
         }`}
       >
-        Check Fair Price →
+        {isSeller ? "Check My Pricing →" : "Check Fair Price →"}
       </button>
 
       {result && (
@@ -558,6 +610,7 @@ function FairPriceCalculator({
 }
 
 export default function FabPrice() {
+  const { user } = useUser();
   const [activeTab, setActiveTab] = useState<Tab>("fabric");
   const [searchText, setSearchText] = useState("");
   const [selectedCity, setSelectedCity] = useState("All Cities");
@@ -785,6 +838,7 @@ export default function FabPrice() {
         items={FABRIC_ROWS.map((row) => row.name)}
         getRange={(item) => FABRIC_ROWS.find((row) => row.name === item)?.price200 ?? null}
         unitLabel="/m"
+        isSeller={isSellerContext(user.userType, "fabric")}
       />
     ) : activeTab === "making" ? (
       <FairPriceCalculator
@@ -792,6 +846,7 @@ export default function FabPrice() {
         items={MAKING_ROWS.map((row) => row.category)}
         getRange={(item) => MAKING_ROWS.find((row) => row.category === item)?.price100 ?? null}
         unitLabel="/pc"
+        isSeller={isSellerContext(user.userType, "making")}
       />
     ) : (
       <FairPriceCalculator
@@ -799,6 +854,7 @@ export default function FabPrice() {
         items={TRIM_ROWS.map((row) => row.name)}
         getRange={(item) => TRIM_ROWS.find((row) => row.name === item)?.price ?? null}
         unitLabel=""
+        isSeller={isSellerContext(user.userType, "trims")}
       />
     );
 
@@ -1078,23 +1134,15 @@ export default function FabPrice() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">FabPrice</h1>
-          <p className="text-[13px] text-text-secondary">
-            Real-time price benchmarks from verified transactions
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-[11px] text-text-secondary">Last updated: Today</span>
-          <button type="button" aria-label="Notifications" className="text-lg text-text-primary">
-            🔔
-          </button>
-        </div>
-      </div>
+      <TopBar
+        title="FabPrice"
+        subtitle="Real-time price benchmarks from verified transactions"
+        rightContent={
+          <span className="text-[11px] text-text-secondary">
+            Last updated: Today
+          </span>
+        }
+      />
 
       <div className="px-6 py-6">
         {tabsBar}

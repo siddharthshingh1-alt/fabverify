@@ -68,6 +68,13 @@ export type FabMerchScreenConfig = {
   showTalentProfile: boolean
 }
 
+export type LeftNavConfig = {
+  manufacturersLabel: string
+  ordersLabel: string
+  fabmerchLabel: string
+  samplesLabel: string
+}
+
 type ScreenConfig = {
   dashboard: Record<UserType, DashboardScreenConfig>
   samples: Record<UserType, SamplesScreenConfig>
@@ -77,6 +84,7 @@ type ScreenConfig = {
   orders: Record<UserType, OrdersScreenConfig>
   fabmerch: Record<UserType, FabMerchScreenConfig>
   analytics: Record<UserType, AnalyticsScreenConfig>
+  leftNav: Record<UserType, LeftNavConfig>
 }
 
 const screenConfig: ScreenConfig = {
@@ -168,9 +176,9 @@ const screenConfig: ScreenConfig = {
     },
     master: {
       title: 'FabTalent Dashboard',
-      welcomeMessage: 'Brands need your expert sample making skills',
+      welcomeMessage: 'Brands are looking for skilled masters to construct their samples',
       quickActions: [
-        { icon: '📋', title: 'Browse Sample Requests', desc: 'Brands needing samples made', href: '/samples' },
+        { icon: '✂️', title: 'Sample Making Requests', desc: 'Brands who need samples constructed', href: '/samples' },
         { icon: '✅', title: 'Complete Verification', desc: 'Get skill-verified badge', href: '/verification' },
         { icon: '💼', title: 'Active Projects', desc: '0 active projects', href: '/orders' },
         { icon: '⭐', title: 'Your FabScore', desc: 'Build your reputation', href: '/credit' },
@@ -262,14 +270,14 @@ const screenConfig: ScreenConfig = {
       emptyState: 'No requests yet.'
     },
     merchandiser: {
-      title: 'Merchandising Hire Requests',
+      title: 'Merchandising Requests',
       subtitle: 'Brands looking for merchandising help',
       tabs: ['New Requests', 'Active Projects'],
       showPostForm: false,
       emptyState: 'No hire requests yet.'
     },
     qc_inspector: {
-      title: 'Inspection Requests',
+      title: 'Inspection Booking Requests',
       subtitle: 'Factories needing quality inspection',
       tabs: ['New Requests', 'Completed'],
       showPostForm: false,
@@ -305,7 +313,7 @@ const screenConfig: ScreenConfig = {
     },
     job_worker: {
       title: 'Find Clients',
-      subtitle: 'Manufacturers needing processing work',
+      subtitle: 'Brands looking for job work on their production',
       mode: 'buyers'
     },
     designer: {
@@ -324,8 +332,8 @@ const screenConfig: ScreenConfig = {
       mode: 'buyers'
     },
     qc_inspector: {
-      title: 'Find Jobs',
-      subtitle: 'Brands and manufacturers looking for your services',
+      title: 'Find Inspection Jobs',
+      subtitle: 'Factories and manufacturers needing quality inspection',
       mode: 'buyers'
     }
   },
@@ -537,6 +545,69 @@ const screenConfig: ScreenConfig = {
     master: { subtitle: 'Your projects, earnings, and ratings' },
     merchandiser: { subtitle: 'Your projects, earnings, and ratings' },
     qc_inspector: { subtitle: 'Your projects, earnings, and ratings' }
+  },
+
+  leftNav: {
+    buyer: {
+      manufacturersLabel: 'Find Manufacturers',
+      ordersLabel: 'My Orders',
+      fabmerchLabel: 'FabMerch',
+      samplesLabel: 'Sample Briefs'
+    },
+    manufacturer: {
+      manufacturersLabel: 'Find Suppliers',
+      ordersLabel: 'Production Orders',
+      fabmerchLabel: 'Book QC Inspector',
+      samplesLabel: 'Brief Requests'
+    },
+    fabric_mill: {
+      manufacturersLabel: 'Find Buyers',
+      ordersLabel: 'Supply Orders',
+      fabmerchLabel: 'Book QC Inspector',
+      samplesLabel: 'Fabric Requests'
+    },
+    trim_supplier: {
+      manufacturersLabel: 'Find Buyers',
+      ordersLabel: 'Supply Orders',
+      fabmerchLabel: 'Book QC Inspector',
+      samplesLabel: 'Trim Requests'
+    },
+    artisan: {
+      manufacturersLabel: 'Find Buyers',
+      ordersLabel: 'Craft Orders',
+      fabmerchLabel: 'Get Help or Book QC',
+      samplesLabel: 'Craft Requests'
+    },
+    job_worker: {
+      manufacturersLabel: 'Find Clients',
+      ordersLabel: 'Job Orders',
+      fabmerchLabel: 'Book QC Inspector',
+      samplesLabel: 'Job Requests'
+    },
+    designer: {
+      manufacturersLabel: 'Find Clients',
+      ordersLabel: 'My Projects',
+      fabmerchLabel: 'My FabTalent',
+      samplesLabel: 'Hire Requests'
+    },
+    master: {
+      manufacturersLabel: 'Find Clients',
+      ordersLabel: 'My Projects',
+      fabmerchLabel: 'My FabTalent',
+      samplesLabel: 'Sample Requests'
+    },
+    merchandiser: {
+      manufacturersLabel: 'Find Clients',
+      ordersLabel: 'My Projects',
+      fabmerchLabel: 'My FabTalent',
+      samplesLabel: 'Hire Requests'
+    },
+    qc_inspector: {
+      manufacturersLabel: 'Find Jobs',
+      ordersLabel: 'Inspection Jobs',
+      fabmerchLabel: 'My FabTalent',
+      samplesLabel: 'Inspection Requests'
+    }
   }
 }
 

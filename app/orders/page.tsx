@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
+import type { UserType } from "../context/UserContext";
 import screenConfig from "../config/screens";
 
 const BOTTOM_NAV = [
@@ -124,46 +126,168 @@ const COMPLETED_ORDERS: Order[] = [
   },
 ];
 
-const SUPPLY_ORDERS: Order[] = [
-  {
-    id: "SUP-2024-001",
-    manufacturer: "Jaipur Ethnic Works",
-    counterpartyPrefix: "Buyer",
-    counterpartyLabel: "Manufacturer",
-    status: "Processing",
-    statusColor: "blue",
-    product: "Metal Buttons 4-hole 15mm Silver — 5,000 pieces",
-    orderedDate: "20 June 2026",
-    expectedDate: "10 July 2026",
-    milestones: [
-      { name: "Order Confirmed", status: "complete", date: "Jun 20" },
-      { name: "In Production", status: "active" },
-      { name: "Delivered", status: "pending" },
-    ],
-    orderValue: 85000,
-    releasedAmount: 17000,
-    releasedPercent: 20,
-    escrowAmount: 68000,
-    escrowPercent: 80,
-  },
-  {
-    id: "SUP-2024-002",
-    manufacturer: "Delhi Woven Works",
-    counterpartyPrefix: "Buyer",
-    counterpartyLabel: "Manufacturer",
-    status: "Ready to Ship",
-    statusColor: "green",
-    product: "Invisible Zip 20cm Black — 2,000 pieces",
-    orderedDate: "15 June 2026",
-    expectedDate: "5 July 2026",
-    milestones: [
-      { name: "Order Confirmed", status: "complete", date: "Jun 15" },
-      { name: "Packed", status: "complete", date: "Jul 2" },
-      { name: "Pending Dispatch", status: "pending" },
-    ],
-    orderValue: 32000,
-  },
-];
+const SUPPLY_ORDERS_BY_ROLE: Partial<Record<UserType, Order[]>> = {
+  trim_supplier: [
+    {
+      id: "SUP-2024-001",
+      manufacturer: "Jaipur Ethnic Works",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Processing",
+      statusColor: "blue",
+      product: "Metal Buttons 4-hole 15mm Silver — 5,000 pieces",
+      orderedDate: "20 June 2026",
+      expectedDate: "10 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 20" },
+        { name: "In Production", status: "active" },
+        { name: "Delivered", status: "pending" },
+      ],
+      orderValue: 85000,
+      releasedAmount: 17000,
+      releasedPercent: 20,
+      escrowAmount: 68000,
+      escrowPercent: 80,
+    },
+    {
+      id: "SUP-2024-002",
+      manufacturer: "Delhi Woven Works",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Ready to Ship",
+      statusColor: "green",
+      product: "Invisible Zip 20cm Black — 2,000 pieces",
+      orderedDate: "15 June 2026",
+      expectedDate: "5 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 15" },
+        { name: "Packed", status: "complete", date: "Jul 2" },
+        { name: "Pending Dispatch", status: "pending" },
+      ],
+      orderValue: 32000,
+    },
+  ],
+  fabric_mill: [
+    {
+      id: "SUP-2024-011",
+      manufacturer: "Jaipur Ethnic Works",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Processing",
+      statusColor: "blue",
+      product: "Cotton Lawn 80 GSM — 3,000 metres",
+      orderedDate: "18 June 2026",
+      expectedDate: "8 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 18" },
+        { name: "Weaving & Dyeing", status: "active" },
+        { name: "Delivered", status: "pending" },
+      ],
+      orderValue: 315000,
+      releasedAmount: 63000,
+      releasedPercent: 20,
+      escrowAmount: 252000,
+      escrowPercent: 80,
+    },
+    {
+      id: "SUP-2024-012",
+      manufacturer: "Delhi Woven Works",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Ready to Ship",
+      statusColor: "green",
+      product: "Linen Blend 180 GSM — 1,500 metres",
+      orderedDate: "14 June 2026",
+      expectedDate: "4 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 14" },
+        { name: "Packed", status: "complete", date: "Jul 1" },
+        { name: "Pending Dispatch", status: "pending" },
+      ],
+      orderValue: 270000,
+    },
+  ],
+  artisan: [
+    {
+      id: "SUP-2024-021",
+      manufacturer: "Studio Kavya",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Brand",
+      status: "Processing",
+      statusColor: "blue",
+      product: "Chikankari Embroidery Kurta — 200 pieces",
+      orderedDate: "19 June 2026",
+      expectedDate: "12 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 19" },
+        { name: "Embroidery Work", status: "active" },
+        { name: "Delivered", status: "pending" },
+      ],
+      orderValue: 24000,
+      releasedAmount: 4800,
+      releasedPercent: 20,
+      escrowAmount: 19200,
+      escrowPercent: 80,
+    },
+    {
+      id: "SUP-2024-022",
+      manufacturer: "House of Nira",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Brand",
+      status: "Ready to Ship",
+      statusColor: "green",
+      product: "Block Print Dupatta — 150 pieces",
+      orderedDate: "16 June 2026",
+      expectedDate: "6 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 16" },
+        { name: "Packed", status: "complete", date: "Jul 2" },
+        { name: "Pending Dispatch", status: "pending" },
+      ],
+      orderValue: 12750,
+    },
+  ],
+  job_worker: [
+    {
+      id: "SUP-2024-031",
+      manufacturer: "Jaipur Ethnic Works",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Processing",
+      statusColor: "blue",
+      product: "Embroidery Job Work — 1,000 pieces",
+      orderedDate: "20 June 2026",
+      expectedDate: "11 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 20" },
+        { name: "In Progress", status: "active" },
+        { name: "Delivered", status: "pending" },
+      ],
+      orderValue: 32000,
+      releasedAmount: 6400,
+      releasedPercent: 20,
+      escrowAmount: 25600,
+      escrowPercent: 80,
+    },
+    {
+      id: "SUP-2024-032",
+      manufacturer: "Mumbai Denim Studio",
+      counterpartyPrefix: "Buyer",
+      counterpartyLabel: "Manufacturer",
+      status: "Ready to Ship",
+      statusColor: "green",
+      product: "Denim Washing — 2,000 pieces",
+      orderedDate: "17 June 2026",
+      expectedDate: "3 July 2026",
+      milestones: [
+        { name: "Order Confirmed", status: "complete", date: "Jun 17" },
+        { name: "Packed", status: "complete", date: "Jul 1" },
+        { name: "Pending Dispatch", status: "pending" },
+      ],
+      orderValue: 18000,
+    },
+  ],
+};
 
 const STATUS_PILL_STYLES: Record<StatusColor, string> = {
   gold: "border-primary bg-primary/15 text-primary",
@@ -366,11 +490,13 @@ export default function Orders() {
     "active" | "completed" | "cancelled"
   >("active");
 
+  const supplyOrders = SUPPLY_ORDERS_BY_ROLE[user.userType] ?? [];
+
   const activeOrders =
     config.mode === "buyer-demo"
       ? ACTIVE_ORDERS
       : config.mode === "supply-demo"
-        ? SUPPLY_ORDERS
+        ? supplyOrders
         : [];
   const completedOrders = config.mode === "buyer-demo" ? COMPLETED_ORDERS : [];
 
@@ -478,14 +604,14 @@ export default function Orders() {
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-secondary">Active Supply Orders</span>
           <span className="font-bold text-primary">
-            {SUPPLY_ORDERS.length}
+            {supplyOrders.length}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-secondary">Total Value</span>
           <span className="font-bold text-primary">
             ₹
-            {SUPPLY_ORDERS.reduce((sum, order) => sum + order.orderValue, 0).toLocaleString(
+            {supplyOrders.reduce((sum, order) => sum + order.orderValue, 0).toLocaleString(
               "en-IN"
             )}
           </span>
@@ -494,7 +620,7 @@ export default function Orders() {
           <span className="text-text-secondary">In Escrow</span>
           <span className="font-bold text-primary">
             ₹
-            {SUPPLY_ORDERS.reduce(
+            {supplyOrders.reduce(
               (sum, order) => sum + (order.escrowAmount ?? 0),
               0
             ).toLocaleString("en-IN")}
@@ -596,24 +722,7 @@ export default function Orders() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <h1 className="font-display text-xl font-bold text-white">
-          {config.title}
-        </h1>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="text-lg text-text-primary"
-          >
-            🔔
-          </button>
-          {headerButton}
-        </div>
-      </div>
+      <TopBar title={config.title} rightContent={headerButton} />
 
       <div className="px-6 py-6">
         {config.subtitle && (

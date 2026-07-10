@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
 
@@ -1617,22 +1618,10 @@ export default function SampleBriefs() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <h1 className="font-display text-xl font-bold text-white">
-          {config.title}
-        </h1>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="text-lg text-text-primary"
-          >
-            🔔
-          </button>
-          {config.showPostForm && (
+      <TopBar
+        title={config.title}
+        rightContent={
+          config.showPostForm ? (
             <button
               type="button"
               onClick={startNewBrief}
@@ -1640,9 +1629,9 @@ export default function SampleBriefs() {
             >
               Post New Brief
             </button>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
       <div className="px-6 py-6">
         <p className="-mt-2 mb-4 text-sm text-text-secondary">

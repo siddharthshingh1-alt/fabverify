@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import ThreePanelLayout from "../components/ThreePanelLayout";
+import TopBar from "../components/TopBar";
 import { UploadBox } from "../onboarding/components";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
@@ -86,29 +87,17 @@ export default function Profile() {
 
   const centrePanel = (
     <>
-      <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
-        style={{ backgroundColor: "#07122a" }}
-      >
-        <h1 className="font-display text-xl font-bold text-white">
-          My Profile
-        </h1>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="text-lg text-text-primary"
-          >
-            🔔
-          </button>
+      <TopBar
+        title="My Profile"
+        rightContent={
           <button
             type="button"
             className="rounded-lg border border-primary px-4 py-2 text-sm font-bold text-primary"
           >
             Edit Profile
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="px-6 py-6">
         <div className="rounded-xl border border-border-dark bg-card p-6">
