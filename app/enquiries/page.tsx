@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState, type CSSProperties } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
@@ -8,6 +10,14 @@ import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
 import { getEnquiries, senderEmoji, senderLabel } from "../data/enquiries";
 import type { Enquiry } from "../data/enquiries";
+
+const BOTTOM_NAV = [
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
+];
 
 function EnquiryCard({
   enquiry,
@@ -94,6 +104,7 @@ const REPLY_PLACEHOLDER =
 
 export default function Enquiries() {
   const { user } = useUser();
+  const pathname = usePathname();
   const config = screenConfig.enquiries[user.userType];
   const [activeTab, setActiveTab] = useState<"new" | "all">("new");
 
@@ -456,6 +467,31 @@ export default function Enquiries() {
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />
+
+      <div
+        className="flex flex-col pb-20 md:hidden"
+        style={{ height: "100vh", overflowY: "auto", scrollbarWidth: "none" }}
+      >
+        {centrePanel}
+
+        <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
+          {BOTTOM_NAV.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
+              }`}
+            >
+              <span className="text-lg">{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+
       {replyModal}
       {detailModal}
     </>

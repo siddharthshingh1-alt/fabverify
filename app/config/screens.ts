@@ -460,7 +460,7 @@ const screenConfig: ScreenConfig = {
       rightPanel: 'supply'
     },
     designer: {
-      title: 'Active Projects',
+      title: 'My Projects',
       subtitle: 'Projects hired through FabTalent',
       showCreateButton: false,
       altButton: { label: 'View Hire Requests', href: '/samples' },
@@ -469,7 +469,7 @@ const screenConfig: ScreenConfig = {
       rightPanel: 'project'
     },
     master: {
-      title: 'Active Projects',
+      title: 'My Projects',
       subtitle: 'Projects hired through FabTalent',
       showCreateButton: false,
       altButton: { label: 'View Hire Requests', href: '/samples' },
@@ -478,7 +478,7 @@ const screenConfig: ScreenConfig = {
       rightPanel: 'project'
     },
     merchandiser: {
-      title: 'Active Projects',
+      title: 'My Projects',
       subtitle: 'Projects hired through FabTalent',
       showCreateButton: false,
       altButton: { label: 'View Hire Requests', href: '/samples' },

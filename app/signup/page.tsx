@@ -58,7 +58,7 @@ export default function SignUp() {
     if (next.every((d) => d !== "") && !isVerifying) {
       setIsVerifying(true);
       setTimeout(() => {
-        router.push("/onboarding/type");
+        router.push("/onboarding/profile");
       }, 800);
     }
   };

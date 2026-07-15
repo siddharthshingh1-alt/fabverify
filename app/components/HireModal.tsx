@@ -33,6 +33,7 @@ function HireModalContent({
   const [selectedStage, setSelectedStage] = useState(visiblePills[0] ?? "");
   const [requirementText, setRequirementText] = useState("");
   const [timelineDate, setTimelineDate] = useState("");
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -47,7 +48,8 @@ function HireModalContent({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-[480px] rounded-xl border border-border-dark bg-card p-8"
+        className="hide-scrollbar relative w-full max-w-[480px] rounded-xl border border-border-dark bg-card p-8"
+        style={{ maxHeight: "90vh", overflowY: "auto" }}
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -59,6 +61,25 @@ function HireModalContent({
           ✕
         </button>
 
+        {submitted ? (
+          <div className="flex flex-col items-center py-8 text-center">
+            <div className="text-5xl">✅</div>
+            <p className="mt-4 text-lg font-bold text-white">
+              Hire request sent!
+            </p>
+            <p className="mt-2 text-sm text-text-secondary">
+              {professional.name} will be notified and will respond shortly.
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-bold text-navy"
+            >
+              Close
+            </button>
+          </div>
+        ) : (
+          <>
         <h2 className="text-xl font-bold text-white">
           Hire {professional.name}
         </h2>
@@ -129,12 +150,14 @@ function HireModalContent({
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => setSubmitted(true)}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
           >
             Send Hire Request →
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

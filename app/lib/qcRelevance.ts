@@ -10,7 +10,6 @@ type QcTypeMapping = { matchType: string; label: string };
 const QC_RELEVANT_TYPES: Partial<Record<UserType, QcTypeMapping[]>> = {
   trim_supplier: [
     { matchType: "Pre-dispatch", label: "Pre-dispatch" },
-    { matchType: "In-line", label: "Product Quality Check" },
   ],
   fabric_mill: [
     { matchType: "In-line", label: "Fabric Quality Inspection" },

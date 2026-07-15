@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useUser } from "../../context/UserContext";
+import type { UserType } from "../../context/UserContext";
 
 type UserTypeCard = {
   id: string;
@@ -74,10 +76,17 @@ const USER_TYPES: UserTypeCard[] = [
     description: "I inspect garment quality at factories before dispatch",
     tag: "FabTalent Verified",
   },
+  {
+    id: "enterprise-brand",
+    emoji: "🏢",
+    title: "Enterprise Brand",
+    description: "Large brand with team, multiple vendors, and seasonal collections",
+  },
 ];
 
 const ROUTE_BY_TYPE: Record<string, string> = {
-  "brand-buyer": "/onboarding/brand-builder",
+  "brand-buyer": "/onboarding/position",
+  "enterprise-brand": "/onboarding/enterprise",
   manufacturer: "/onboarding/manufacturer",
   "fabric-mill": "/onboarding/supplier",
   "trim-supplier": "/onboarding/supplier",
@@ -104,13 +113,18 @@ const STORAGE_TYPE_BY_ID: Record<string, string> = {
 
 export default function UserTypeSelection() {
   const router = useRouter();
+  const { setUser } = useUser();
   const [selected, setSelected] = useState<string | null>(null);
 
   const selectedCard = USER_TYPES.find((card) => card.id === selected);
 
   const handleContinue = () => {
     if (!selectedCard) return;
-    localStorage.setItem("userType", STORAGE_TYPE_BY_ID[selectedCard.id]);
+    const userType = STORAGE_TYPE_BY_ID[selectedCard.id];
+    if (userType) {
+      localStorage.setItem("userType", userType);
+      setUser({ userType: userType as UserType });
+    }
     router.push(ROUTE_BY_TYPE[selectedCard.id] ?? "/dashboard");
   };
 
@@ -134,10 +148,10 @@ export default function UserTypeSelection() {
         </div>
 
         <div className="mt-6 h-1 w-full overflow-hidden rounded-full bg-border-dark">
-          <div className="h-full w-1/4 bg-gold" />
+          <div className="h-full w-full bg-gold" />
         </div>
         <p className="mt-2 text-center text-xs text-text-secondary">
-          Step 1 of 4 — Choose your role
+          Step 2 of 2 — Choose Your Role
         </p>
 
         <h1 className="mt-8 text-center text-[28px] font-bold text-text-primary">

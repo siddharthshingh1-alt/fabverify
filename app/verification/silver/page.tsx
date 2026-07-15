@@ -572,12 +572,20 @@ export default function SilverVerification() {
           References added
         </p>
         <div className="mt-2 flex flex-col gap-1.5 text-sm text-text-primary">
-          {references.map((reference, index) => (
-            <div key={index}>
-              ✅ Reference {index + 1} —{" "}
-              {reference.contactPerson || reference.brandName || "Pending name"}
-            </div>
-          ))}
+          {references.map((reference, index) => {
+            const referenceName = reference.contactPerson || reference.brandName;
+            return (
+              <div key={index}>
+                {referenceName ? (
+                  <>✅ Reference {index + 1} — {referenceName}</>
+                ) : (
+                  <span style={{ color: "#f59e0b" }}>
+                    ⚠️ Reference {index + 1} — Not provided
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-text-secondary">
@@ -634,13 +642,22 @@ export default function SilverVerification() {
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setSubmitted(true)}
-          className="mt-5 w-full rounded-lg bg-primary py-4 text-base font-bold text-navy"
-        >
-          Pay ₹1,179 & Submit Application →
-        </button>
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="rounded-lg border border-border-dark px-6 py-4 text-sm font-semibold text-text-secondary hover:text-text-primary"
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubmitted(true)}
+            className="flex-1 rounded-lg bg-primary py-4 text-base font-bold text-navy"
+          >
+            Pay ₹1,179 & Submit Application →
+          </button>
+        </div>
 
         <p className="mt-3 text-center text-[11px] text-text-secondary">
           After payment your application goes to our verification team

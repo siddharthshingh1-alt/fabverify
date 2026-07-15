@@ -27,6 +27,9 @@ export default function LogIn() {
   const isPhoneValid = phone.length === 10;
   const isOtpComplete = otp.every((digit) => digit !== "");
 
+  const postLoginRoute = () =>
+    localStorage.getItem("fabverify_profile") ? "/dashboard" : "/onboarding/profile";
+
   const handlePhoneChange = (value: string) => {
     setPhone(value.replace(/\D/g, "").slice(0, 10));
   };
@@ -58,7 +61,7 @@ export default function LogIn() {
     if (next.every((d) => d !== "") && !isVerifying) {
       setIsVerifying(true);
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push(postLoginRoute());
       }, 800);
     }
   };
@@ -76,7 +79,7 @@ export default function LogIn() {
     if (!isOtpComplete || isVerifying) return;
     setIsVerifying(true);
     setTimeout(() => {
-      router.push("/dashboard");
+      router.push(postLoginRoute());
     }, 1500);
   };
 

@@ -2,11 +2,20 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { UploadBox } from "../onboarding/components";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
+
+const BOTTOM_NAV = [
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
+];
 
 const UNIT_OPTIONS = ["pieces", "metres", "kg", "per project"];
 
@@ -44,6 +53,7 @@ const EMPTY_FORM = {
 
 export default function Profile() {
   const { user, userLabel, isSupplySide, isTalent } = useUser();
+  const pathname = usePathname();
   const config = screenConfig.profile[user.userType];
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -472,9 +482,35 @@ export default function Profile() {
   );
 
   return (
-    <ThreePanelLayout
-      centre={centrePanel}
-      right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
-    />
+    <>
+      <ThreePanelLayout
+        centre={centrePanel}
+        right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
+      />
+
+      <div
+        className="flex flex-col pb-20 md:hidden"
+        style={{ height: "100vh", overflowY: "auto", scrollbarWidth: "none" }}
+      >
+        {centrePanel}
+
+        <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
+          {BOTTOM_NAV.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
+              }`}
+            >
+              <span className="text-lg">{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </>
   );
 }

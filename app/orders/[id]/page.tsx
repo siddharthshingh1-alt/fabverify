@@ -308,6 +308,12 @@ export default function OrderDetail() {
   const orderId = params.id as string;
   const order = ORDER_DETAILS[orderId];
 
+  const nearbyQcInspectors = order
+    ? qcInspectors.filter((inspector) =>
+        inspector.citiesCovered.includes(order.factoryCity)
+      )
+    : [];
+
   const searchParams = useSearchParams();
   const defaultTab = searchParams.get("tab") || "overview";
   const [activeTab, setActiveTab] = useState(defaultTab);
@@ -859,10 +865,15 @@ export default function OrderDetail() {
             </div>
 
             <p className="mb-3 mt-6 text-sm font-medium text-text-primary">
-              Available inspectors near {order.factoryCity}
+              {nearbyQcInspectors.length > 0
+                ? `Available inspectors near ${order.factoryCity}`
+                : `No inspectors currently cover ${order.factoryCity} — showing other available inspectors`}
             </p>
             <div className="flex flex-col gap-3">
-              {qcInspectors.slice(0, 2).map((inspector) => (
+              {(nearbyQcInspectors.length > 0
+                ? nearbyQcInspectors
+                : qcInspectors.slice(0, 2)
+              ).map((inspector) => (
                 <div
                   key={inspector.id}
                   className="rounded-[10px] border border-border-dark bg-background p-4"

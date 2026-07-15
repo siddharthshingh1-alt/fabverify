@@ -237,7 +237,7 @@ export default function Home() {
       </nav>
 
       <main
-        className="hide-scrollbar"
+        className="hide-scrollbar textile-pattern"
         style={{
           height: "100vh",
           backgroundColor: "#07122a",

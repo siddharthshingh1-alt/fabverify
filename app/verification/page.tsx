@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { useUser, type UserType } from "../context/UserContext";
 
 const BOTTOM_NAV = [
-  { icon: "🏠", label: "Home", active: false },
-  { icon: "📦", label: "Orders", active: false },
-  { icon: "🔍", label: "Discover", active: false },
-  { icon: "👔", label: "Merch", active: false },
-  { icon: "👤", label: "Profile", active: false },
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
 ];
 
 type Feature = { ok: boolean; text: string };
@@ -704,6 +705,7 @@ function TierCard({
 
 export default function Verification() {
   const { user, mounted } = useUser();
+  const pathname = usePathname();
   const userType = mounted ? user.userType : "buyer";
   const config = VERIFICATION_CONFIG[userType];
 
@@ -930,16 +932,18 @@ export default function Verification() {
 
         <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
           {BOTTOM_NAV.map((item) => (
-            <button
+            <Link
               key={item.label}
-              type="button"
+              href={item.href}
               className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
-                item.active ? "text-primary" : "text-text-secondary"
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
               }`}
             >
               <span className="text-lg">{item.icon}</span>
               {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
       </div>

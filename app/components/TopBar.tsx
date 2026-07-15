@@ -91,6 +91,16 @@ export default function TopBar({
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
+  const filteredSearchResults = (() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return SEARCH_RESULTS;
+    return SEARCH_RESULTS.filter(
+      (result) =>
+        result.name.toLowerCase().includes(query) ||
+        result.meta.toLowerCase().includes(query)
+    );
+  })();
+
   useEffect(() => {
     if (!showNotifications) return;
     function handleClickOutside(event: MouseEvent) {
@@ -228,7 +238,7 @@ export default function TopBar({
 
                   <div className="px-4 py-3 text-center">
                     <Link
-                      href="#"
+                      href="/enquiries"
                       className="text-[12px] font-semibold text-primary"
                     >
                       View all notifications →
@@ -329,24 +339,30 @@ export default function TopBar({
               </>
             ) : (
               <div className="mt-6 flex flex-col gap-3">
-                {SEARCH_RESULTS.map((result) => (
-                  <Link
-                    key={result.name}
-                    href={result.href}
-                    onClick={closeSearch}
-                    className="rounded-[8px] border border-border-dark bg-background p-3 transition-colors hover:border-primary"
-                  >
-                    <p className="text-sm font-bold text-white">
-                      {result.icon} {result.name}
-                    </p>
-                    <p className="mt-1 text-xs text-text-secondary">
-                      {result.meta}
-                    </p>
-                    <span className="mt-1.5 inline-block text-xs font-semibold text-primary">
-                      View Profile →
-                    </span>
-                  </Link>
-                ))}
+                {filteredSearchResults.length > 0 ? (
+                  filteredSearchResults.map((result) => (
+                    <Link
+                      key={result.name}
+                      href={result.href}
+                      onClick={closeSearch}
+                      className="rounded-[8px] border border-border-dark bg-background p-3 transition-colors hover:border-primary"
+                    >
+                      <p className="text-sm font-bold text-white">
+                        {result.icon} {result.name}
+                      </p>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {result.meta}
+                      </p>
+                      <span className="mt-1.5 inline-block text-xs font-semibold text-primary">
+                        View Profile →
+                      </span>
+                    </Link>
+                  ))
+                ) : (
+                  <p className="mt-2 text-sm text-text-secondary">
+                    No results for &ldquo;{searchQuery}&rdquo;
+                  </p>
+                )}
               </div>
             )}
           </div>

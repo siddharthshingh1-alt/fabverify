@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
+import {
+  MdCeoDashboard,
+  HeadOfOperationsDashboard,
+  MerchandiserDashboard,
+  DesignerDashboard,
+  AccountsDashboard,
+} from "./PositionDashboards";
 
 const TODAY_STATS = [
   { label: "Active Orders", value: 0 },
@@ -20,11 +28,13 @@ const PRICE_ROWS = [
 
 const SUGGESTED_MANUFACTURERS = [
   {
+    id: "jaipur-ethnic-works",
     name: "Jaipur Ethnic Works",
     tag: "Ethnic Wear • Gold Verified",
     rating: "⭐ 4.8",
   },
   {
+    id: "surat-cotton-mills",
     name: "Surat Cotton Mills",
     tag: "Cotton Fabric • Silver Verified",
     rating: "⭐ 4.6",
@@ -34,16 +44,32 @@ const SUGGESTED_MANUFACTURERS = [
 const TIER_ORDER = ["unverified", "bronze", "silver", "gold", "platinum"] as const;
 
 const BOTTOM_NAV = [
-  { icon: "🏠", label: "Home", active: true },
-  { icon: "📦", label: "Orders" },
-  { icon: "🔍", label: "Discover" },
-  { icon: "👔", label: "Merch" },
-  { icon: "👤", label: "Profile" },
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
 ];
 
 export default function Dashboard() {
   const { user, greeting } = useUser();
   const config = screenConfig.dashboard[user.userType];
+  const pathname = usePathname();
+
+  if (user.userType === "buyer" && user.position && user.position !== "solo_founder") {
+    switch (user.position) {
+      case "md_ceo":
+        return <MdCeoDashboard />;
+      case "head_operations":
+        return <HeadOfOperationsDashboard />;
+      case "merchandiser":
+        return <MerchandiserDashboard />;
+      case "designer":
+        return <DesignerDashboard />;
+      case "accounts":
+        return <AccountsDashboard />;
+    }
+  }
 
   const tierIndex = TIER_ORDER.indexOf(user.verificationTier);
   const nextTier = TIER_ORDER[tierIndex + 1];
@@ -240,12 +266,12 @@ export default function Dashboard() {
               <p className="mt-0.5 text-[11px] text-primary">
                 {manufacturer.rating}
               </p>
-              <a
-                href="#"
+              <Link
+                href={`/manufacturers/${manufacturer.id}`}
                 className="mt-1 inline-block text-[11px] font-medium text-primary"
               >
                 View Profile
-              </a>
+              </Link>
             </div>
           ))}
         </div>
@@ -306,16 +332,18 @@ export default function Dashboard() {
 
         <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
           {BOTTOM_NAV.map((item) => (
-            <button
+            <Link
               key={item.label}
-              type="button"
+              href={item.href}
               className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
-                item.active ? "text-primary" : "text-text-secondary"
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
               }`}
             >
               <span className="text-lg">{item.icon}</span>
               {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
       </div>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import SampleRequestModal from "../components/SampleRequestModal";
@@ -13,11 +14,11 @@ import type { UserType } from "../context/UserContext";
 import screenConfig from "../config/screens";
 
 const BOTTOM_NAV = [
-  { icon: "🏠", label: "Home", active: false },
-  { icon: "📦", label: "Orders", active: false },
-  { icon: "🔍", label: "Discover", active: true },
-  { icon: "👔", label: "Merch", active: false },
-  { icon: "👤", label: "Profile", active: false },
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
 ];
 
 const CATEGORY_PILLS = [
@@ -199,6 +200,202 @@ const BUYERS: BuyerCard[] = [
 const BUYER_CATEGORY_OPTIONS = Array.from(new Set(BUYERS.map((b) => b.category)));
 const BUYER_CITY_OPTIONS = Array.from(new Set(BUYERS.map((b) => b.city)));
 
+type InspectionType =
+  | "Pre-dispatch"
+  | "Inline"
+  | "Pre-production"
+  | "Factory Audit";
+
+type InspectionJob = {
+  id: string;
+  factory: string;
+  city: string;
+  category: string;
+  inspectionType: InspectionType;
+  date: string;
+  pieces: number;
+  fee: string;
+  urgency: "Urgent" | "Standard";
+  requirements: string[];
+};
+
+const INSPECTION_JOBS: InspectionJob[] = [
+  {
+    id: "job-001",
+    factory: "Jaipur Ethnic Works",
+    city: "Jaipur",
+    category: "Ethnic Wear",
+    inspectionType: "Pre-dispatch",
+    date: "July 20, 2026",
+    pieces: 500,
+    fee: "₹3,500",
+    urgency: "Standard",
+    requirements: ["AQL 2.5", "Measurement check", "Colour fastness"],
+  },
+  {
+    id: "job-002",
+    factory: "Delhi Woven Works",
+    city: "Delhi NCR",
+    category: "Western Wear",
+    inspectionType: "Inline",
+    date: "July 18, 2026",
+    pieces: 800,
+    fee: "₹4,200",
+    urgency: "Urgent",
+    requirements: ["AQL 1.0", "Stitch density", "Zipper quality"],
+  },
+  {
+    id: "job-003",
+    factory: "Tirupur Knits",
+    city: "Tirupur",
+    category: "Knitwear",
+    inspectionType: "Pre-production",
+    date: "July 22, 2026",
+    pieces: 1200,
+    fee: "₹5,800",
+    urgency: "Standard",
+    requirements: ["GSM check", "Shrinkage test", "Colour approval"],
+  },
+  {
+    id: "job-004",
+    factory: "Surat Silk House",
+    city: "Surat",
+    category: "Ethnic Wear",
+    inspectionType: "Factory Audit",
+    date: "July 25, 2026",
+    pieces: 0,
+    fee: "₹8,500",
+    urgency: "Standard",
+    requirements: ["SMETA checklist", "Worker welfare", "Safety compliance"],
+  },
+  {
+    id: "job-005",
+    factory: "Bangalore Apparel",
+    city: "Bangalore",
+    category: "Western Wear",
+    inspectionType: "Pre-dispatch",
+    date: "July 19, 2026",
+    pieces: 650,
+    fee: "₹3,800",
+    urgency: "Urgent",
+    requirements: ["AQL 2.5", "Packing check", "Label verification"],
+  },
+  {
+    id: "job-006",
+    factory: "Kolkata Garments",
+    city: "Kolkata",
+    category: "Kids Wear",
+    inspectionType: "Inline",
+    date: "July 21, 2026",
+    pieces: 400,
+    fee: "₹2,800",
+    urgency: "Standard",
+    requirements: ["Safety standards", "Button pull test", "Flammability"],
+  },
+];
+
+const JOB_TYPE_OPTIONS = [
+  "All Types",
+  "Pre-dispatch",
+  "Inline",
+  "Pre-production",
+  "Factory Audit",
+];
+
+const JOB_CITY_OPTIONS = [
+  "All Cities",
+  "Jaipur",
+  "Delhi",
+  "Tirupur",
+  "Surat",
+  "Bangalore",
+  "Kolkata",
+];
+
+function parseFeeValue(fee: string) {
+  return Number(fee.replace(/[^\d]/g, ""));
+}
+
+function InspectionJobCard({ job }: { job: InspectionJob }) {
+  return (
+    <div className="rounded-[10px] border border-border-dark bg-card p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary font-display text-sm font-bold text-navy">
+          {job.factory
+            .split(" ")
+            .map((word) => word[0])
+            .slice(0, 2)
+            .join("")
+            .toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[14px] font-bold text-white">{job.factory}</p>
+          <p className="text-xs text-text-secondary">{job.city}</p>
+        </div>
+        <span
+          className={`shrink-0 rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold ${
+            job.urgency === "Urgent"
+              ? "border-red-500/60 bg-red-500/15 text-red-400"
+              : "border-secondary/40 bg-secondary/15 text-secondary"
+          }`}
+        >
+          {job.urgency}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
+        <div>
+          <p className="text-[11px] text-text-secondary">Inspection type</p>
+          <p className="text-[13px] font-bold text-white">{job.inspectionType}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-text-secondary">Date</p>
+          <p className="text-[13px] font-bold text-white">{job.date}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-text-secondary">Fee</p>
+          <p className="text-[13px] font-bold text-primary">{job.fee}</p>
+        </div>
+      </div>
+
+      {job.pieces > 0 && (
+        <p className="mt-3 text-xs text-text-secondary">📦 {job.pieces} pieces</p>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {job.requirements.map((requirement) => (
+          <span
+            key={requirement}
+            className="rounded-[20px] bg-background px-2.5 py-1 text-[10px] text-text-secondary"
+          >
+            {requirement}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border-dark pt-3">
+        <span className="rounded-[20px] border border-primary px-2.5 py-1 text-[10px] font-semibold text-primary">
+          {job.category}
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-text-secondary"
+          >
+            View Details
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
+          >
+            Accept Job →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TALENT_LOOKING_FOR: Partial<Record<UserType, string>> = {
   designer: "Designer",
   master: "Master",
@@ -213,6 +410,7 @@ function formatRupees(value: number) {
 export default function Manufacturers() {
   const { user, isTalent } = useUser();
   const config = screenConfig.manufacturers[user.userType];
+  const pathname = usePathname();
   const talentLookingFor = TALENT_LOOKING_FOR[user.userType];
 
   const [sampleModalManufacturer, setSampleModalManufacturer] =
@@ -251,6 +449,10 @@ export default function Manufacturers() {
   const [qtyTo, setQtyTo] = useState("");
   const [budgetFrom, setBudgetFrom] = useState("");
   const [budgetTo, setBudgetTo] = useState("");
+
+  // Mode: qc_inspector (inspection job board)
+  const [jobTypeFilter, setJobTypeFilter] = useState("All Types");
+  const [jobCityFilter, setJobCityFilter] = useState("All Cities");
 
   const toggleTier = (tier: Tier) => {
     setSelectedTiers((current) =>
@@ -368,6 +570,9 @@ export default function Manufacturers() {
       (selectedTierDropdown === "Bronze Verified" &&
         manufacturer.tier === "bronze");
 
+    const matchesMoqFrom = moqFrom === "" || manufacturer.moq >= Number(moqFrom);
+    const matchesMoqTo = moqTo === "" || manufacturer.moq <= Number(moqTo);
+
     return (
       matchesSearch &&
       matchesCategory &&
@@ -375,7 +580,9 @@ export default function Manufacturers() {
       matchesCity &&
       matchesRating &&
       matchesCityDropdown &&
-      matchesTierDropdown
+      matchesTierDropdown &&
+      matchesMoqFrom &&
+      matchesMoqTo
     );
   }).sort((a, b) => {
     switch (sortBy) {
@@ -424,6 +631,25 @@ export default function Manufacturers() {
       matchesBudgetTo
     );
   });
+
+  const isQcInspector = user.userType === "qc_inspector";
+
+  const filteredJobs = INSPECTION_JOBS.filter((job) => {
+    const matchesType =
+      jobTypeFilter === "All Types" || job.inspectionType === jobTypeFilter;
+    const matchesCity =
+      jobCityFilter === "All Cities" || job.city.includes(jobCityFilter);
+    return matchesType && matchesCity;
+  });
+
+  const jobStats = {
+    available: INSPECTION_JOBS.length,
+    avgFee: Math.round(
+      INSPECTION_JOBS.reduce((sum, job) => sum + parseFeeValue(job.fee), 0) /
+        INSPECTION_JOBS.length
+    ),
+    urgent: INSPECTION_JOBS.filter((job) => job.urgency === "Urgent").length,
+  };
 
   const supplierCards = (
     <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -749,8 +975,33 @@ export default function Manufacturers() {
     </>
   );
 
-  const centreContent =
-    config.mode === "manufacturers" ? (
+  const jobCards = (
+    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+      {filteredJobs.map((job) => (
+        <InspectionJobCard key={job.id} job={job} />
+      ))}
+    </div>
+  );
+
+  const centreContent = isQcInspector ? (
+    <>
+      <p className="text-[13px] text-text-secondary">
+        Showing {filteredJobs.length} of {INSPECTION_JOBS.length} inspection jobs
+      </p>
+      {jobCards}
+      {filteredJobs.length === 0 && (
+        <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+          <div className="text-4xl">🔍</div>
+          <p className="mt-3 text-sm text-text-primary">
+            No inspection jobs match your filters
+          </p>
+          <p className="mt-1 text-xs text-text-secondary">
+            Try adjusting your filters
+          </p>
+        </div>
+      )}
+    </>
+  ) : config.mode === "manufacturers" ? (
       manufacturerFilterBar
     ) : config.mode === "suppliers" ? (
       <>
@@ -1168,8 +1419,75 @@ export default function Manufacturers() {
     </>
   );
 
-  const rightPanel =
-    config.mode === "manufacturers"
+  const qcInspectorRightPanel = (
+    <>
+      <p className="text-base font-bold text-white">Find Inspection Jobs</p>
+      <p className="mt-1 text-xs text-text-secondary">
+        Verified inspection opportunities near you
+      </p>
+
+      <div className="mt-5 flex flex-col gap-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Jobs available</span>
+          <span className="font-bold text-primary">{jobStats.available}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Avg fee</span>
+          <span className="font-bold text-primary">
+            ₹{jobStats.avgFee.toLocaleString("en-IN")}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Urgent</span>
+          <span className="font-bold text-red-400">{jobStats.urgent}</span>
+        </div>
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        Inspection Type
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        {JOB_TYPE_OPTIONS.map((type) => (
+          <label key={type} className="flex items-center gap-2 text-sm text-text-primary">
+            <input
+              type="radio"
+              name="jobType"
+              checked={jobTypeFilter === type}
+              onChange={() => setJobTypeFilter(type)}
+              className="h-4 w-4 accent-primary"
+            />
+            {type}
+          </label>
+        ))}
+      </div>
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+        City
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        {JOB_CITY_OPTIONS.map((city) => (
+          <label key={city} className="flex items-center gap-2 text-sm text-text-primary">
+            <input
+              type="radio"
+              name="jobCity"
+              checked={jobCityFilter === city}
+              onChange={() => setJobCityFilter(city)}
+              className="h-4 w-4 accent-primary"
+            />
+            {city}
+          </label>
+        ))}
+      </div>
+    </>
+  );
+
+  const rightPanel = isQcInspector
+    ? qcInspectorRightPanel
+    : config.mode === "manufacturers"
       ? manufacturersRightPanel
       : config.mode === "suppliers"
         ? suppliersRightPanel
@@ -1338,7 +1656,29 @@ export default function Manufacturers() {
           </h1>
           <p className="mt-1 text-xs text-text-secondary">{config.subtitle}</p>
 
-          {config.mode === "manufacturers" ? (
+          {isQcInspector ? (
+            <>
+              <p className="mt-4 text-[13px] text-text-secondary">
+                Showing {filteredJobs.length} of {INSPECTION_JOBS.length} inspection jobs
+              </p>
+              <div className="mt-4 flex flex-col gap-3">
+                {filteredJobs.map((job) => (
+                  <InspectionJobCard key={job.id} job={job} />
+                ))}
+                {filteredJobs.length === 0 && (
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+                    <div className="text-4xl">🔍</div>
+                    <p className="mt-3 text-sm text-text-primary">
+                      No inspection jobs match your filters
+                    </p>
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Try adjusting your filters
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : config.mode === "manufacturers" ? (
             <>
               <div className="relative mt-4">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">
@@ -1492,16 +1832,18 @@ export default function Manufacturers() {
 
         <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
           {BOTTOM_NAV.map((item) => (
-            <button
+            <Link
               key={item.label}
-              type="button"
+              href={item.href}
               className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
-                item.active ? "text-primary" : "text-text-secondary"
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
               }`}
             >
               <span className="text-lg">{item.icon}</span>
               {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
       </div>

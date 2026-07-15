@@ -13,12 +13,38 @@ export type UserType =
   | 'merchandiser'
   | 'qc_inspector'
 
+export type Position =
+  | 'solo_founder'
+  | 'md_ceo'
+  | 'head_operations'
+  | 'merchandiser'
+  | 'designer'
+  | 'accounts'
+
+// Role selected during the separate Enterprise Brand onboarding
+// (app/onboarding/enterprise), distinct from `Position` above which
+// drives the Brand/Buyer adaptive dashboard.
+export type EnterprisePosition =
+  | 'md_ceo'
+  | 'head_operations'
+  | 'head_merchandising'
+  | 'buying_head'
+  | 'cfo'
+  | 'it_head'
+  | 'other'
+
 export interface User {
   name: string
   userType: UserType
   verificationTier: 'unverified' | 'bronze' | 'silver' | 'gold' | 'platinum'
   fabscore: number
   city: string
+  email?: string
+  profilePhoto?: string
+  state?: string
+  referralCode?: string
+  position?: Position
+  enterprisePosition?: EnterprisePosition
 }
 
 interface UserContextType {

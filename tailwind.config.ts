@@ -11,7 +11,7 @@ const config: Config = {
         navy: "#07101F",
         card: "#0D1B33",
         "border-dark": "#1C3050",
-        gold: "#F5A524",
+        gold: "#f2ca50",
         "text-primary": "#E2E8F0",
         "text-secondary": "#7A8FA8",
 
@@ -41,7 +41,7 @@ const config: Config = {
         DEFAULT: "0.125rem",
         lg: "0.25rem",
         xl: "0.5rem",
-        full: "0.75rem",
+        full: "9999px",
       },
     },
   },

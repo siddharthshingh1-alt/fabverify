@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
@@ -8,11 +9,11 @@ import { useUser } from "../context/UserContext";
 import type { UserType } from "../context/UserContext";
 
 const BOTTOM_NAV = [
-  { icon: "🏠", label: "Home", active: false },
-  { icon: "📦", label: "Orders", active: false },
-  { icon: "🔍", label: "Discover", active: false },
-  { icon: "👔", label: "Merch", active: false },
-  { icon: "👤", label: "Profile", active: false },
+  { icon: "🏠", label: "Home", href: "/dashboard" },
+  { icon: "📦", label: "Orders", href: "/orders" },
+  { icon: "🔍", label: "Discover", href: "/manufacturers" },
+  { icon: "👔", label: "Merch", href: "/fabmerch" },
+  { icon: "👤", label: "Profile", href: "/profile" },
 ];
 
 type TabId = "fabscore" | "products";
@@ -138,7 +139,7 @@ const COMPARISON_ROWS: ComparisonRow[] = [
 type CreditProductId = "fabfloat" | "fabpaylater" | "fabmaterial";
 
 const PRODUCT_VISIBILITY: Partial<Record<UserType, CreditProductId[]>> = {
-  buyer: ["fabfloat", "fabpaylater", "fabmaterial"],
+  buyer: ["fabpaylater"],
   manufacturer: ["fabfloat", "fabmaterial"],
   fabric_mill: ["fabmaterial"],
   trim_supplier: ["fabmaterial"],
@@ -634,6 +635,7 @@ function RightPanel() {
 }
 
 function CreditAndScorePage() {
+  const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<TabId>("fabscore");
 
   const tabsBar = (
@@ -715,16 +717,18 @@ function CreditAndScorePage() {
 
         <nav className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-border-dark bg-card">
           {BOTTOM_NAV.map((item) => (
-            <button
+            <Link
               key={item.label}
-              type="button"
+              href={item.href}
               className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
-                item.active ? "text-primary" : "text-text-secondary"
+                pathname === item.href || pathname.startsWith(item.href + "/")
+                  ? "text-primary"
+                  : "text-text-secondary"
               }`}
             >
               <span className="text-lg">{item.icon}</span>
               {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
       </div>
