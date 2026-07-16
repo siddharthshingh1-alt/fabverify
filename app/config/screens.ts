@@ -60,7 +60,7 @@ export type OrdersScreenConfig = {
   rightPanel: OrdersRightPanel
 }
 
-export type FabMerchTabId = 'merchandisers' | 'designers' | 'masters' | 'qc-inspectors'
+export type FabMerchTabId = 'my-hires' | 'merchandisers' | 'designers' | 'masters' | 'qc-inspectors'
 
 export type FabMerchScreenConfig = {
   subtitle: string
@@ -500,7 +500,7 @@ const screenConfig: ScreenConfig = {
   fabmerch: {
     buyer: {
       subtitle: 'Hire verified garment professionals per stage',
-      visibleTabs: ['merchandisers', 'designers', 'masters', 'qc-inspectors'],
+      visibleTabs: ['my-hires', 'merchandisers', 'designers', 'masters', 'qc-inspectors'],
       showTalentProfile: false
     },
     manufacturer: {

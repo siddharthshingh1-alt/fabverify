@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { useUser, type UserType } from "../context/UserContext";
@@ -720,6 +721,28 @@ export default function Verification() {
     .filter((b) => b.ok && b.text !== "Everything in Bronze")
     .map((b) => b.text);
 
+  const isSilverComplete =
+    user.verificationTier === "silver" ||
+    user.verificationTier === "gold" ||
+    user.verificationTier === "platinum";
+
+  const [resumeAvailable, setResumeAvailable] = useState(false);
+  useEffect(() => {
+    try {
+      const savedRegion = localStorage.getItem("fabverify_user_region");
+      setResumeAvailable(Boolean(savedRegion));
+    } catch {}
+  }, []);
+
+  const resumeBanner = resumeAvailable && (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-primary/50 bg-primary/10 px-4 py-3">
+      <p className="text-sm text-text-primary">You have a verification in progress</p>
+      <Link href="/verification/identity" className="text-sm font-bold text-primary">
+        Resume verification →
+      </Link>
+    </div>
+  );
+
   const currentStatusCard = (
     <div className="rounded-[12px] border border-border-dark bg-card p-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -751,7 +774,7 @@ export default function Verification() {
             ))}
           </div>
           <Link
-            href="/verification/silver"
+            href="/verification/identity"
             className="mt-4 inline-block rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-navy"
           >
             Upgrade to Silver →
@@ -790,7 +813,7 @@ export default function Verification() {
         footer={
           <>
             <Link
-              href="/verification/silver"
+              href="/verification/identity"
               className="block w-full rounded-lg bg-primary py-2.5 text-center text-sm font-bold text-navy"
             >
               → Start Verification
@@ -811,13 +834,36 @@ export default function Verification() {
         benefits={goldBenefits}
         requirements={goldRequirements}
         footer={
-          <button
-            type="button"
-            disabled
-            className="w-full cursor-not-allowed rounded-lg border border-border-dark bg-background py-2.5 text-sm font-semibold text-text-secondary"
-          >
-            Complete Silver first
-          </button>
+          <>
+            <p className="text-[12px] font-semibold text-text-primary">
+              Gold verification includes everything in Silver plus:
+            </p>
+            <ul className="mt-2 flex flex-col gap-1">
+              {[
+                "Physical factory visit by FabVerify field officer",
+                "Video recording of factory floor",
+                "Annual audit report",
+                "EU compliance certificate eligibility",
+              ].map((line) => (
+                <li key={line} className="text-[11px] text-text-secondary">
+                  • {line}
+                </li>
+              ))}
+            </ul>
+
+            {isSilverComplete ? (
+              <Link
+                href="/verification/identity?tier=gold"
+                className="mt-4 block w-full rounded-lg bg-primary py-2.5 text-center text-sm font-bold text-navy"
+              >
+                Start Gold Verification →
+              </Link>
+            ) : (
+              <p className="mt-4 text-center text-[12px] text-text-secondary">
+                Complete Silver first
+              </p>
+            )}
+          </>
         }
       />
     </div>
@@ -825,6 +871,7 @@ export default function Verification() {
 
   const centreContent = (
     <>
+      {resumeBanner}
       {currentStatusCard}
       {tierCards}
     </>

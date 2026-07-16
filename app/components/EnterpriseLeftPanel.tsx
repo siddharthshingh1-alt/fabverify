@@ -61,7 +61,7 @@ const ROLE_LABELS: Record<EnterprisePosition, string> = {
 };
 
 const TOOLS_ITEMS = [
-  { icon: "💬", label: "Enquiries", href: "/enquiries" },
+  { icon: "💬", label: "Enquiries", href: "/enterprise/enquiries" },
   { icon: "💰", label: "FabPrice", href: "/fabprice" },
   { icon: "✅", label: "Verification", href: "/verification" },
 ];

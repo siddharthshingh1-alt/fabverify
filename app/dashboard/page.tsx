@@ -6,6 +6,7 @@ import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
 import screenConfig from "../config/screens";
+import { getActiveHiresCount } from "../data/hires";
 import {
   MdCeoDashboard,
   HeadOfOperationsDashboard,
@@ -74,6 +75,14 @@ export default function Dashboard() {
   const tierIndex = TIER_ORDER.indexOf(user.verificationTier);
   const nextTier = TIER_ORDER[tierIndex + 1];
 
+  const activeHiresCount = getActiveHiresCount();
+  const resolveQuickAction = (action: (typeof config.quickActions)[number]) => {
+    if (action.href !== "/fabmerch") return action;
+    return activeHiresCount > 0
+      ? { ...action, title: `My Hires (${activeHiresCount} active)` }
+      : { ...action, title: "Hire Merchandiser →" };
+  };
+
   const centrePanel = (
     <>
       <TopBar title={config.title} />
@@ -93,21 +102,24 @@ export default function Dashboard() {
             What do you want to do today?
           </h2>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {config.quickActions.map((action) => (
-              <Link
-                key={action.title}
-                href={action.href}
-                className="block rounded-xl border border-border-dark bg-card p-4 transition-colors hover:border-primary"
-              >
-                <div className="text-2xl">{action.icon}</div>
-                <h3 className="mt-2 text-sm font-bold text-text-primary">
-                  {action.title}
-                </h3>
-                <p className="mt-1 text-xs text-text-secondary">
-                  {action.desc}
-                </p>
-              </Link>
-            ))}
+            {config.quickActions.map((rawAction) => {
+              const action = resolveQuickAction(rawAction);
+              return (
+                <Link
+                  key={rawAction.title}
+                  href={action.href}
+                  className="block rounded-xl border border-border-dark bg-card p-4 transition-colors hover:border-primary"
+                >
+                  <div className="text-2xl">{action.icon}</div>
+                  <h3 className="mt-2 text-sm font-bold text-text-primary">
+                    {action.title}
+                  </h3>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    {action.desc}
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </div>
 
@@ -313,20 +325,23 @@ export default function Dashboard() {
           </p>
 
           <div className="mt-5 flex flex-col gap-3">
-            {config.quickActions.map((action) => (
-              <Link
-                key={action.title}
-                href={action.href}
-                className="block rounded-xl border-l-2 border-primary bg-card p-4"
-              >
-                <p className="text-sm font-bold text-text-primary">
-                  {action.icon} {action.title}
-                </p>
-                <p className="mt-1 text-xs text-text-secondary">
-                  {action.desc}
-                </p>
-              </Link>
-            ))}
+            {config.quickActions.map((rawAction) => {
+              const action = resolveQuickAction(rawAction);
+              return (
+                <Link
+                  key={rawAction.title}
+                  href={action.href}
+                  className="block rounded-xl border-l-2 border-primary bg-card p-4"
+                >
+                  <p className="text-sm font-bold text-text-primary">
+                    {action.icon} {action.title}
+                  </p>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    {action.desc}
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </div>
 

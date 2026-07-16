@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import ThreePanelLayout from "../../components/ThreePanelLayout";
 import TopBar from "../../components/TopBar";
@@ -174,6 +174,7 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function TalentProfile() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
   const professional = allProfessionals.find((p) => p.id === id);
   const { user } = useUser();
@@ -458,6 +459,7 @@ export default function TalentProfile() {
         professional={hireTarget}
         viewerUserType={user.userType}
         onClose={() => setHireTarget(null)}
+        onViewHires={() => router.push("/fabmerch")}
       />
     </>
   );

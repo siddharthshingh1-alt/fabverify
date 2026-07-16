@@ -85,8 +85,8 @@ const USER_TYPES: UserTypeCard[] = [
 ];
 
 const ROUTE_BY_TYPE: Record<string, string> = {
-  "brand-buyer": "/onboarding/position",
-  "enterprise-brand": "/onboarding/enterprise",
+  "brand-buyer": "/onboarding/brand-builder",
+  "enterprise-brand": "/onboarding/position",
   manufacturer: "/onboarding/manufacturer",
   "fabric-mill": "/onboarding/supplier",
   "trim-supplier": "/onboarding/supplier",
@@ -100,6 +100,7 @@ const ROUTE_BY_TYPE: Record<string, string> = {
 
 const STORAGE_TYPE_BY_ID: Record<string, string> = {
   "brand-buyer": "buyer",
+  "enterprise-brand": "buyer",
   manufacturer: "manufacturer",
   "fabric-mill": "fabric_mill",
   "trim-supplier": "trim_supplier",
@@ -125,6 +126,15 @@ export default function UserTypeSelection() {
       localStorage.setItem("userType", userType);
       setUser({ userType: userType as UserType });
     }
+    try {
+      // Marks whether /onboarding/position was reached via the Enterprise
+      // Brand path — checked by that page to bounce regular Brand/Buyer
+      // users (and anyone landing there directly via URL) elsewhere.
+      localStorage.setItem(
+        "fabverify_onboarding_flow",
+        selectedCard.id === "enterprise-brand" ? "enterprise" : "standard"
+      );
+    } catch {}
     router.push(ROUTE_BY_TYPE[selectedCard.id] ?? "/dashboard");
   };
 

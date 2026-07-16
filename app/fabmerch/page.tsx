@@ -17,6 +17,8 @@ import type { FabMerchTabId } from "../config/screens";
 import { getVisibleQcPills, qcInspectorMatchesViewer } from "../lib/qcRelevance";
 import HireModal from "../components/HireModal";
 import type { HireModalProfessional } from "../components/HireModal";
+import { HIRES, getActiveHires, getCompletedHiresCount, getTotalSpent } from "../data/hires";
+import type { Hire, HireStatus } from "../data/hires";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -360,6 +362,209 @@ const TIER_COLORS: Record<string, string> = {
   platinum: "#e2e8f0",
 };
 
+const HIRE_STATUS_LABELS: Record<HireStatus, string> = {
+  active: "Active",
+  completed: "Completed ✓",
+  pending_start: "Pending Start",
+};
+
+const HIRE_STATUS_STYLES: Record<HireStatus, string> = {
+  active: "border-green-500/60 bg-green-500/15 text-green-400",
+  completed: "border-border-dark bg-background text-text-secondary",
+  pending_start: "border-amber-500/60 bg-amber-500/15 text-amber-400",
+};
+
+function HireCard({ hire }: { hire: Hire }) {
+  const progressPct = Math.round(
+    (hire.milestonesComplete / hire.milestonesTotal) * 100
+  );
+  const milestoneSuffix = hire.milestoneNote
+    ? ` — ${hire.milestoneNote}`
+    : hire.status === "completed"
+      ? " complete"
+      : "";
+
+  return (
+    <div className="mb-3 rounded-[10px] border border-border-dark bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary font-display text-sm font-bold text-navy">
+            {hire.name.charAt(0)}
+          </div>
+          <div>
+            <p className="text-sm font-bold text-white">{hire.name}</p>
+            <span className="mt-1 inline-block rounded-[20px] border border-primary/40 bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
+              {hire.role}
+            </span>
+          </div>
+        </div>
+        <span
+          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${HIRE_STATUS_STYLES[hire.status]}`}
+        >
+          {HIRE_STATUS_LABELS[hire.status]}
+        </span>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[13px] font-bold text-white">{hire.styleName}</p>
+        <p className="mt-1 text-xs text-text-secondary">
+          Managing: {hire.managingLabel}
+        </p>
+        <p className="mt-0.5 text-xs text-text-secondary">{hire.linkedLabel}</p>
+      </div>
+
+      <div className="mt-3">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-border-dark">
+          <div
+            className="h-full rounded-full bg-primary"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-text-secondary">
+          {hire.milestonesComplete} of {hire.milestonesTotal} milestones
+          {milestoneSuffix}
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
+        <div>
+          <p className="text-[11px] text-text-secondary">Agreed rate</p>
+          <p className="mt-0.5 text-xs font-bold text-white">{hire.rateLabel}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-text-secondary">Paid so far</p>
+          <p className="mt-0.5 text-xs font-bold text-green-400">
+            ₹{hire.paid.toLocaleString("en-IN")}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] text-text-secondary">Remaining</p>
+          <p className="mt-0.5 text-xs font-bold text-amber-400">
+            ₹{hire.due.toLocaleString("en-IN")}
+          </p>
+        </div>
+      </div>
+
+      <div
+        className={`mt-3 flex flex-col gap-2 border-t border-border-dark pt-3 sm:flex-row sm:items-center ${
+          hire.bottomLeftLabel ? "sm:justify-between" : "sm:justify-end"
+        }`}
+      >
+        {hire.bottomLeftLabel && (
+          <p className="text-[11px] text-text-secondary">{hire.bottomLeftLabel}</p>
+        )}
+        <div className="flex gap-3">
+          {hire.bottomRightAction === "download" ? (
+            <button type="button" className="text-xs font-semibold text-primary">
+              Download Tech Pack →
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="text-xs font-semibold text-text-secondary"
+              >
+                Message →
+              </button>
+              <button type="button" className="text-xs font-semibold text-primary">
+                View Work →
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyHiresEmptyState() {
+  return (
+    <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-16 text-center">
+      <div className="text-5xl">👔</div>
+      <p className="mt-4 text-base font-bold text-white">No active hires yet</p>
+      <p className="mt-2 max-w-sm text-[13px] text-text-secondary">
+        Hire a verified professional to manage your orders, create tech
+        packs, or inspect your production.
+      </p>
+    </div>
+  );
+}
+
+function HireSummaryPanel({
+  onPostRequirement,
+  onBrowseProfessionals,
+}: {
+  onPostRequirement: () => void;
+  onBrowseProfessionals: () => void;
+}) {
+  const activeHires = getActiveHires();
+  const completedCount = getCompletedHiresCount();
+  const totalSpent = getTotalSpent();
+
+  return (
+    <>
+      <p className="text-sm font-bold text-white">Hire Summary</p>
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Active hires</span>
+          <span className="font-bold text-green-400">{activeHires.length}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Completed</span>
+          <span className="font-bold text-text-secondary">{completedCount}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Total spent</span>
+          <span className="font-bold text-primary">
+            ₹{totalSpent.toLocaleString("en-IN")}
+          </span>
+        </div>
+      </div>
+
+      {activeHires.length > 0 && (
+        <>
+          <div className="my-5 h-px bg-border-dark" />
+          <p className="text-sm font-bold text-white">Active Professionals</p>
+          <div className="mt-3 flex flex-col gap-2.5">
+            {activeHires.map((hire) => (
+              <div key={hire.id} className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary font-display text-xs font-bold text-navy">
+                  {hire.name.charAt(0)}
+                </div>
+                <div>
+                  <p className="text-[13px] font-bold text-text-primary">
+                    {hire.name}
+                  </p>
+                  <p className="text-[11px] text-text-secondary">{hire.role}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="my-5 h-px bg-border-dark" />
+
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onPostRequirement}
+          className="w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-bold text-navy"
+        >
+          Post a Requirement →
+        </button>
+        <button
+          type="button"
+          onClick={onBrowseProfessionals}
+          className="w-full rounded-lg border border-primary px-4 py-2.5 text-center text-sm font-semibold text-primary"
+        >
+          Browse Professionals →
+        </button>
+      </div>
+    </>
+  );
+}
+
 function TalentFabMerchProfile() {
   const { user, userLabel } = useUser();
   const profileConfig = screenConfig.profile[user.userType];
@@ -465,6 +670,11 @@ export default function FabMerch() {
   const visibleTabList = TABS.filter((tab) =>
     fabMerchConfig.visibleTabs.includes(tab.id)
   );
+  const showMyHiresTab = fabMerchConfig.visibleTabs.includes("my-hires");
+  const tabBarItems: { id: TabId; label: string }[] = [
+    ...(showMyHiresTab ? [{ id: "my-hires" as TabId, label: "My Hires" }] : []),
+    ...visibleTabList.map((tab) => ({ id: tab.id, label: tab.label })),
+  ];
 
   const [activeTab, setActiveTab] = useState<TabId>("merchandisers");
   const [searchText, setSearchText] = useState("");
@@ -510,7 +720,8 @@ export default function FabMerch() {
     return <TalentFabMerchProfile />;
   }
 
-  const currentTab = TABS.find((tab) => tab.id === activeTab)!;
+  const showMyHires = activeTab === "my-hires";
+  const currentTab = TABS.find((tab) => tab.id === activeTab) ?? TABS[0];
 
   const filteredProfessionals = currentTab.data
     .filter((professional) => {
@@ -565,6 +776,11 @@ export default function FabMerch() {
     });
   };
 
+  const handleViewHires = () => {
+    setHireTarget(null);
+    setActiveTab("my-hires");
+  };
+
   const toggleReqStage = (stage: string) => {
     setReqStages((current) =>
       current.includes(stage)
@@ -594,9 +810,9 @@ export default function FabMerch() {
     setReqSubmitted(true);
   };
 
-  const tabsBar = visibleTabList.length > 1 && (
+  const tabsBar = tabBarItems.length > 1 && (
     <div className="flex gap-6 border-b border-border-dark">
-      {visibleTabList.map((tab) => (
+      {tabBarItems.map((tab) => (
         <button
           key={tab.id}
           type="button"
@@ -685,7 +901,7 @@ export default function FabMerch() {
     </>
   );
 
-  const rightPanel = (
+  const browseRightPanel = (
     <>
       <p className="text-base font-bold text-white">How FabTalent Works</p>
       <div className="mt-4 flex flex-col gap-4">
@@ -759,12 +975,37 @@ export default function FabMerch() {
     </>
   );
 
+  const rightPanel = showMyHires ? (
+    <HireSummaryPanel
+      onPostRequirement={openRequirementModal}
+      onBrowseProfessionals={() =>
+        setActiveTab(visibleTabList[0]?.id ?? "merchandisers")
+      }
+    />
+  ) : (
+    browseRightPanel
+  );
+
+  const myHiresContent = HIRES.length === 0 ? (
+    <MyHiresEmptyState />
+  ) : (
+    <div className="mt-5">
+      {HIRES.map((hire) => (
+        <HireCard key={hire.id} hire={hire} />
+      ))}
+    </div>
+  );
+
   const centrePanel = (
     <>
       <TopBar title="FabMerch" subtitle={fabMerchConfig.subtitle} />
 
       <div className="px-6 py-6">
         {tabsBar}
+        {showMyHires ? (
+          myHiresContent
+        ) : (
+          <>
         {filterBar}
 
         <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -788,6 +1029,8 @@ export default function FabMerch() {
               Try adjusting your search or clearing filters
             </p>
           </div>
+        )}
+          </>
         )}
       </div>
     </>
@@ -1060,6 +1303,10 @@ export default function FabMerch() {
           </p>
 
           <div className="mt-4">{tabsBar}</div>
+          {showMyHires ? (
+            myHiresContent
+          ) : (
+            <>
           {filterBar}
 
           <div className="mt-4 flex flex-col gap-3">
@@ -1083,6 +1330,8 @@ export default function FabMerch() {
                 Try adjusting your search or clearing filters
               </p>
             </div>
+          )}
+            </>
           )}
         </div>
 
@@ -1108,6 +1357,7 @@ export default function FabMerch() {
         professional={hireTarget}
         viewerUserType={user.userType}
         onClose={() => setHireTarget(null)}
+        onViewHires={handleViewHires}
       />
       {requirementModal}
     </>

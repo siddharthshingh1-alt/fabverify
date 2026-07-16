@@ -4,6 +4,7 @@ import Link from "next/link";
 import ThreePanelLayout from "../components/ThreePanelLayout";
 import TopBar from "../components/TopBar";
 import { useUser } from "../context/UserContext";
+import { getActiveHiresCount } from "../data/hires";
 
 type Status = "On Track" | "Delayed" | "In Progress" | "Ready" | "Delivered";
 
@@ -93,6 +94,7 @@ const SEASON_HEALTH_ROWS = [
 
 export function MdCeoDashboard() {
   const { user, greeting } = useUser();
+  const activeHiresCount = getActiveHiresCount();
 
   const centrePanel = (
     <>
@@ -183,6 +185,14 @@ export function MdCeoDashboard() {
             className="rounded-lg border border-primary px-5 py-2.5 text-sm font-bold text-primary"
           >
             👥 View Team Activity
+          </Link>
+          <Link
+            href="/fabmerch"
+            className="rounded-lg border border-primary px-5 py-2.5 text-sm font-bold text-primary"
+          >
+            {activeHiresCount > 0
+              ? `👔 My Hires (${activeHiresCount} active)`
+              : "Hire Merchandiser →"}
           </Link>
         </div>
       </div>

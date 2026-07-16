@@ -20,10 +20,12 @@ function HireModalContent({
   professional,
   viewerUserType,
   onClose,
+  onViewHires,
 }: {
   professional: HireModalProfessional;
   viewerUserType: UserType;
   onClose: () => void;
+  onViewHires: () => void;
 }) {
   const visiblePills =
     professional.tabId === "qc-inspectors"
@@ -31,6 +33,7 @@ function HireModalContent({
       : professional.extraPills;
 
   const [selectedStage, setSelectedStage] = useState(visiblePills[0] ?? "");
+  const [styleName, setStyleName] = useState("");
   const [requirementText, setRequirementText] = useState("");
   const [timelineDate, setTimelineDate] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -65,18 +68,33 @@ function HireModalContent({
           <div className="flex flex-col items-center py-8 text-center">
             <div className="text-5xl">✅</div>
             <p className="mt-4 text-lg font-bold text-white">
-              Hire request sent!
+              Hire Confirmed!
             </p>
             <p className="mt-2 text-sm text-text-secondary">
-              {professional.name} will be notified and will respond shortly.
+              {professional.name} has been hired for{" "}
+              {selectedStage || "the selected stage"} of{" "}
+              {styleName.trim() || "your project"}.
             </p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-bold text-navy"
-            >
-              Close
-            </button>
+            <p className="mt-2 text-sm text-text-secondary">
+              Payment of {professional.rateRange} is held in escrow and will
+              be released when the work is approved.
+            </p>
+            <div className="mt-6 flex w-full flex-col gap-3">
+              <button
+                type="button"
+                onClick={onViewHires}
+                className="w-full rounded-lg bg-primary px-6 py-2.5 text-sm font-bold text-navy"
+              >
+                View My Hires →
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full rounded-lg border border-border-dark px-6 py-2.5 text-sm font-semibold text-text-secondary"
+              >
+                Continue Browsing
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -104,6 +122,19 @@ function HireModalContent({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="mt-5">
+          <p className="text-sm font-medium text-text-primary">
+            Style or project name (optional):
+          </p>
+          <input
+            type="text"
+            value={styleName}
+            onChange={(event) => setStyleName(event.target.value)}
+            placeholder="e.g. Style 04 — Block Print Kurta"
+            className="mt-2 w-full rounded-[6px] border border-border-dark bg-background p-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary focus:border-primary"
+          />
         </div>
 
         <div className="mt-5">
@@ -153,7 +184,7 @@ function HireModalContent({
             onClick={() => setSubmitted(true)}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
           >
-            Send Hire Request →
+            Confirm Hire →
           </button>
         </div>
           </>
@@ -167,10 +198,12 @@ export default function HireModal({
   professional,
   viewerUserType,
   onClose,
+  onViewHires,
 }: {
   professional: HireModalProfessional | null;
   viewerUserType: UserType;
   onClose: () => void;
+  onViewHires: () => void;
 }) {
   if (!professional) return null;
 
@@ -180,6 +213,7 @@ export default function HireModal({
       professional={professional}
       viewerUserType={viewerUserType}
       onClose={onClose}
+      onViewHires={onViewHires}
     />
   );
 }

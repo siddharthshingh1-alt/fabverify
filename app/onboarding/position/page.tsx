@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
 import type { Position } from "../../context/UserContext";
@@ -55,6 +55,24 @@ export default function PositionSelection() {
   const router = useRouter();
   const { setUser } = useUser();
   const [selected, setSelected] = useState<Position | null>(null);
+  const [allowed, setAllowed] = useState(false);
+
+  // This screen only makes sense for the Enterprise Brand signup path. A
+  // regular Brand/Buyer (or anyone landing here directly via URL) gets
+  // bounced straight to the brand builder wizard instead.
+  useEffect(() => {
+    let flow: string | null = null;
+    try {
+      flow = localStorage.getItem("fabverify_onboarding_flow");
+    } catch {}
+    if (flow !== "enterprise") {
+      router.replace("/onboarding/brand-builder");
+      return;
+    }
+    setAllowed(true);
+  }, [router]);
+
+  if (!allowed) return null;
 
   const handleContinue = () => {
     if (!selected) return;
@@ -62,7 +80,7 @@ export default function PositionSelection() {
       localStorage.setItem("fabverify_position", selected);
     } catch {}
     setUser({ position: selected });
-    router.push(selected === "solo_founder" ? "/onboarding/brand-builder" : "/dashboard");
+    router.push("/onboarding/enterprise");
   };
 
   return (
@@ -85,10 +103,10 @@ export default function PositionSelection() {
         </div>
 
         <h1 className="mt-6 text-center font-display text-[22px] font-bold text-white">
-          One more thing
+          What is your role in the company?
         </h1>
         <p className="mt-1 text-center text-sm text-text-secondary">
-          So we show you exactly what matters to you
+          We will customise your dashboard for your specific responsibilities
         </p>
 
         <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3">

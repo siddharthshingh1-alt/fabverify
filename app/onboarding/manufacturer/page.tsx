@@ -30,14 +30,8 @@ const UNIT_TYPES = [
   {
     id: "shared-unit",
     emoji: "🤝",
-    title: "Shared Unit",
-    description: "I share a production space",
-  },
-  {
-    id: "job-work-unit",
-    emoji: "📦",
-    title: "Job Work Unit",
-    description: "I do specific processes only",
+    title: "Shared Factory",
+    description: "I share a production unit with other manufacturers",
   },
 ];
 
