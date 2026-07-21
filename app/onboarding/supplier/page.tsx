@@ -10,6 +10,8 @@ import {
   TextField,
 } from "../components";
 import { useUser } from "../../context/UserContext";
+import { getBasePath } from "../../lib/routing";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const TOTAL_STEPS = 3;
 
@@ -137,7 +139,7 @@ export default function SupplierOnboarding() {
         fabscore: 0,
         city,
       });
-      router.push("/dashboard");
+      router.push(consumePendingChatRedirect() ?? `${getBasePath(supplierType)}/dashboard`);
       return;
     }
     setStep((current) => Math.min(TOTAL_STEPS, current + 1));

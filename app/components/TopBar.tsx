@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useUser } from "../context/UserContext";
+import { getUnreadCount } from "../chat/data";
 
 type Notification = {
   id: string;
@@ -76,11 +79,17 @@ export default function TopBar({
   title,
   subtitle,
   rightContent,
+  alertNotification,
 }: {
   title: string;
   subtitle?: string;
   rightContent?: React.ReactNode;
+  alertNotification?: { title: string; detail: string };
 }) {
+  const router = useRouter();
+  const { user, mounted } = useUser();
+  const chatUnread = mounted ? getUnreadCount(user.userType, Boolean(user.position)) : 0;
+
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const [showSearch, setShowSearch] = useState(false);
@@ -158,6 +167,23 @@ export default function TopBar({
         <div className="flex items-center gap-4">
           {rightContent}
 
+          <button
+            type="button"
+            aria-label="Messages"
+            onClick={() => router.push("/chat")}
+            className="relative cursor-pointer text-lg text-text-primary"
+          >
+            💬
+            {chatUnread > 0 && (
+              <span
+                className="absolute flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white"
+                style={{ top: "-4px", right: "-4px" }}
+              >
+                {chatUnread}
+              </span>
+            )}
+          </button>
+
           <div className="relative" ref={notificationsRef}>
             <button
               type="button"
@@ -173,6 +199,12 @@ export default function TopBar({
                 >
                   {unreadCount}
                 </span>
+              )}
+              {alertNotification && (
+                <span
+                  className="absolute h-2 w-2 rounded-full bg-amber-400"
+                  style={{ bottom: "-2px", right: "-2px" }}
+                />
               )}
             </button>
 
@@ -203,6 +235,25 @@ export default function TopBar({
                 </div>
 
                 <div className="flex flex-col">
+                  {alertNotification && (
+                    <div
+                      className="relative border-b border-border-dark px-4 py-3"
+                      style={{ borderLeft: "2px solid #f2ca50" }}
+                    >
+                      <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-amber-400" />
+                      <div className="flex gap-2.5 pr-4">
+                        <span className="shrink-0 text-base">⚠️</span>
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-text-primary">
+                            {alertNotification.title}
+                          </p>
+                          <p className="mt-0.5 text-[12px] text-text-secondary">
+                            {alertNotification.detail}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {notifications.map((notification) => (
                     <div
                       key={notification.id}

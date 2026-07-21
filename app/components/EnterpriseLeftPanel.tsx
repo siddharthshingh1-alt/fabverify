@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { EnterprisePosition } from "../context/UserContext";
 
 type NavItem = { icon: string; label: string; href: string };
@@ -72,6 +73,7 @@ export default function EnterpriseLeftPanel() {
   const [position, setPosition] = useState<EnterprisePosition | null>(null);
   const [greeting, setGreeting] = useState("Good morning");
   const [mounted, setMounted] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -112,6 +114,7 @@ export default function EnterpriseLeftPanel() {
     }`;
 
   return (
+    <>
     <div className="flex h-full flex-col p-5">
       <div className="mb-6 flex items-center gap-1 font-display text-lg font-bold">
         <span>🧵</span>
@@ -168,14 +171,165 @@ export default function EnterpriseLeftPanel() {
           <p className="mt-2 text-sm font-semibold text-text-primary">
             Foundational Plan
           </p>
-          <Link
-            href="/enterprise/dashboard"
+          <button
+            type="button"
+            onClick={() => setShowUpgradeModal(true)}
             className="mt-1.5 inline-block text-xs font-semibold text-primary"
           >
             Upgrade plan →
-          </Link>
+          </button>
         </div>
       </div>
     </div>
+
+    {mounted && showUpgradeModal && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-5"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowUpgradeModal(false);
+          }}
+        >
+          <div
+            className="relative w-full max-w-[520px] max-h-[90vh] overflow-y-auto rounded-xl border border-border-dark bg-card p-7"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setShowUpgradeModal(false)}
+              className="absolute right-4 top-4 text-lg leading-none text-text-secondary hover:text-text-primary"
+            >
+              ✕
+            </button>
+
+            <p className="font-display text-xl font-bold text-white">
+              Upgrade Your Plan
+            </p>
+            <p className="mb-5 text-[13px] text-text-secondary">
+              Unlock more features as you grow
+            </p>
+
+            <div className="flex flex-col gap-4">
+              <div className="rounded-lg border border-primary bg-background p-4">
+                <span className="inline-block rounded-[20px] bg-primary px-2.5 py-0.5 text-[10px] font-bold text-navy">
+                  Current Plan
+                </span>
+                <p className="mt-2 text-base font-bold text-white">Foundational</p>
+                <p className="mt-0.5 text-lg font-bold text-primary">
+                  ₹2L / month
+                </p>
+                <div className="mt-3 flex flex-col gap-1">
+                  {[
+                    "Up to 50 styles per season",
+                    "Up to 50 vendors",
+                    "1,000 AI calls per month",
+                  ].map((line) => (
+                    <p key={line} className="text-xs text-text-secondary">
+                      • {line}
+                    </p>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs italic text-text-secondary">
+                  Your current plan
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-border-dark bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-base font-bold text-white">Growth</p>
+                  <span className="inline-block rounded-[20px] bg-primary px-2.5 py-0.5 text-[10px] font-bold text-navy">
+                    Recommended ⭐
+                  </span>
+                </div>
+                <p className="mt-0.5 text-lg font-bold text-primary">
+                  ₹4L / month
+                </p>
+                <div className="mt-3 flex flex-col gap-1">
+                  {[
+                    "Up to 200 styles per season",
+                    "Up to 200 vendors",
+                    "5,000 AI calls per month",
+                    "ERP integration — 1 system",
+                    "FabFloor + FabPLM included",
+                  ].map((line) => (
+                    <p key={line} className="text-xs text-text-secondary">
+                      • {line}
+                    </p>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="mt-4 w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-navy"
+                >
+                  Upgrade to Growth →
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-border-dark bg-card p-4">
+                <p className="text-base font-bold text-white">Enterprise</p>
+                <p className="mt-0.5 text-lg font-bold text-primary">
+                  ₹8L / month
+                </p>
+                <div className="mt-3 flex flex-col gap-1">
+                  {[
+                    "Unlimited styles and vendors",
+                    "Unlimited AI calls",
+                    "Unlimited ERP integrations",
+                    "Dedicated account manager",
+                    "99.9% SLA guarantee",
+                  ].map((line) => (
+                    <p key={line} className="text-xs text-text-secondary">
+                      • {line}
+                    </p>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="mt-4 w-full rounded-lg border border-primary py-2.5 text-sm font-bold text-primary"
+                >
+                  Upgrade to Enterprise →
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-lg border-l-4 border-primary bg-background p-3">
+              <p className="text-xs text-text-secondary">
+                Tier upgrades are pre-agreed in your contract. You will receive
+                30 days advance notice before any upgrade activates.
+              </p>
+            </div>
+
+            <div className="mt-5">
+              <p className="text-[13px] text-text-secondary">
+                Talk to us about upgrading
+              </p>
+              <a
+                href="https://wa.me/919876543210"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 block text-[13px] font-semibold text-primary"
+              >
+                WhatsApp: +91 98765 43210
+              </a>
+              <a
+                href="mailto:enterprise@fabverify.com"
+                className="mt-1 block text-[13px] font-semibold text-primary"
+              >
+                Or email: enterprise@fabverify.com
+              </a>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowUpgradeModal(false)}
+              className="mt-5 w-full rounded-lg border border-border-dark py-2.5 text-sm font-semibold text-text-secondary"
+            >
+              Close
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }

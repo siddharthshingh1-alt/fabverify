@@ -4,47 +4,57 @@ import { usePathname } from 'next/navigation'
 import theme from '../theme'
 import content from '../content'
 import { useUser } from '../context/UserContext'
-import type { Position } from '../context/UserContext'
+import type { Position, UserType } from '../context/UserContext'
 import screenConfig from '../config/screens'
+import { getBasePath, getOrdersSlug, getDiscoverySlug } from '../lib/routing'
+import { getUnreadCount } from '../chat/data'
 
 type NavItem = { href: string; icon: string; label: string }
 
+const HAS_SAMPLES: UserType[] = ['buyer', 'manufacturer', 'fabric_mill', 'trim_supplier']
+const HAS_ANALYTICS: UserType[] = [
+  'buyer', 'manufacturer', 'fabric_mill', 'trim_supplier', 'artisan', 'job_worker', 'designer',
+]
+
+// Buyer sub-positions link into the already-separate /enterprise/* section and
+// /brand/* (their own base path is always '/brand' since this nav only ever
+// applies to userType 'buyer').
 const POSITION_NAV: Partial<Record<Position, NavItem[]>> = {
   md_ceo: [
-    { icon: '🏠', label: 'Home', href: '/dashboard' },
+    { icon: '🏠', label: 'Home', href: '/brand/dashboard' },
     { icon: '📊', label: 'Season Overview', href: '/enterprise/analytics' },
-    { icon: '⚠', label: 'Exceptions', href: '/orders' },
+    { icon: '⚠', label: 'Exceptions', href: '/brand/orders' },
     { icon: '👥', label: 'My Team', href: '/enterprise/team' },
     { icon: '📈', label: 'Analytics', href: '/enterprise/analytics' },
   ],
   head_operations: [
-    { icon: '🏠', label: 'Home', href: '/dashboard' },
-    { icon: '📦', label: 'All Orders', href: '/orders' },
+    { icon: '🏠', label: 'Home', href: '/brand/dashboard' },
+    { icon: '📦', label: 'All Orders', href: '/brand/orders' },
     { icon: '🏭', label: 'Vendors', href: '/enterprise/vendors' },
     { icon: '📊', label: 'Analytics', href: '/enterprise/analytics' },
-    { icon: '⚠', label: 'Exceptions', href: '/orders' },
+    { icon: '⚠', label: 'Exceptions', href: '/brand/orders' },
   ],
   merchandiser: [
-    { icon: '🏠', label: 'Home', href: '/dashboard' },
-    { icon: '📦', label: 'My Orders', href: '/orders' },
-    { icon: '📋', label: 'Sample Briefs', href: '/samples' },
-    { icon: '🔍', label: 'Find Manufacturers', href: '/manufacturers' },
-    { icon: '👔', label: 'FabMerch', href: '/fabmerch' },
-    { icon: '💰', label: 'FabPrice', href: '/fabprice' },
+    { icon: '🏠', label: 'Home', href: '/brand/dashboard' },
+    { icon: '📦', label: 'My Orders', href: '/brand/orders' },
+    { icon: '📋', label: 'Sample Briefs', href: '/brand/samples' },
+    { icon: '🔍', label: 'Find Manufacturers', href: '/brand/manufacturers' },
+    { icon: '👔', label: 'FabMerch', href: '/brand/fabmerch' },
+    { icon: '💰', label: 'FabPrice', href: '/brand/fabprice' },
   ],
   designer: [
-    { icon: '🏠', label: 'Home', href: '/dashboard' },
-    { icon: '✏️', label: 'My Styles', href: '/orders' },
-    { icon: '📋', label: 'Tech Packs', href: '/samples' },
-    { icon: '🔍', label: 'Find Manufacturers', href: '/manufacturers' },
-    { icon: '🎨', label: 'FabMerch', href: '/fabmerch' },
+    { icon: '🏠', label: 'Home', href: '/brand/dashboard' },
+    { icon: '✏️', label: 'My Styles', href: '/brand/orders' },
+    { icon: '📋', label: 'Tech Packs', href: '/brand/samples' },
+    { icon: '🔍', label: 'Find Manufacturers', href: '/brand/manufacturers' },
+    { icon: '🎨', label: 'FabMerch', href: '/brand/fabmerch' },
   ],
   accounts: [
-    { icon: '🏠', label: 'Home', href: '/dashboard' },
-    { icon: '💳', label: 'Payments', href: '/orders' },
-    { icon: '📊', label: 'Budget', href: '/analytics' },
-    { icon: '🧾', label: 'Invoices', href: '/credit' },
-    { icon: '📈', label: 'Analytics', href: '/analytics' },
+    { icon: '🏠', label: 'Home', href: '/brand/dashboard' },
+    { icon: '💳', label: 'Payments', href: '/brand/orders' },
+    { icon: '📊', label: 'Budget', href: '/brand/analytics' },
+    { icon: '🧾', label: 'Invoices', href: '/brand/credit' },
+    { icon: '📈', label: 'Analytics', href: '/brand/analytics' },
   ],
 }
 
@@ -52,37 +62,59 @@ export default function LeftPanel() {
   const pathname = usePathname()
   const { user, userLabel, greeting, isSupplySide, isTalent, mounted } = useUser()
   const leftNav = screenConfig.leftNav[user.userType]
+  const basePath = getBasePath(user.userType)
+  const ordersSlug = getOrdersSlug(user.userType)
+  const discoverySlug = getDiscoverySlug(user.userType)
 
   const positionNav =
     mounted && user.userType === 'buyer' && user.position
       ? POSITION_NAV[user.position]
       : undefined
 
+  const unreadMessages = mounted ? getUnreadCount(user.userType, Boolean(user.position)) : 0
+
+  // Manufacturer/mill/supplier/artisan/job-worker have no fabmerch route of
+  // their own — "Book QC Inspector" reuses the brand's shared marketplace.
+  // Talent types don't book talent, they *are* the talent, so this nav slot
+  // becomes "My FabTalent" pointing at their own profile.
+  const fabmerchHref = user.userType === 'buyer'
+    ? `${basePath}/fabmerch`
+    : isTalent
+      ? `${basePath}/profile`
+      : '/brand/fabmerch'
+
   const navItems: NavItem[] = positionNav ?? [
-    { href: '/dashboard', icon: '🏠', label: content.nav.home },
+    { href: `${basePath}/dashboard`, icon: '🏠', label: content.nav.home },
     ...(isSupplySide || isTalent
-      ? [{ href: '/enquiries', icon: '📬', label: 'Enquiries' }]
+      ? [{ href: `${basePath}/enquiries`, icon: '📬', label: 'Enquiries' }]
       : []),
-    { href: '/orders', icon: '📦', label: leftNav.ordersLabel },
-    { href: '/manufacturers', icon: '🔍', label: leftNav.manufacturersLabel },
-    { href: '/fabmerch', icon: '👔', label: leftNav.fabmerchLabel },
-    { href: '/credit', icon: '💳', label: content.nav.credit },
+    { href: `${basePath}/${ordersSlug}`, icon: '📦', label: leftNav.ordersLabel },
+    ...(user.userType === 'buyer'
+      ? [{ href: '/brand/orders/new', icon: '📦', label: 'Place Order' }]
+      : []),
+    { href: `${basePath}/${discoverySlug}`, icon: '🔍', label: leftNav.manufacturersLabel },
+    { href: fabmerchHref, icon: '👔', label: leftNav.fabmerchLabel },
+    { href: `${basePath}/credit`, icon: '💳', label: content.nav.credit },
   ]
 
   const toolItems: NavItem[] = positionNav
     ? []
     : [
-        { href: '/samples', icon: '📋', label: leftNav.samplesLabel },
-        { href: '/fabprice', icon: '💰', label: content.nav.fabprice },
-        {
-          href: '/analytics',
-          icon: '📊',
-          label: isSupplySide
-            ? 'Business Analytics'
-            : isTalent
-              ? 'Performance'
-              : 'Analytics',
-        },
+        ...(HAS_SAMPLES.includes(user.userType)
+          ? [{ href: `${basePath}/samples`, icon: '📋', label: leftNav.samplesLabel }]
+          : []),
+        { href: `${basePath}/fabprice`, icon: '💰', label: content.nav.fabprice },
+        ...(HAS_ANALYTICS.includes(user.userType)
+          ? [{
+              href: `${basePath}/analytics`,
+              icon: '📊',
+              label: isSupplySide
+                ? 'Business Analytics'
+                : isTalent
+                  ? 'Performance'
+                  : 'Analytics',
+            }]
+          : []),
       ]
 
   const fabscoreTitle = isTalent ? 'Your FabTalent Score' : content.fabscore.title
@@ -196,6 +228,49 @@ export default function LeftPanel() {
         </div>
       </div>
 
+      {/* FabChat — the separate mobile-first chat experience at /chat */}
+      <Link href="/chat" style={{
+        display: 'block',
+        padding: '10px 12px',
+        borderRadius: theme.radius.md,
+        marginBottom: '14px',
+        textDecoration: 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            color: theme.colors.primary,
+            fontSize: '14px',
+            fontWeight: 600,
+          }}>
+            <span>💬</span>
+            <span>FabChat ↗</span>
+          </span>
+          {unreadMessages > 0 && (
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '18px',
+              height: '18px',
+              padding: '0 5px',
+              borderRadius: '9999px',
+              background: '#ef4444',
+              color: '#fff',
+              fontSize: '10px',
+              fontWeight: 700,
+            }}>
+              {unreadMessages}
+            </span>
+          )}
+        </div>
+        <div style={{ marginTop: '2px', paddingLeft: '26px', color: theme.colors.textSecondary, fontSize: '10px' }}>
+          Opens on mobile too
+        </div>
+      </Link>
+
       {/* Workspace section */}
       <div style={{
         fontSize: '10px',
@@ -266,7 +341,7 @@ export default function LeftPanel() {
           }}>
             {fabscoreLockedMessage}
           </div>
-          <Link href="/verification" style={{
+          <Link href={`${basePath}/verification`} style={{
             display: 'block',
             textAlign: 'center',
             padding: '8px',

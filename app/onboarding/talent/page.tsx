@@ -10,6 +10,8 @@ import {
   UploadBox,
 } from "../components";
 import { useUser } from "../../context/UserContext";
+import { getBasePath } from "../../lib/routing";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const TOTAL_STEPS = 4;
 
@@ -222,7 +224,11 @@ export default function TalentOnboarding() {
       localStorage.setItem("qcCitiesCovered", travelCities.join(", "));
       localStorage.setItem("qcTurnaround", turnaround);
     }
-    router.push(verified ? "/verification" : "/dashboard");
+    if (verified) {
+      router.push(`${getBasePath(talentType)}/verification`);
+      return;
+    }
+    router.push(consumePendingChatRedirect() ?? `${getBasePath(talentType)}/dashboard`);
   };
 
   const stepLabel = `Step ${step} of ${TOTAL_STEPS}`;

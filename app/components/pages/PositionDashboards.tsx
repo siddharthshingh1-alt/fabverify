@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import ThreePanelLayout from "../components/ThreePanelLayout";
-import TopBar from "../components/TopBar";
-import { useUser } from "../context/UserContext";
-import { getActiveHiresCount } from "../data/hires";
+import ThreePanelLayout from "../ThreePanelLayout";
+import TopBar from "../TopBar";
+import { useUser } from "../../context/UserContext";
+import { getActiveHiresCount } from "../../data/hires";
 
 type Status = "On Track" | "Delayed" | "In Progress" | "Ready" | "Delivered";
 

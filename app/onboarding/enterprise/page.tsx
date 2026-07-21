@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
 import type { EnterprisePosition } from "../../context/UserContext";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const ROLES = [
   "MD / CEO",
@@ -107,7 +108,7 @@ export default function EnterpriseOnboarding() {
     if (position) {
       setUser({ enterprisePosition: position });
     }
-    router.push("/enterprise/dashboard");
+    router.push(consumePendingChatRedirect() ?? "/enterprise/dashboard");
   };
 
   return (

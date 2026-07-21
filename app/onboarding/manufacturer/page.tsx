@@ -11,6 +11,7 @@ import {
   TextField,
 } from "../components";
 import { useUser } from "../../context/UserContext";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const TOTAL_STEPS = 4;
 
@@ -288,7 +289,7 @@ export default function ManufacturerOnboarding() {
                 fabscore: 0,
                 city,
               });
-              router.push("/verification");
+              router.push("/manufacturer/verification");
             }}
             onSkip={() => {
               setUser({
@@ -298,7 +299,7 @@ export default function ManufacturerOnboarding() {
                 fabscore: 0,
                 city,
               });
-              router.push("/dashboard");
+              router.push(consumePendingChatRedirect() ?? "/manufacturer/dashboard");
             }}
           />
         )}

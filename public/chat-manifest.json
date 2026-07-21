@@ -1,0 +1,16 @@
+{
+  "name": "FabChat",
+  "short_name": "FabChat",
+  "description": "FabVerify Messages",
+  "start_url": "/chat",
+  "display": "standalone",
+  "background_color": "#07122a",
+  "theme_color": "#07122a",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

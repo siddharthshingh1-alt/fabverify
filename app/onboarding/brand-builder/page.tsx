@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const TOTAL_STEPS = 5;
 
@@ -66,7 +67,7 @@ export default function BrandBuilderOnboarding() {
   useEffect(() => {
     if (!isComplete) return;
     const timer = setTimeout(() => {
-      router.push("/dashboard");
+      router.push(consumePendingChatRedirect() ?? "/brand/dashboard");
     }, 1500);
     return () => clearTimeout(timer);
   }, [isComplete, router]);

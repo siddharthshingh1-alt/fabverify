@@ -10,6 +10,7 @@ import {
   UploadBox,
 } from "../components";
 import { useUser } from "../../context/UserContext";
+import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
 
 const TOTAL_STEPS = 3;
 
@@ -101,7 +102,7 @@ export default function ArtisanOnboarding() {
         fabscore: 0,
         city,
       });
-      router.push("/dashboard");
+      router.push(consumePendingChatRedirect() ?? "/artisan/dashboard");
       return;
     }
     setStep((current) => Math.min(TOTAL_STEPS, current + 1));

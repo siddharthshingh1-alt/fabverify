@@ -3,6 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { consumePendingChatRedirect } from "../lib/postAuthRedirect";
+
+// A profile already existing at this point means this is a returning user
+// re-verifying (e.g. bounced here by ChatAuthGuard), not a brand-new
+// signup — send them straight back to what they were trying to reach
+// instead of through onboarding again. A first-time signup has no profile
+// yet, so the pending redirect is left alone; the onboarding flow's own
+// terminal step picks it up once a profile actually exists.
+const postVerifyRoute = () =>
+  localStorage.getItem("fabverify_profile") ? consumePendingChatRedirect() : null;
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
@@ -58,7 +68,7 @@ export default function SignUp() {
     if (next.every((d) => d !== "") && !isVerifying) {
       setIsVerifying(true);
       setTimeout(() => {
-        router.push("/onboarding/profile");
+        router.push(postVerifyRoute() ?? "/onboarding/profile");
       }, 800);
     }
   };
@@ -76,7 +86,7 @@ export default function SignUp() {
     if (!isOtpComplete || isVerifying) return;
     setIsVerifying(true);
     setTimeout(() => {
-      router.push("/onboarding/type");
+      router.push(postVerifyRoute() ?? "/onboarding/type");
     }, 1500);
   };
 

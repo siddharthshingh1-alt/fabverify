@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import {
+  consumePendingChatRedirect,
+  peekPendingChatRedirect,
+} from "../lib/postAuthRedirect";
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
@@ -14,7 +18,19 @@ export default function LogIn() {
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [chatRedirectPending, setChatRedirectPending] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  // Already has a local session — nothing to log in to. Send them back to
+  // whatever they were trying to reach (e.g. bounced here by
+  // ChatAuthGuard) or their dashboard, same as a fresh login would.
+  useEffect(() => {
+    if (localStorage.getItem("fabverify_profile")) {
+      router.replace(consumePendingChatRedirect() ?? "/dashboard");
+      return;
+    }
+    setChatRedirectPending(!!peekPendingChatRedirect());
+  }, [router]);
 
   useEffect(() => {
     if (step !== "otp") return;
@@ -27,8 +43,11 @@ export default function LogIn() {
   const isPhoneValid = phone.length === 10;
   const isOtpComplete = otp.every((digit) => digit !== "");
 
-  const postLoginRoute = () =>
-    localStorage.getItem("fabverify_profile") ? "/dashboard" : "/onboarding/profile";
+  const postLoginRoute = () => {
+    const chatRedirect = consumePendingChatRedirect();
+    if (chatRedirect) return chatRedirect;
+    return localStorage.getItem("fabverify_profile") ? "/dashboard" : "/onboarding/profile";
+  };
 
   const handlePhoneChange = (value: string) => {
     setPhone(value.replace(/\D/g, "").slice(0, 10));
@@ -119,6 +138,12 @@ export default function LogIn() {
                 className="flex-1 bg-transparent text-text-primary placeholder-text-secondary outline-none"
               />
             </div>
+
+            {chatRedirectPending && (
+              <p className="mt-2 text-center text-[12px] italic text-gray-400">
+                Sign in to access your FabVerify messages
+              </p>
+            )}
 
             <button
               onClick={handleSendOtp}
