@@ -332,7 +332,7 @@ export default function ManufacturerProfile() {
           <div className="mt-4 rounded-xl border border-border-dark bg-card">
             {reviews.map((review, index) => (
               <div
-                key={review.name}
+                key={`${review.name}-${review.time}`}
                 className={`bg-background p-4 ${
                   index < reviews.length - 1 ? "border-b border-border-dark" : ""
                 }`}

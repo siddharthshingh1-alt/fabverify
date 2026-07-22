@@ -72,7 +72,7 @@ export default function TalentQcDashboard() {
           <h2 className="mb-4 text-base font-bold text-white">Reports Due</h2>
           <TableShell columns={["Factory", "Date Inspected", "Report Due"]} minWidth={440}>
             {REPORTS_DUE.map((row, index) => (
-              <TableRow key={row.factory} columns={3} index={index}>
+              <TableRow key={`${row.factory}-${row.inspected}`} columns={3} index={index}>
                 <span className="text-[13px] font-bold text-white">{row.factory}</span>
                 <span className="text-xs text-text-secondary">{row.inspected}</span>
                 <span className="text-xs font-semibold text-amber-400">{row.due}</span>

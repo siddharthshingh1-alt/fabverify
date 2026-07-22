@@ -265,7 +265,7 @@ export default function Dashboard() {
         <div className="mt-3 flex flex-col gap-3">
           {SUGGESTED_MANUFACTURERS.map((manufacturer) => (
             <div
-              key={manufacturer.name}
+              key={manufacturer.id}
               className="rounded-[6px] border border-border-dark bg-background p-2.5"
             >
               <div className="text-xl">🏭</div>

@@ -31,7 +31,7 @@ const CATEGORY_PILLS = [
   "Luxury",
 ];
 
-const CITY_OPTIONS = manufacturers.map((m) => m.city);
+const CITY_OPTIONS = Array.from(new Set(manufacturers.map((m) => m.city)));
 
 const TIER_STYLES: Record<Tier, string> = {
   gold: "border-primary/40 bg-primary/15 text-primary",

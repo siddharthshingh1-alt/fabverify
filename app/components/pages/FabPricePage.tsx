@@ -149,6 +149,10 @@ const TRIM_ROWS: TrimRow[] = trimPrices.map((row) => ({
   history: row.history,
 }));
 
+const FABRIC_NAMES = Array.from(new Set(FABRIC_ROWS.map((row) => row.name)));
+const MAKING_CATEGORIES = Array.from(new Set(MAKING_ROWS.map((row) => row.category)));
+const TRIM_NAMES = Array.from(new Set(TRIM_ROWS.map((row) => row.name)));
+
 const TABS: { id: Tab; label: string }[] = [
   { id: "fabric", label: "Fabric" },
   { id: "making", label: "Making Charges" },
@@ -838,7 +842,7 @@ export default function FabPrice() {
     activeTab === "fabric" ? (
       <FairPriceCalculator
         key="fabric-calc"
-        items={FABRIC_ROWS.map((row) => row.name)}
+        items={FABRIC_NAMES}
         getRange={(item) => FABRIC_ROWS.find((row) => row.name === item)?.price200 ?? null}
         unitLabel="/m"
         isSeller={isSellerContext(user.userType, "fabric")}
@@ -846,7 +850,7 @@ export default function FabPrice() {
     ) : activeTab === "making" ? (
       <FairPriceCalculator
         key="making-calc"
-        items={MAKING_ROWS.map((row) => row.category)}
+        items={MAKING_CATEGORIES}
         getRange={(item) => MAKING_ROWS.find((row) => row.category === item)?.price100 ?? null}
         unitLabel="/pc"
         isSeller={isSellerContext(user.userType, "making")}
@@ -854,7 +858,7 @@ export default function FabPrice() {
     ) : (
       <FairPriceCalculator
         key="trims-calc"
-        items={TRIM_ROWS.map((row) => row.name)}
+        items={TRIM_NAMES}
         getRange={(item) => TRIM_ROWS.find((row) => row.name === item)?.price ?? null}
         unitLabel=""
         isSeller={isSellerContext(user.userType, "trims")}
@@ -1130,10 +1134,10 @@ export default function FabPrice() {
 
   const calculatorItemsForCurrentTab =
     activeTab === "fabric"
-      ? FABRIC_ROWS.map((row) => row.name)
+      ? FABRIC_NAMES
       : activeTab === "making"
-        ? MAKING_ROWS.map((row) => row.category)
-        : TRIM_ROWS.map((row) => row.name);
+        ? MAKING_CATEGORIES
+        : TRIM_NAMES;
 
   const centrePanel = (
     <>

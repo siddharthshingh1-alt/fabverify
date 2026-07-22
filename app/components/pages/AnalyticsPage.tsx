@@ -1696,7 +1696,7 @@ function SupplierAnalytics() {
         <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border-dark bg-card p-4">
           {data.topProducts.map((product, index) => (
             <div
-              key={product.name}
+              key={`${product.name}-${index}`}
               className={`flex items-center justify-between gap-3 text-xs ${
                 index > 0 ? "border-t border-border-dark pt-2 mt-2" : ""
               }`}
