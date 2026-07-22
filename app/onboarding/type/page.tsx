@@ -116,15 +116,40 @@ export default function UserTypeSelection() {
   const router = useRouter();
   const { setUser } = useUser();
   const [selected, setSelected] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const selectedCard = USER_TYPES.find((card) => card.id === selected);
 
-  const handleContinue = () => {
-    if (!selectedCard) return;
+  const saveUserType = async (type: string) => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) return;
+
+    // Dev-mode auth has no real Supabase session/auth.uid() yet, so this
+    // goes through the service-role-backed dev-auth API instead of a
+    // direct RLS-protected client call.
+    const res = await fetch("/api/dev-auth/save-user-type", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: auth.phone, userType: type }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+      console.error("User type save error:", error);
+    }
+
+    localStorage.setItem("fabverify_user_type", type);
+  };
+
+  const handleContinue = async () => {
+    if (!selectedCard || isSaving) return;
     const userType = STORAGE_TYPE_BY_ID[selectedCard.id];
     if (userType) {
+      setIsSaving(true);
       localStorage.setItem("userType", userType);
       setUser({ userType: userType as UserType });
+      await saveUserType(userType);
+      setIsSaving(false);
     }
     try {
       // Marks whether /onboarding/position was reached via the Enterprise
@@ -221,15 +246,15 @@ export default function UserTypeSelection() {
         <div className="mt-8 flex justify-center">
           <button
             type="button"
-            onClick={handleContinue}
-            disabled={!selectedCard}
+            onClick={() => void handleContinue()}
+            disabled={!selectedCard || isSaving}
             className={`w-full rounded-lg py-3.5 font-bold transition-colors sm:w-[320px] ${
-              selectedCard
+              selectedCard && !isSaving
                 ? "cursor-pointer bg-gold text-navy"
                 : "cursor-not-allowed bg-border-dark text-text-secondary"
             }`}
           >
-            Continue →
+            {isSaving ? "Saving..." : "Continue →"}
           </button>
         </div>
       </div>

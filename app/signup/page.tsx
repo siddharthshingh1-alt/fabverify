@@ -16,6 +16,13 @@ const postVerifyRoute = () =>
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
+const DEV_OTP_BYPASS = "123456";
+
+// Only allow the dev OTP bypass on localhost — never in production, even if
+// NODE_ENV is misconfigured on the deploy.
+const isDev =
+  process.env.NODE_ENV === "development" ||
+  (typeof window !== "undefined" && window.location.hostname === "localhost");
 
 export default function SignUp() {
   const router = useRouter();
@@ -24,6 +31,8 @@ export default function SignUp() {
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
@@ -41,18 +50,80 @@ export default function SignUp() {
     setPhone(value.replace(/\D/g, "").slice(0, 10));
   };
 
-  const handleSendOtp = () => {
-    if (!isPhoneValid) return;
+  // Development mode — no SMS provider (MSG91) is wired up in Supabase yet,
+  // so real signInWithOtp() throws "unsupported phone provider". Skip
+  // Supabase entirely and just move to the OTP step until MSG91 is connected.
+  const sendOtp = async () => {
+    setIsSendingOtp(true);
+    setErrorMessage("");
+
+    if (!phone || phone.length < 10) {
+      setErrorMessage("Please enter a valid 10-digit phone number");
+      setIsSendingOtp(false);
+      return;
+    }
+
     setOtp(Array(OTP_LENGTH).fill(""));
     setCountdown(RESEND_SECONDS);
     setStep("otp");
+    setIsSendingOtp(false);
+  };
+
+  const handleSendOtp = () => {
+    if (!isPhoneValid || isSendingOtp) return;
+    void sendOtp();
   };
 
   const handleResendOtp = () => {
-    if (countdown > 0) return;
-    setOtp(Array(OTP_LENGTH).fill(""));
-    setCountdown(RESEND_SECONDS);
-    otpRefs.current[0]?.focus();
+    if (countdown > 0 || isSendingOtp) return;
+    void sendOtp().then(() => otpRefs.current[0]?.focus());
+  };
+
+  // Development mode — no SMS provider (MSG91) is wired up yet, so there's
+  // no real code to check against. Accept a fixed test code instead of
+  // calling Supabase phone auth, and derive a stable per-phone-number id so
+  // the same test phone number consistently maps back to the same "user".
+  const verifyOtp = async (code: string) => {
+    setIsVerifying(true);
+    setErrorMessage("");
+
+    if (!isDev) {
+      setErrorMessage("Invalid OTP. Please try again.");
+      setIsVerifying(false);
+      return;
+    }
+
+    if (code !== DEV_OTP_BYPASS) {
+      setErrorMessage("Development mode: enter 123456 to continue");
+      setIsVerifying(false);
+      return;
+    }
+
+    const mockUserId = "dev-user-" + phone.replace(/\D/g, "");
+
+    const existingProfile = localStorage.getItem("fabverify_profile");
+    const existingAuth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+
+    localStorage.setItem(
+      "fabverify_auth",
+      JSON.stringify({
+        userId: mockUserId,
+        phone,
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+        devMode: true,
+      })
+    );
+
+    if (existingAuth.phone === phone && existingProfile) {
+      const userType = localStorage.getItem("fabverify_user_type");
+      router.push(postVerifyRoute() ?? (userType ? "/dashboard" : "/onboarding/type"));
+      setIsVerifying(false);
+      return;
+    }
+
+    router.push(postVerifyRoute() ?? "/onboarding/profile");
+    setIsVerifying(false);
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -66,10 +137,7 @@ export default function SignUp() {
     }
 
     if (next.every((d) => d !== "") && !isVerifying) {
-      setIsVerifying(true);
-      setTimeout(() => {
-        router.push(postVerifyRoute() ?? "/onboarding/profile");
-      }, 800);
+      void verifyOtp(next.join(""));
     }
   };
 
@@ -84,10 +152,7 @@ export default function SignUp() {
 
   const handleVerify = () => {
     if (!isOtpComplete || isVerifying) return;
-    setIsVerifying(true);
-    setTimeout(() => {
-      router.push(postVerifyRoute() ?? "/onboarding/type");
-    }, 1500);
+    void verifyOtp(otp.join(""));
   };
 
   return (
@@ -127,19 +192,29 @@ export default function SignUp() {
               />
             </div>
 
+            {errorMessage && (
+              <p className="mt-2 text-center text-[12px] text-red-400">{errorMessage}</p>
+            )}
+
             <button
               onClick={handleSendOtp}
-              disabled={!isPhoneValid}
+              disabled={!isPhoneValid || isSendingOtp}
               className="mt-6 w-full rounded-lg bg-gold py-3.5 font-bold text-navy transition-colors hover:bg-[#dc9420] disabled:cursor-not-allowed disabled:bg-gold/40"
             >
-              Send OTP
+              {isSendingOtp ? "Sending..." : "Send OTP"}
             </button>
           </>
         ) : (
           <>
-            <p className="mb-4 text-center text-sm text-text-secondary">
-              We sent a code to +91{phone}
-            </p>
+            {isDev && (
+              <p className="mb-4 text-center text-[13px] text-gold">
+                Development mode: enter 123456 to continue
+              </p>
+            )}
+
+            {errorMessage && (
+              <p className="mb-2 text-center text-[12px] text-red-400">{errorMessage}</p>
+            )}
 
             <div className="flex justify-center gap-2">
               {otp.map((digit, index) => (

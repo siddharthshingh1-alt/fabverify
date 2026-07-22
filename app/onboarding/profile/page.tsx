@@ -58,6 +58,7 @@ export default function ProfileSetup() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [isSaving, setIsSaving] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,7 +142,7 @@ export default function ProfileSetup() {
     setPhotoPreview(URL.createObjectURL(file));
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     const nextErrors: FormErrors = {
       name: isNameValid ? undefined : "Please enter your name",
       email: isEmailValid ? undefined : "Please enter a valid email address",
@@ -149,6 +150,31 @@ export default function ProfileSetup() {
     };
     setErrors((current) => ({ ...current, ...nextErrors }));
     if (!isNameValid || !isEmailValid || !isCityValid || !termsAccepted) return;
+
+    setIsSaving(true);
+
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+
+    // Dev-mode auth has no real Supabase session/auth.uid() behind it yet,
+    // so this goes through the service-role-backed dev-auth API rather than
+    // a direct RLS-protected client call. Keyed by phone since there's no
+    // real auth-linked id available in dev mode.
+    const res = await fetch("/api/dev-auth/save-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: auth.phone,
+        name: name.trim(),
+        email: email.trim(),
+        city: city.trim(),
+        state,
+      }),
+    });
+
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+      console.error("Profile save error:", error);
+    }
 
     setUser({
       name: name.trim(),
@@ -169,6 +195,7 @@ export default function ProfileSetup() {
       })
     );
 
+    setIsSaving(false);
     router.push("/onboarding/type");
   };
 
@@ -407,15 +434,15 @@ export default function ProfileSetup() {
         {/* Continue button */}
         <button
           type="button"
-          onClick={handleContinue}
-          disabled={!isFormValid}
+          onClick={() => void handleContinue()}
+          disabled={!isFormValid || isSaving}
           className={`mt-8 w-full rounded-[8px] py-3.5 text-[15px] font-bold transition-colors ${
-            isFormValid
+            isFormValid && !isSaving
               ? "cursor-pointer bg-primary text-navy"
               : "cursor-not-allowed bg-border-dark text-text-secondary"
           }`}
         >
-          Continue to Choose Your Role →
+          {isSaving ? "Saving..." : "Continue to Choose Your Role →"}
         </button>
       </div>
     </div>
