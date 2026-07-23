@@ -2,14 +2,28 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { mapMessageRowToChatMessage } from "@/app/lib/mapMessage";
+import type { MessageRow } from "@/app/lib/mapMessage";
 import type { ChatMessage, Conversation, OrderCard } from "../types";
 import { PILL_CLASSES } from "../types";
 
 type PreviewPhoto = {
+  file: File;
   url: string;
   caption: string;
   markProduction: boolean;
 };
+
+const MESSAGES_POLL_MS = 5000;
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 const TIER_LABELS = {
   gold: "Gold Verified ✓",
@@ -35,8 +49,11 @@ export default function ChatWindow({
   newOrderPath: string;
 }) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>(conversation.messages);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [viewerPhone, setViewerPhone] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
+  const [sendError, setSendError] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<PreviewPhoto | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -75,14 +92,101 @@ export default function ChatWindow({
     };
   }, []);
 
-  const handleSend = () => {
+  // Resolve the viewer's own real user id once — needed to tell sent from
+  // received messages. Kept in its own effect (rather than inline in the
+  // polling effect below) so the polling effect can depend on it and avoid
+  // a stale closure once it resolves from null to the real id.
+  useEffect(() => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) return;
+    setViewerPhone(auth.phone);
+
+    let cancelled = false;
+    fetch("/api/dev-auth/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: auth.phone }),
+    })
+      .then((res) => res.json())
+      .then(({ user }) => {
+        if (!cancelled && user?.id) setViewerId(user.id);
+      })
+      .catch((error) => console.error("Failed to resolve viewer id:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Real conversations only — the hardcoded per-role demo conversations
+  // have no partnerPhone, so this is skipped for those and the window stays
+  // empty (there's nothing to fetch).
+  useEffect(() => {
+    if (!conversation.partnerPhone || !viewerPhone || !viewerId) return;
+    let cancelled = false;
+
+    async function loadMessages() {
+      try {
+        const params = new URLSearchParams({
+          phone: viewerPhone!,
+          otherPhone: conversation.partnerPhone!,
+        });
+        if (conversation.orderId) params.set("orderId", conversation.orderId);
+
+        const res = await fetch(`/api/messages?${params}`);
+        const { messages: rows } = (await res.json()) as { messages: MessageRow[] };
+        if (!cancelled && rows) {
+          setMessages(rows.map((row) => mapMessageRowToChatMessage(row, viewerId!)));
+        }
+      } catch (error) {
+        console.error("Failed to load messages:", error);
+      }
+    }
+
+    loadMessages();
+    fetch("/api/messages/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: viewerPhone, senderPhone: conversation.partnerPhone }),
+    }).catch(() => {});
+
+    const interval = setInterval(loadMessages, MESSAGES_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [conversation.id, conversation.partnerPhone, conversation.orderId, viewerPhone, viewerId]);
+
+  const canSend = Boolean(conversation.partnerPhone && viewerPhone);
+
+  const handleSend = async () => {
     const trimmed = inputText.trim();
-    if (!trimmed) return;
+    if (!trimmed || !canSend) return;
+    setInputText("");
+    setSendError("");
+
+    const tempId = `local-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      { id: `local-${Date.now()}`, kind: "sent", text: trimmed, time: "Just now", read: false },
+      { id: tempId, kind: "sent", text: trimmed, time: "Just now", read: false },
     ]);
-    setInputText("");
+
+    try {
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderPhone: viewerPhone,
+          receiverPhone: conversation.partnerPhone,
+          orderId: conversation.orderId || null,
+          content: trimmed,
+          messageType: "text",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to send message");
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setSendError("Failed to send message");
+    }
   };
 
   const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +194,7 @@ export default function ChatWindow({
     e.target.value = "";
     setSheetOpen(false);
     if (!file) return;
-    setPreviewPhoto({ url: URL.createObjectURL(file), caption: "", markProduction: true });
+    setPreviewPhoto({ file, url: URL.createObjectURL(file), caption: "", markProduction: true });
   };
 
   const handleDocumentChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,18 +208,21 @@ export default function ChatWindow({
     ]);
   };
 
-  const handleSendPhoto = () => {
-    if (!previewPhoto) return;
+  const handleSendPhoto = async () => {
+    if (!previewPhoto || !canSend) return;
     const verified = canMarkProductionUpdate && previewPhoto.markProduction;
+    const caption = previewPhoto.caption.trim() || undefined;
+    const tempId = `local-photo-${Date.now()}`;
+
     setMessages((prev) => [
       ...prev,
       {
-        id: `local-photo-${Date.now()}`,
+        id: tempId,
         kind: "sent",
         time: "Just now",
         read: false,
         photo: {
-          caption: previewPhoto.caption.trim() || undefined,
+          caption,
           verified,
           geoNote: verified ? "Geo-verified · production update" : undefined,
           dataUrl: previewPhoto.url,
@@ -123,6 +230,31 @@ export default function ChatWindow({
       },
     ]);
     setPreviewPhoto(null);
+    setSendError("");
+
+    try {
+      // Stored inline as a data URL for now — will move to Supabase Storage
+      // once that's wired up, matching content-type in media_url instead of
+      // a real object URL.
+      const dataUrl = await readFileAsDataUrl(previewPhoto.file);
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderPhone: viewerPhone,
+          receiverPhone: conversation.partnerPhone,
+          orderId: conversation.orderId || null,
+          content: caption || "Photo",
+          messageType: "photo",
+          mediaUrl: dataUrl,
+          isVerifiedUpdate: verified,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to send photo");
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setSendError("Failed to send photo");
+    }
   };
 
   const startRecording = async () => {
@@ -351,6 +483,10 @@ export default function ChatWindow({
         <div ref={messagesEndRef} />
       </div>
 
+      {sendError && (
+        <p className="bg-card px-3 pt-2 text-center text-[11px] text-red-400">{sendError}</p>
+      )}
+
       <div className="flex h-[56px] shrink-0 items-center gap-2 border-t border-border-dark bg-card px-3">
         {isRecording ? (
           <div className="flex flex-1 items-center gap-3">
@@ -391,7 +527,7 @@ export default function ChatWindow({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleSend();
+                if (e.key === "Enter") void handleSend();
               }}
               placeholder="Message..."
               className="h-10 flex-1 rounded-[20px] border border-border-dark bg-background px-3.5 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
@@ -400,7 +536,7 @@ export default function ChatWindow({
               <button
                 type="button"
                 aria-label="Send message"
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-base text-navy"
               >
                 ➤
@@ -500,7 +636,7 @@ export default function ChatWindow({
             </button>
             <button
               type="button"
-              onClick={handleSendPhoto}
+              onClick={() => void handleSendPhoto()}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-navy"
             >
               Send Photo
@@ -548,7 +684,7 @@ export default function ChatWindow({
 
             <button
               type="button"
-              onClick={handleSendPhoto}
+              onClick={() => void handleSendPhoto()}
               className="mt-3 h-11 w-full rounded-lg bg-primary text-sm font-bold text-navy"
             >
               Send →

@@ -8,12 +8,8 @@ import TopBar from "../TopBar";
 import { useUser } from "../../context/UserContext";
 import type { UserType } from "../../context/UserContext";
 import screenConfig from "../../config/screens";
-import {
-  acceptBulkOrder,
-  declineBulkOrder,
-  getBulkOrders,
-  type BulkOrder,
-} from "../../lib/bulkOrders";
+import { mapOrderRowToPendingOrder } from "../../lib/mapOrder";
+import type { OrderRow, PendingOrder } from "../../lib/mapOrder";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -35,6 +31,10 @@ type StatusColor = "gold" | "blue" | "green";
 
 type Order = {
   id: string;
+  // Real orders display a human-readable order_number instead of the id
+  // (a UUID) used for routing/actions; hardcoded demo orders leave this
+  // unset and fall back to `id`, which already looks like "ORD-2024-001".
+  orderNumberLabel?: string;
   manufacturer: string;
   counterpartyPrefix?: string;
   counterpartyLabel?: string;
@@ -53,85 +53,6 @@ type Order = {
   messagesCount?: number;
   rating?: number;
 };
-
-const ACTIVE_ORDERS: Order[] = [
-  {
-    id: "ORD-2024-001",
-    manufacturer: "Jaipur Ethnic Works",
-    status: "In Production",
-    statusColor: "gold",
-    product: "Cotton Block Print Kurta — 200 pieces",
-    orderedDate: "15 June 2026",
-    expectedDate: "15 July 2026",
-    milestones: [
-      { name: "Order Confirmed", status: "complete", date: "Jun 15" },
-      { name: "Raw Material", status: "complete", date: "Jun 18" },
-      { name: "Production", status: "active" },
-      { name: "Quality Check", status: "pending" },
-      { name: "Dispatched", status: "pending" },
-      { name: "Delivered", status: "pending" },
-    ],
-    orderValue: 84000,
-    releasedAmount: 16800,
-    releasedPercent: 20,
-    escrowAmount: 67200,
-    escrowPercent: 80,
-    photosCount: 2,
-    messagesCount: 3,
-  },
-  {
-    id: "ORD-2024-002",
-    manufacturer: "Tirupur Knits",
-    status: "Quality Check",
-    statusColor: "blue",
-    product: "Cotton T-shirt — 500 pieces",
-    orderedDate: "1 June 2026",
-    expectedDate: "25 June 2026",
-    milestones: [
-      { name: "Order Confirmed", status: "complete", date: "Jun 1" },
-      { name: "Raw Material", status: "complete", date: "Jun 5" },
-      { name: "Production", status: "complete", date: "Jun 18" },
-      { name: "Quality Check", status: "active" },
-      { name: "Dispatched", status: "pending" },
-      { name: "Delivered", status: "pending" },
-    ],
-    orderValue: 125000,
-    releasedAmount: 75000,
-    releasedPercent: 60,
-    escrowAmount: 50000,
-    escrowPercent: 40,
-    photosCount: 4,
-    messagesCount: 5,
-  },
-];
-
-const COMPLETED_ORDERS: Order[] = [
-  {
-    id: "ORD-2024-000",
-    manufacturer: "Lucknow Chikankari House",
-    status: "Delivered",
-    statusColor: "green",
-    product: "Chikankari Kurta Set — 100 pieces",
-    orderedDate: "1 May 2026",
-    expectedDate: "1 June 2026",
-    milestones: [
-      { name: "Order Confirmed", status: "complete", date: "May 1" },
-      { name: "Raw Material", status: "complete", date: "May 5" },
-      { name: "Production", status: "complete", date: "May 20" },
-      { name: "Quality Check", status: "complete", date: "May 26" },
-      { name: "Dispatched", status: "complete", date: "May 28" },
-      { name: "Delivered", status: "complete", date: "Jun 1" },
-    ],
-    orderValue: 62000,
-    releasedAmount: 62000,
-    releasedPercent: 100,
-    escrowAmount: 0,
-    escrowPercent: 0,
-    photosCount: 6,
-    messagesCount: 8,
-    rating: 5,
-  },
-];
 
 const SUPPLY_ORDERS_BY_ROLE: Partial<Record<UserType, Order[]>> = {
   trim_supplier: [
@@ -370,7 +291,7 @@ function OrderCard({
   return (
     <div className="mb-4 rounded-[10px] border border-border-dark bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-bold text-primary">{order.id}</span>
+        <span className="text-sm font-bold text-primary">{order.orderNumberLabel ?? order.id}</span>
         <span className="text-[15px] font-bold text-white">
           {order.counterpartyPrefix && `${order.counterpartyPrefix}: `}
           {order.manufacturer}
@@ -500,7 +421,7 @@ function AcceptOrderModal({
   onAccept,
   onDecline,
 }: {
-  order: BulkOrder | null;
+  order: PendingOrder | null;
   onClose: () => void;
   onAccept: (id: string) => void;
   onDecline: (id: string) => void;
@@ -561,7 +482,7 @@ function PendingBulkOrderCard({
   onToggleExpand,
   onAcceptClick,
 }: {
-  order: BulkOrder;
+  order: PendingOrder;
   expanded: boolean;
   onToggleExpand: () => void;
   onAcceptClick: () => void;
@@ -569,7 +490,7 @@ function PendingBulkOrderCard({
   return (
     <div className="mb-4 rounded-[10px] border border-primary bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-bold text-primary">{order.id}</span>
+        <span className="text-sm font-bold text-primary">{order.orderNumber}</span>
         <span className="text-[15px] font-bold text-white">
           {order.styleName} — {order.totalQuantity} pieces
         </span>
@@ -661,6 +582,69 @@ function EmptyOrdersState({ message }: { message: string }) {
   );
 }
 
+function formatOrderDate(value: string | null | undefined) {
+  if (!value) return "";
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function mapMilestoneStatus(status: string): MilestoneStatus {
+  if (status === "completed") return "complete";
+  if (status === "active") return "active";
+  return "pending";
+}
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending Confirmation",
+  confirmed: "Confirmed",
+  completed: "Completed",
+  declined: "Declined",
+};
+
+const ORDER_STATUS_COLOR: Record<string, StatusColor> = {
+  pending: "gold",
+  confirmed: "blue",
+  completed: "green",
+  declined: "gold",
+};
+
+function mapOrderRowToOrderCard(row: OrderRow, viewerRole: "buyer" | "manufacturer"): Order {
+  const counterpartyName =
+    viewerRole === "buyer" ? row.manufacturer?.name : row.buyer?.name;
+
+  return {
+    id: row.id,
+    orderNumberLabel: row.order_number,
+    manufacturer: counterpartyName ?? "Unknown",
+    counterpartyPrefix: viewerRole === "manufacturer" ? "Buyer" : undefined,
+    status: ORDER_STATUS_LABEL[row.status] ?? row.status,
+    statusColor: ORDER_STATUS_COLOR[row.status] ?? "gold",
+    product: row.style_name,
+    orderedDate: formatOrderDate(row.created_at?.slice(0, 10)),
+    expectedDate: formatOrderDate(row.delivery_date),
+    milestones: (row.milestones ?? [])
+      .slice()
+      .sort((a, b) => a.milestone_number - b.milestone_number)
+      .map((m) => ({
+        name: m.milestone_name,
+        status: mapMilestoneStatus(m.status),
+        date: m.completed_at ? formatOrderDate(m.completed_at.slice(0, 10)) : undefined,
+      })),
+    orderValue: row.total_value,
+    releasedAmount: row.escrow_released,
+    releasedPercent: row.total_value
+      ? Math.round((row.escrow_released / row.total_value) * 100)
+      : 0,
+    escrowAmount: row.escrow_total - row.escrow_released,
+    escrowPercent: row.total_value
+      ? 100 - Math.round((row.escrow_released / row.total_value) * 100)
+      : 0,
+  };
+}
+
 export default function Orders() {
   const { user } = useUser();
   const config = screenConfig.orders[user.userType];
@@ -669,32 +653,59 @@ export default function Orders() {
     "active" | "completed" | "cancelled"
   >("active");
 
-  const [bulkOrders, setBulkOrders] = useState<BulkOrder[]>([]);
+  const isOrdersRole = user.userType === "buyer" || user.userType === "manufacturer";
+  const [realOrders, setRealOrders] = useState<OrderRow[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(isOrdersRole);
   const [expandedBulkOrderId, setExpandedBulkOrderId] = useState<string | null>(null);
-  const [acceptModalOrder, setAcceptModalOrder] = useState<BulkOrder | null>(null);
+  const [acceptModalOrder, setAcceptModalOrder] = useState<PendingOrder | null>(null);
 
-  useEffect(() => {
-    if (user.userType === "manufacturer") {
-      setBulkOrders(getBulkOrders());
+  const loadRealOrders = async () => {
+    if (!isOrdersRole) return;
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      setOrdersLoading(false);
+      return;
     }
-  }, [user.userType]);
-
-  const pendingBulkOrders = bulkOrders.filter((order) => order.status === "pending_acceptance");
-
-  const handleAccept = (id: string) => {
-    acceptBulkOrder(id);
-    setBulkOrders((current) =>
-      current.map((order) => (order.id === id ? { ...order, status: "active" } : order))
-    );
-    setAcceptModalOrder(null);
+    try {
+      const res = await fetch(
+        `/api/orders?phone=${encodeURIComponent(auth.phone)}&role=${user.userType}`
+      );
+      const { orders } = (await res.json()) as { orders: OrderRow[] };
+      setRealOrders(orders ?? []);
+    } catch (error) {
+      console.error("Failed to load orders:", error);
+    } finally {
+      setOrdersLoading(false);
+    }
   };
 
-  const handleDecline = (id: string) => {
-    declineBulkOrder(id);
-    setBulkOrders((current) =>
-      current.map((order) => (order.id === id ? { ...order, status: "declined" } : order))
-    );
+  useEffect(() => {
+    loadRealOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.userType]);
+
+  const pendingBulkOrders = realOrders
+    .filter((order) => order.status === "pending")
+    .map(mapOrderRowToPendingOrder);
+
+  const handleAccept = async (id: string) => {
+    await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "confirmed" }),
+    });
     setAcceptModalOrder(null);
+    loadRealOrders();
+  };
+
+  const handleDecline = async (id: string) => {
+    await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "declined" }),
+    });
+    setAcceptModalOrder(null);
+    loadRealOrders();
   };
 
   const pendingBulkOrdersSection =
@@ -716,13 +727,22 @@ export default function Orders() {
 
   const supplyOrders = SUPPLY_ORDERS_BY_ROLE[user.userType] ?? [];
 
-  const activeOrders =
-    config.mode === "buyer-demo"
-      ? ACTIVE_ORDERS
-      : config.mode === "supply-demo"
-        ? supplyOrders
-        : [];
-  const completedOrders = config.mode === "buyer-demo" ? COMPLETED_ORDERS : [];
+  const realOrdersForTabs = realOrders.filter((order) =>
+    user.userType === "manufacturer" ? order.status !== "pending" : order.status !== "declined"
+  );
+
+  const activeOrders = isOrdersRole
+    ? realOrdersForTabs
+        .filter((order) => order.status !== "completed")
+        .map((order) => mapOrderRowToOrderCard(order, user.userType as "buyer" | "manufacturer"))
+    : config.mode === "supply-demo"
+      ? supplyOrders
+      : [];
+  const completedOrders = isOrdersRole
+    ? realOrdersForTabs
+        .filter((order) => order.status === "completed")
+        .map((order) => mapOrderRowToOrderCard(order, user.userType as "buyer" | "manufacturer"))
+    : [];
 
   const tabs: { id: typeof activeTab; label: string }[] = [
     { id: "active", label: "Active Orders" },
@@ -749,8 +769,11 @@ export default function Orders() {
     </div>
   );
 
-  const tabContent =
-    activeTab === "active" ? (
+  const tabContent = ordersLoading ? (
+    <div className="mt-6 flex items-center justify-center py-16 text-sm text-text-secondary">
+      Loading orders...
+    </div>
+  ) : activeTab === "active" ? (
       activeOrders.length > 0 ? (
         <div className="mt-6">
           {activeOrders.map((order) => (

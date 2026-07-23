@@ -4,13 +4,8 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTypeGuard } from "@/app/hooks/useTypeGuard";
 import { useUser } from "@/app/context/UserContext";
-import { manufacturers } from "@/app/data/manufacturers";
-import {
-  createBulkOrder,
-  generateBulkOrderId,
-  type BulkOrder,
-  type BulkOrderDocument,
-} from "@/app/lib/bulkOrders";
+import { mapManufacturerRow } from "@/app/lib/mapManufacturer";
+import type { ManufacturerRow } from "@/app/lib/mapManufacturer";
 
 const TOTAL_STEPS = 8;
 
@@ -140,6 +135,13 @@ const SUPPORTING_SHEETS: SupportingSheet[] = [
 ];
 
 type MilestoneDef = { name: string; percent: number; min: number; max: number };
+
+type PlacedOrderSummary = {
+  orderNumber: string;
+  orderId: string;
+  manufacturerName: string;
+  firstMilestoneAmount: number;
+};
 
 const DEFAULT_MILESTONES: MilestoneDef[] = [
   { name: "Order Confirmation", percent: 20, min: 0, max: 40 },
@@ -297,7 +299,34 @@ function PlaceBulkOrderInner() {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [placedOrder, setPlacedOrder] = useState<BulkOrder | null>(null);
+  const [placedOrder, setPlacedOrder] = useState<PlacedOrderSummary | null>(null);
+  const [orderError, setOrderError] = useState("");
+
+  const [manufacturerRows, setManufacturerRows] = useState<ManufacturerRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadManufacturers() {
+      try {
+        const res = await fetch("/api/manufacturers");
+        const { manufacturers: rows } = (await res.json()) as {
+          manufacturers: ManufacturerRow[];
+        };
+        if (!cancelled) setManufacturerRows(rows ?? []);
+      } catch (error) {
+        console.error("Failed to load manufacturers:", error);
+      }
+    }
+    loadManufacturers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const manufacturerList = manufacturerRows.map(mapManufacturerRow);
+  const manufacturerPhoneById = Object.fromEntries(
+    manufacturerRows.map((row) => [row.id, row.user?.phone ?? ""])
+  );
 
   // Step 1
   const [manufacturerId, setManufacturerId] = useState(manufacturerParam ?? initialSample?.manufacturerId ?? "");
@@ -371,13 +400,13 @@ function PlaceBulkOrderInner() {
 
   if (!authorized) return null;
 
-  const manufacturer = manufacturers.find((m) => m.id === manufacturerId);
+  const manufacturer = manufacturerList.find((m) => m.id === manufacturerId);
 
   const mfrSearchQuery = mfrSearch.trim().toLowerCase();
   const mfrSearchResults =
     mfrSearchQuery === ""
       ? []
-      : manufacturers.filter(
+      : manufacturerList.filter(
           (m) =>
             m.name.toLowerCase().includes(mfrSearchQuery) ||
             m.city.toLowerCase().includes(mfrSearchQuery) ||
@@ -391,7 +420,7 @@ function PlaceBulkOrderInner() {
   };
 
   const selectManufacturerByName = (name: string) => {
-    const found = manufacturers.find((m) => m.name === name);
+    const found = manufacturerList.find((m) => m.name === name);
     if (found) selectManufacturer(found.id);
   };
 
@@ -550,46 +579,55 @@ function PlaceBulkOrderInner() {
     setDeclared(false);
   };
 
-  const placeOrder = () => {
+  const placeOrder = async () => {
     if (!isStep8Valid || !manufacturer) return;
+
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      router.push("/login");
+      return;
+    }
+
+    const manufacturerPhone = manufacturerPhoneById[manufacturer.id];
+    if (!manufacturerPhone) {
+      setOrderError("This manufacturer can't be reached right now. Please choose another.");
+      return;
+    }
+
+    setOrderError("");
     setIsSubmitting(true);
-    setTimeout(() => {
-      const orderId = generateBulkOrderId();
-      const documents: BulkOrderDocument[] = allDocs;
-      const order: BulkOrder = {
-        id: orderId,
-        manufacturerId: manufacturer.id,
+
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyerPhone: auth.phone,
+          manufacturerPhone,
+          styleName,
+          quantity: totalQty,
+          pricePerPiece: priceNum,
+          deliveryDate,
+          milestoneSchedule: milestones.map((m) => ({ name: m.name, pct: m.percent })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to place order");
+
+      setPlacedOrder({
+        orderNumber: data.orderNumber,
+        orderId: data.order.id,
         manufacturerName: manufacturer.name,
-        brandName: `${user.name}'s Brand`,
-        styleName,
-        styleNumber,
-        category,
-        season: season === "Custom" ? customSeason : season,
-        orderType,
-        totalQuantity: totalQty,
-        sizeRatio: Object.fromEntries(sizes.map((s) => [s, Number(sizeQty[s]) || 0])),
-        colours: colours.map((c) => ({ name: c.name, quantity: c.quantity })),
-        pricePerPiece: priceNum,
-        totalValue,
-        deliveryDate,
-        deliveryCity,
-        deliveryState,
-        paymentMilestones: milestones.map((m) => ({
-          name: m.name,
-          percent: m.percent,
-          amount: Math.round((totalValue * m.percent) / 100),
-        })),
-        documents,
-        qualityLevel,
-        aqlLevel,
-        confidential,
-        createdAt: new Date().toISOString(),
-        status: "pending_acceptance",
-      };
-      createBulkOrder(order);
-      setPlacedOrder(order);
-      setIsSubmitting(false);
-    }, 2000);
+        firstMilestoneAmount: Math.round((totalValue * (milestones[0]?.percent ?? 0)) / 100),
+      });
+    } catch (error) {
+      setOrderError(
+        error instanceof Error ? error.message : "Failed to place order. Please try again."
+      );
+    }
+
+    setIsSubmitting(false);
   };
 
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
@@ -624,7 +662,7 @@ function PlaceBulkOrderInner() {
       <div className="flex min-h-[70vh] flex-col items-center justify-center text-center">
         <div className="text-6xl">🎉</div>
         <h1 className="mt-6 font-display text-2xl font-bold text-white">Order Placed Successfully!</h1>
-        <p className="mt-4 text-lg font-bold text-primary">{placedOrder.id}</p>
+        <p className="mt-4 text-lg font-bold text-primary">{placedOrder.orderNumber}</p>
         <p className="mt-4 max-w-[400px] text-[13px] text-text-secondary">
           {placedOrder.manufacturerName} has been notified and has 24 hours to confirm your order. You will receive a
           WhatsApp notification when they respond.
@@ -641,7 +679,7 @@ function PlaceBulkOrderInner() {
             </li>
             <li>
               <span className="font-semibold text-primary">On confirmation</span> — ₹
-              {(placedOrder.paymentMilestones[0]?.amount ?? 0).toLocaleString("en-IN")} held in escrow
+              {placedOrder.firstMilestoneAmount.toLocaleString("en-IN")} held in escrow
             </li>
             <li>Production begins per T&amp;A plan</li>
             <li>You track progress in real time</li>
@@ -651,7 +689,7 @@ function PlaceBulkOrderInner() {
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
-            onClick={() => router.push(`/brand/orders/${placedOrder.id}`)}
+            onClick={() => router.push(`/brand/orders/${placedOrder.orderId}`)}
             className="rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
           >
             Track This Order →
@@ -1684,13 +1722,17 @@ function PlaceBulkOrderInner() {
               {milestone1Amount.toLocaleString("en-IN")} in escrow on my behalf upon order placement.
             </label>
 
+            {orderError && (
+              <p className="text-[13px] text-red-400">{orderError}</p>
+            )}
+
             <div className="flex items-center justify-between">
               <button type="button" onClick={handleBack} className="rounded-lg border border-border-dark px-6 py-3 text-sm font-semibold text-text-secondary">
                 ← Edit Order
               </button>
               <button
                 type="button"
-                onClick={placeOrder}
+                onClick={() => void placeOrder()}
                 disabled={!isStep8Valid}
                 className={`rounded-lg px-8 py-3.5 text-base font-bold transition-colors ${
                   isStep8Valid ? "cursor-pointer bg-primary text-navy" : "cursor-not-allowed bg-border-dark text-text-secondary"

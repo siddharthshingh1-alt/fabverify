@@ -6,9 +6,10 @@ import { useRouter, usePathname } from "next/navigation";
 /**
  * Gates the entire /chat subtree. "Logged in" here means the same thing
  * /login already checks before sending someone to /dashboard: a saved
- * fabverify_profile. (fabverify_auth / fabverify_user_type aren't real keys
- * anywhere in this app — nothing ever sets them — so gating on those would
- * lock every real user out permanently.)
+ * fabverify_profile. fabverify_auth (phone + dev-mode userId) is also real
+ * and set by the same signup/login flow — FabChat's data-fetching code
+ * reads it directly — but presence of a profile is the correct signal for
+ * "is this device logged in", same as everywhere else in the app.
  *
  * A missing profile just means this device has no local session — it says
  * nothing about whether the visitor already has a FabVerify account. Send

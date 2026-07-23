@@ -31,7 +31,15 @@ export default function ChatList({
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {conversations.length === 0 ? (
+        <div className="px-6 py-10 text-center">
+          <div className="text-4xl">💬</div>
+          <p className="mt-3 text-[15px] font-semibold text-text-primary">No messages yet</p>
+          <p className="mt-2 text-xs text-text-secondary">
+            Send an enquiry to a manufacturer to start a conversation
+          </p>
+        </div>
+      ) : filtered.length === 0 ? (
         <p className="px-4 py-10 text-center text-[13px] italic text-text-secondary">
           No conversations found.
         </p>

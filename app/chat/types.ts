@@ -48,6 +48,9 @@ export type Conversation = {
   verificationTier?: VerificationTier;
   city?: string;
   fabscore?: number;
+  // Real conversations only — the counterparty's phone, needed to call
+  // /api/messages. Absent on the hardcoded per-role demo conversations.
+  partnerPhone?: string;
 };
 
 export type OrderCard = {

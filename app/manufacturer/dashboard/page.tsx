@@ -9,7 +9,8 @@ import ThreePanelLayout from "@/app/components/ThreePanelLayout";
 import TopBar from "@/app/components/TopBar";
 import { makingCharges } from "@/app/data/fabprice";
 import { getEnquiries } from "@/app/data/enquiries";
-import { getBulkOrders, type BulkOrder } from "@/app/lib/bulkOrders";
+import { mapOrderRowToPendingOrder } from "@/app/lib/mapOrder";
+import type { OrderRow, PendingOrder } from "@/app/lib/mapOrder";
 import {
   StatGrid,
   StatCard,
@@ -46,11 +47,37 @@ export default function ManufacturerDashboard() {
   const authorized = useTypeGuard("manufacturer");
   const { user, greeting } = useUser();
   const router = useRouter();
-  const [pendingBulkOrders, setPendingBulkOrders] = useState<BulkOrder[]>([]);
+  const [pendingBulkOrders, setPendingBulkOrders] = useState<PendingOrder[]>([]);
+
+  const loadPendingOrders = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) return;
+    try {
+      const res = await fetch(
+        `/api/orders?phone=${encodeURIComponent(auth.phone)}&role=manufacturer`
+      );
+      const { orders } = (await res.json()) as { orders: OrderRow[] };
+      setPendingBulkOrders(
+        (orders ?? []).filter((order) => order.status === "pending").map(mapOrderRowToPendingOrder)
+      );
+    } catch (error) {
+      console.error("Failed to load pending orders:", error);
+    }
+  };
 
   useEffect(() => {
-    setPendingBulkOrders(getBulkOrders().filter((order) => order.status === "pending_acceptance"));
+    loadPendingOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const acceptOrder = async (orderId: string) => {
+    await fetch(`/api/orders/${orderId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "confirmed" }),
+    });
+    loadPendingOrders();
+  };
 
   if (!authorized) return null;
 
@@ -118,7 +145,7 @@ export default function ManufacturerDashboard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => router.push("/manufacturer/orders")}
+                    onClick={() => void acceptOrder(order.id)}
                     className="rounded-lg bg-green-500 px-4 py-2 text-xs font-bold text-navy"
                   >
                     Accept Order ✓

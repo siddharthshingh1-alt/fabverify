@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import ThreePanelLayout from "../ThreePanelLayout";
 import { qcInspectors } from "../../data/qcInspectors";
+import type { OrderRow } from "../../lib/mapOrder";
 
 type MilestoneStatus = "complete" | "active" | "pending";
 
@@ -278,6 +279,76 @@ const ORDER_DETAILS: Record<string, OrderDetailData> = {
   },
 };
 
+function formatDetailDate(value: string | null | undefined) {
+  if (!value) return "";
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const DETAIL_MILESTONE_STATUS: Record<string, MilestoneStatus> = {
+  completed: "complete",
+  active: "active",
+  pending: "pending",
+};
+
+const DETAIL_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending Confirmation",
+  confirmed: "Confirmed",
+  completed: "Completed",
+  declined: "Declined",
+};
+
+// Maps a real order (fetched from /api/orders/[id]) into the same shape the
+// hardcoded demo orders use, so the whole tab/render tree below works
+// unchanged. Real orders don't have chat, production photos, tracker sub-updates,
+// or shipping/courier tracking yet, so those sections render empty rather
+// than being ripped out — an honest "not built yet" rather than a fabricated one.
+function mapOrderRowToDetail(row: OrderRow): OrderDetailData {
+  const milestones = (row.milestones ?? [])
+    .slice()
+    .sort((a, b) => a.milestone_number - b.milestone_number);
+  const currentMilestone = milestones.find((m) => m.status === "active") ?? milestones[0];
+
+  return {
+    id: row.order_number,
+    manufacturer: row.manufacturer?.name ?? "Unknown manufacturer",
+    manufacturerRating: "New on FabVerify",
+    manufacturerTier: "",
+    factoryCity: row.manufacturer?.city ?? "",
+    product: row.style_name,
+    fabricInfo: `Qty: ${row.quantity.toLocaleString("en-IN")} pieces`,
+    orderDate: formatDetailDate(row.created_at?.slice(0, 10)),
+    expectedDelivery: formatDetailDate(row.delivery_date),
+    statusLine: DETAIL_STATUS_LABEL[row.status] ?? row.status,
+    status: DETAIL_STATUS_LABEL[row.status] ?? row.status,
+    milestones: milestones.map((m) => ({
+      name: m.milestone_name,
+      status: DETAIL_MILESTONE_STATUS[m.status] ?? "pending",
+      date: m.completed_at ? formatDetailDate(m.completed_at.slice(0, 10)) : undefined,
+      lines: [],
+    })),
+    paymentRows: milestones.map((m) => ({
+      name: m.milestone_name,
+      percent: m.payment_percentage,
+      amount: Math.round((row.total_value * m.payment_percentage) / 100),
+      status: m.status === "completed" ? "Released" : "Pending",
+    })),
+    totalValue: row.total_value,
+    productionPhotos: [],
+    initialMessages: [],
+    shippingAddress: "",
+    courier: "",
+    trackingNumber: "Not yet assigned",
+    currentMilestoneName: currentMilestone?.milestone_name ?? "",
+    currentMilestoneWindow: "",
+    currentProgressLine: "",
+    latestUpdateLine: "",
+  };
+}
+
 function MilestoneCircle({ status }: { status: MilestoneStatus }) {
   if (status === "complete") {
     return (
@@ -306,7 +377,35 @@ const TABS: { id: "overview" | "tracker"; label: string }[] = [
 export default function OrderDetail() {
   const params = useParams();
   const orderId = params.id as string;
-  const order = ORDER_DETAILS[orderId];
+  const staticOrder = ORDER_DETAILS[orderId];
+  const [fetchedOrder, setFetchedOrder] = useState<OrderDetailData | null>(null);
+  const [loadingOrder, setLoadingOrder] = useState(!staticOrder);
+
+  useEffect(() => {
+    if (staticOrder) {
+      setLoadingOrder(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingOrder(true);
+    fetch(`/api/orders/${orderId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { order: OrderRow } | null) => {
+        if (cancelled) return;
+        setFetchedOrder(data?.order ? mapOrderRowToDetail(data.order) : null);
+      })
+      .catch((error) => {
+        console.error("Failed to load order:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOrder(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, staticOrder]);
+
+  const order = staticOrder ?? fetchedOrder ?? undefined;
 
   const nearbyQcInspectors = order
     ? qcInspectors.filter((inspector) =>
@@ -389,15 +488,18 @@ export default function OrderDetail() {
     </div>
   );
 
-  const centerContent = !order ? (
+  const centerContent = loadingOrder ? (
+    <div className="flex items-center justify-center px-6 py-16 text-sm text-text-secondary">
+      Loading order...
+    </div>
+  ) : !order ? (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <div className="text-5xl">📦</div>
       <p className="mt-4 text-base font-bold text-white">
         Order {orderId} not found
       </p>
       <p className="mt-2 text-[13px] text-text-secondary">
-        This is a demo build — full detail is only available for
-        ORD-2024-001 and ORD-2024-002.
+        This order doesn&apos;t exist or may have been removed.
       </p>
       <Link
         href="/orders"
