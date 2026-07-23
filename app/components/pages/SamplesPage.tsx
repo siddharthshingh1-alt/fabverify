@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ThreePanelLayout from "../ThreePanelLayout";
 import TopBar from "../TopBar";
 import { useUser } from "../../context/UserContext";
 import screenConfig from "../../config/screens";
+import type { SampleBriefRow } from "../../lib/mapSampleBrief";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -522,49 +523,23 @@ const VENDORS: Vendor[] = [
 
 const DEFAULT_SELECTED_VENDORS = VENDORS.slice(0, 3).map((v) => v.id);
 
-type BriefStatus = "Approved" | "In Review" | "Awaiting Samples";
-
-type MyBrief = {
-  id: string;
-  title: string;
-  type: string;
-  vendor: string;
-  status: BriefStatus;
-  statusDate: string;
+const REAL_BRIEF_STATUS_LABEL: Record<string, string> = {
+  open: "Open",
+  responses_received: "Responses Received",
 };
 
-const MY_BRIEFS: MyBrief[] = [
-  {
-    id: "SB-001",
-    title: "Block Print Kurta",
-    type: "R&D Development Sample",
-    vendor: "Jaipur Ethnic Works",
-    status: "Approved",
-    statusDate: "Approved Jun 28",
-  },
-  {
-    id: "SB-002",
-    title: "Palazzo Set",
-    type: "R&D Development Sample",
-    vendor: "Jaipur Ethnic Works",
-    status: "Approved",
-    statusDate: "Approved Jul 5",
-  },
-  {
-    id: "SB-003",
-    title: "Cotton Lawn Fabric Swatch",
-    type: "Fabric Swatch",
-    vendor: "Surat Cotton Mills",
-    status: "In Review",
-    statusDate: "Sent Jul 14",
-  },
-];
-
-const BRIEF_STATUS_STYLES: Record<BriefStatus, string> = {
-  Approved: "border-green-500/60 bg-green-500/15 text-green-400",
-  "In Review": "border-amber-500/60 bg-amber-500/15 text-amber-400",
-  "Awaiting Samples": "border-secondary/60 bg-secondary/15 text-secondary",
+const REAL_BRIEF_STATUS_STYLES: Record<string, string> = {
+  open: "border-secondary/60 bg-secondary/15 text-secondary",
+  responses_received: "border-green-500/60 bg-green-500/15 text-green-400",
 };
+
+function formatBriefDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 const TIER_BADGE_STYLES: Record<VendorTier, string> = {
   gold: "border-primary/40 bg-primary/15 text-primary",
@@ -639,7 +614,93 @@ export default function SampleBriefs() {
   >(DEFAULT_SELECTED_VENDORS);
   const [referenceFileName, setReferenceFileName] = useState("");
   const [isPosted, setIsPosted] = useState(false);
+  const [postedBrief, setPostedBrief] = useState<SampleBriefRow | null>(null);
+  const [isPosting, setIsPosting] = useState(false);
+  const [postError, setPostError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [myBriefs, setMyBriefs] = useState<SampleBriefRow[]>([]);
+  const [myBriefsLoading, setMyBriefsLoading] = useState(config.showPostForm);
+  const [openBriefs, setOpenBriefs] = useState<SampleBriefRow[]>([]);
+  const [openBriefsLoading, setOpenBriefsLoading] = useState(!config.showPostForm);
+  const [respondingBriefId, setRespondingBriefId] = useState<string | null>(null);
+
+  const loadMyBriefs = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      setMyBriefsLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/sample-briefs?phone=${encodeURIComponent(auth.phone)}&role=buyer`
+      );
+      const { briefs } = (await res.json()) as { briefs: SampleBriefRow[] };
+      setMyBriefs(briefs ?? []);
+    } catch (error) {
+      console.error("Failed to load sample briefs:", error);
+    } finally {
+      setMyBriefsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!config.showPostForm) return;
+    loadMyBriefs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.showPostForm]);
+
+  useEffect(() => {
+    if (config.showPostForm) return;
+    let cancelled = false;
+    async function loadOpenBriefs() {
+      try {
+        const res = await fetch("/api/sample-briefs");
+        const { briefs } = (await res.json()) as { briefs: SampleBriefRow[] };
+        if (!cancelled) setOpenBriefs(briefs ?? []);
+      } catch (error) {
+        console.error("Failed to load open sample briefs:", error);
+      } finally {
+        if (!cancelled) setOpenBriefsLoading(false);
+      }
+    }
+    loadOpenBriefs();
+    return () => {
+      cancelled = true;
+    };
+  }, [config.showPostForm]);
+
+  const respondToBrief = async (brief: SampleBriefRow) => {
+    if (!brief.buyer?.phone || respondingBriefId) return;
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      router.push("/login");
+      return;
+    }
+
+    setRespondingBriefId(brief.id);
+    try {
+      await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderPhone: auth.phone,
+          receiverPhone: brief.buyer.phone,
+          content: `Hi, I am interested in your sample brief "${brief.title}". I can produce this for you. Let me share my quote and timeline.`,
+          messageType: "text",
+        }),
+      });
+      await fetch(`/api/sample-briefs/${brief.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "responses_received" }),
+      });
+      router.push("/chat");
+    } catch (error) {
+      console.error("Failed to respond to brief:", error);
+      setRespondingBriefId(null);
+    }
+  };
 
   const updateField = (key: keyof FormDataState, value: string) => {
     setFormData((current) => ({ ...current, [key]: value }));
@@ -769,6 +830,8 @@ export default function SampleBriefs() {
     setSelectedManufacturers(DEFAULT_SELECTED_VENDORS);
     setReferenceFileName("");
     setIsPosted(false);
+    setPostedBrief(null);
+    setPostError("");
   };
 
   const startNewBrief = () => {
@@ -784,6 +847,93 @@ export default function SampleBriefs() {
 
   const handleBack = () => setCurrentStep((step) => Math.max(1, step - 1));
   const handleContinue = () => setCurrentStep((step) => Math.min(4, step + 1));
+
+  // sample_briefs has no columns for most of what this wizard collects
+  // (per-sample-type specs, trim/dye/technique preferences, deadline) — fold
+  // it all into a readable description instead of silently dropping it.
+  const buildBriefDescription = () => {
+    const lines: string[] = [];
+
+    for (const id of selectedSampleTypes) {
+      for (const { key, label } of FIELD_LABELS[id] ?? []) {
+        const rawValue = formData[key as keyof FormDataState];
+        const otherKey = OTHER_FIELD_MAP[key];
+        const displayValue =
+          rawValue === "Other" && otherKey
+            ? formData[otherKey as keyof FormDataState] || "Other"
+            : rawValue;
+        if (displayValue && displayValue.trim() !== "") {
+          lines.push(`${label}: ${displayValue}`);
+        }
+      }
+    }
+    if (trimTypes.length > 0) lines.push(`Trim Type: ${trimTypes.join(", ")}`);
+    if (selectedSampleTypes.includes("lab-dip") && dyeTypePreference.length > 0) {
+      lines.push(`Dye Type Preference: ${dyeTypePreference.join(", ")}`);
+    }
+    if (selectedSampleTypes.includes("rd-sample") && specialTechniques.length > 0) {
+      lines.push(`Special Techniques: ${specialTechniques.join(", ")}`);
+    }
+    if (fabricPreference.length > 0) {
+      lines.push(`Fabric Preference: ${fabricPreference.join(", ")}`);
+    }
+    if (formData.sampleDeadline) lines.push(`Sample Deadline: ${formData.sampleDeadline}`);
+    if (formData.additionalNotes) lines.push(`Additional Notes: ${formData.additionalNotes}`);
+
+    return lines.join("\n");
+  };
+
+  const resolveQuantity = () => {
+    const candidate =
+      (selectedSampleTypes.includes("fabric-swatch") && formData.swatchQuantity) ||
+      (selectedSampleTypes.includes("lab-dip") && formData.numOptions) ||
+      (selectedSampleTypes.includes("rd-sample") && formData.bulkQuantity) ||
+      "";
+    return parseInt(candidate, 10) || 0;
+  };
+
+  const postBrief = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      router.push("/login");
+      return;
+    }
+
+    setIsPosting(true);
+    setPostError("");
+
+    try {
+      const res = await fetch("/api/sample-briefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyerPhone: auth.phone,
+          title: formData.briefTitle,
+          category: selectedSampleTypes
+            .map((id) => SAMPLE_TYPES.find((t) => t.id === id)?.title)
+            .filter(Boolean)
+            .join(", "),
+          description: buildBriefDescription(),
+          quantity: resolveQuantity(),
+          budgetMin: Number(formData.bulkPriceFrom) || 0,
+          budgetMax: Number(formData.bulkPriceTo) || 0,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to post brief");
+
+      setPostedBrief(data.brief);
+      setIsPosted(true);
+      loadMyBriefs();
+    } catch (error) {
+      setPostError(
+        error instanceof Error ? error.message : "Failed to post brief. Please try again."
+      );
+    }
+
+    setIsPosting(false);
+  };
 
   const perVendorLow = 150;
   const perVendorHigh = 280;
@@ -821,73 +971,119 @@ export default function SampleBriefs() {
     </div>
   );
 
-  const myBriefsContent =
-    config.showPostForm && MY_BRIEFS.length > 0 ? (
-      <div className="mt-6 flex flex-col gap-4">
-        {MY_BRIEFS.map((brief) => (
-          <div key={brief.id}>
-            <div className="rounded-[10px] border border-border-dark bg-card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-bold text-white">
-                    {brief.id} — {brief.title}
-                  </p>
-                  <p className="mt-0.5 text-xs text-text-secondary">
-                    {brief.type} • {brief.vendor}
-                  </p>
-                </div>
-                <span
-                  className={`rounded-[20px] border px-2.5 py-1 text-[11px] font-semibold ${BRIEF_STATUS_STYLES[brief.status]}`}
-                >
-                  {brief.status}
-                </span>
-              </div>
-              <p className="mt-2 text-[11px] text-text-secondary">{brief.statusDate}</p>
-            </div>
-
-            {brief.status === "Approved" && (
-              <div
-                className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border p-3.5"
-                style={{
-                  backgroundColor: "rgba(242,202,80,0.08)",
-                  borderColor: "#f2ca50",
-                  padding: "14px 16px",
-                }}
-              >
-                <p className="text-[13px] font-bold text-white">
-                  ✅ Sample approved — ready for bulk
-                </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    router.push(`/brand/orders/new?from=sample&sampleId=${brief.id}`)
-                  }
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-navy"
-                >
-                  Place Bulk Order →
-                </button>
-              </div>
-            )}
+  const myBriefsContent = myBriefsLoading ? (
+    <div className="flex items-center justify-center py-16 text-sm text-text-secondary">
+      Loading briefs...
+    </div>
+  ) : config.showPostForm && myBriefs.length > 0 ? (
+    <div className="mt-6 flex flex-col gap-4">
+      {myBriefs.map((brief) => (
+        <div key={brief.id} className="rounded-[10px] border border-border-dark bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-bold text-white">{brief.title}</p>
+            <span
+              className={`rounded-[20px] border px-2.5 py-1 text-[11px] font-semibold ${
+                REAL_BRIEF_STATUS_STYLES[brief.status] ?? REAL_BRIEF_STATUS_STYLES.open
+              }`}
+            >
+              {REAL_BRIEF_STATUS_LABEL[brief.status] ?? brief.status}
+            </span>
           </div>
-        ))}
-      </div>
-    ) : (
-      <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-        <div className="text-5xl">📋</div>
-        <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">
-          {config.emptyState}
-        </p>
-        {config.showPostForm && (
+          <p className="mt-0.5 text-xs text-text-secondary">
+            {brief.category}
+            {brief.quantity ? ` • Qty ${brief.quantity}` : ""}
+            {brief.budget_min || brief.budget_max
+              ? ` • ₹${brief.budget_min ?? 0}–₹${brief.budget_max ?? 0}`
+              : ""}
+          </p>
+          <p className="mt-2 text-[11px] text-text-secondary">
+            Posted {formatBriefDate(brief.created_at)}
+          </p>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="text-5xl">📋</div>
+      {config.showPostForm ? (
+        <>
+          <p className="mt-2 text-base font-bold text-white">No sample briefs posted yet</p>
+          <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">
+            Post your first brief to get quotes from verified manufacturers
+          </p>
           <button
             type="button"
             onClick={startNewBrief}
             className="mt-5 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
           >
-            Post Your First Brief →
+            + Post a Brief →
           </button>
-        )}
-      </div>
-    );
+        </>
+      ) : (
+        <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">{config.emptyState}</p>
+      )}
+    </div>
+  );
+
+  const openBriefsContent = openBriefsLoading ? (
+    <div className="flex items-center justify-center py-16 text-sm text-text-secondary">
+      Loading briefs...
+    </div>
+  ) : openBriefs.length === 0 ? (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="text-5xl">📬</div>
+      <p className="mt-2 text-base font-bold text-white">No open sample briefs right now</p>
+      <p className="mt-2 max-w-[400px] text-[13px] text-text-secondary">
+        Check back soon — brands post new briefs regularly
+      </p>
+    </div>
+  ) : (
+    <div className="mt-6 flex flex-col gap-4">
+      {openBriefs.map((brief) => (
+        <div key={brief.id} className="rounded-[10px] border border-border-dark bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-bold text-white">{brief.title}</p>
+            <span
+              className={`rounded-[20px] border px-2.5 py-1 text-[11px] font-semibold ${
+                REAL_BRIEF_STATUS_STYLES[brief.status] ?? REAL_BRIEF_STATUS_STYLES.open
+              }`}
+            >
+              {REAL_BRIEF_STATUS_LABEL[brief.status] ?? brief.status}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            From {brief.buyer?.name ?? "Unknown buyer"}
+            {brief.buyer?.city ? ` · ${brief.buyer.city}` : ""}
+          </p>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            {brief.category}
+            {brief.quantity ? ` • Qty ${brief.quantity}` : ""}
+            {brief.budget_min || brief.budget_max
+              ? ` • ₹${brief.budget_min ?? 0}–₹${brief.budget_max ?? 0}`
+              : ""}
+          </p>
+          {brief.description && (
+            <p className="mt-2 whitespace-pre-line text-xs text-text-secondary">
+              {brief.description}
+            </p>
+          )}
+          <div className="mt-3 flex items-center justify-between border-t border-border-dark pt-3">
+            <p className="text-[11px] text-text-secondary">
+              Posted {formatBriefDate(brief.created_at)}
+            </p>
+            <button
+              type="button"
+              onClick={() => void respondToBrief(brief)}
+              disabled={respondingBriefId === brief.id}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-navy disabled:cursor-not-allowed disabled:bg-primary/40"
+            >
+              {respondingBriefId === brief.id ? "Responding..." : "Respond to Brief →"}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   const secondaryTabContent = (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
@@ -1476,23 +1672,34 @@ export default function SampleBriefs() {
   const step4Content = isPosted ? (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <div className="text-6xl">✅</div>
-      <h2 className="mt-6 text-xl font-bold text-white">
-        Brief posted successfully!
-      </h2>
+      <h2 className="mt-6 text-xl font-bold text-white">Brief Posted!</h2>
       <p className="mt-2 max-w-[420px] text-sm text-text-secondary">
-        Your brief has been sent to {selectedManufacturers.length}{" "}
-        manufacturers. You will receive responses within 24–48 hours.
+        Your sample brief is now visible to all verified manufacturers.
       </p>
-      <button
-        type="button"
-        onClick={() => {
-          resetWizard();
-          setActiveTab("primary");
-        }}
-        className="mt-6 rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
-      >
-        View My Briefs →
-      </button>
+      {postedBrief && (
+        <p className="mt-2 text-xs font-semibold text-primary">
+          Brief ID: SB-{postedBrief.id.slice(0, 8).toUpperCase()}
+        </p>
+      )}
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={() => {
+            resetWizard();
+            setActiveTab("primary");
+          }}
+          className="rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
+        >
+          View My Briefs →
+        </button>
+        <button
+          type="button"
+          onClick={startNewBrief}
+          className="rounded-lg border border-border-dark px-6 py-3 text-sm font-semibold text-text-secondary"
+        >
+          Post Another
+        </button>
+      </div>
     </div>
   ) : (
     <div className="mt-6">
@@ -1641,6 +1848,10 @@ export default function SampleBriefs() {
         </p>
       </div>
 
+      {postError && (
+        <p className="mt-4 text-center text-[13px] text-red-400">{postError}</p>
+      )}
+
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
@@ -1651,10 +1862,11 @@ export default function SampleBriefs() {
         </button>
         <button
           type="button"
-          onClick={() => setIsPosted(true)}
-          className="rounded-lg bg-primary px-8 py-3.5 text-base font-bold text-navy"
+          onClick={() => void postBrief()}
+          disabled={isPosting}
+          className="rounded-lg bg-primary px-8 py-3.5 text-base font-bold text-navy disabled:cursor-not-allowed disabled:bg-primary/40"
         >
-          Post Brief →
+          {isPosting ? "Posting..." : "Post Brief →"}
         </button>
       </div>
     </div>
@@ -1737,7 +1949,9 @@ export default function SampleBriefs() {
         </p>
         {tabsBar}
         {activeTab === "primary"
-          ? myBriefsContent
+          ? config.showPostForm
+            ? myBriefsContent
+            : openBriefsContent
           : config.showPostForm
             ? postBriefContent
             : secondaryTabContent}
@@ -1798,7 +2012,9 @@ export default function SampleBriefs() {
 
           <div className="mt-4">{tabsBar}</div>
           {activeTab === "primary"
-            ? myBriefsContent
+            ? config.showPostForm
+              ? myBriefsContent
+              : openBriefsContent
             : config.showPostForm
               ? postBriefContent
               : secondaryTabContent}

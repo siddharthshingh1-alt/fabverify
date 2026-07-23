@@ -558,7 +558,7 @@ export async function getSampleBriefs(filters?: {
       `
       *,
       buyer:users!buyer_id(
-        id, name, city
+        id, name, city, user_type, phone
       )
     `
     )
@@ -574,4 +574,49 @@ export async function getSampleBriefs(filters?: {
 
   if (error) return [];
   return data;
+}
+
+export async function getSampleBriefsByBuyer(buyerId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("sample_briefs")
+    .select(
+      `
+      *,
+      buyer:users!buyer_id(
+        id, name, city
+      )
+    `
+    )
+    .eq("buyer_id", buyerId)
+    .order("created_at", { ascending: false });
+
+  if (error) return [];
+  return data;
+}
+
+export async function getSampleBriefById(id: string) {
+  const { data, error } = await supabaseAdmin
+    .from("sample_briefs")
+    .select(
+      `
+      *,
+      buyer:users!buyer_id(
+        id, name, city, phone
+      )
+    `
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) return null;
+  return data;
+}
+
+export async function updateSampleBriefStatus(id: string, status: string) {
+  const { error } = await supabaseAdmin
+    .from("sample_briefs")
+    .update({ status })
+    .eq("id", id);
+
+  if (error) throw error;
 }
