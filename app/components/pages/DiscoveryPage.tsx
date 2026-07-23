@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThreePanelLayout from "../ThreePanelLayout";
 import TopBar from "../TopBar";
 import SampleRequestModal from "../SampleRequestModal";
 import EnquiryModal from "../EnquiryModal";
-import { manufacturers } from "../../data/manufacturers";
 import type { Manufacturer, Tier } from "../../data/manufacturers";
+import { mapManufacturerRow } from "../../lib/mapManufacturer";
+import type { ManufacturerRow } from "../../lib/mapManufacturer";
 import { useUser } from "../../context/UserContext";
 import type { UserType } from "../../context/UserContext";
 import screenConfig from "../../config/screens";
@@ -30,8 +31,6 @@ const CATEGORY_PILLS = [
   "Western Wear",
   "Luxury",
 ];
-
-const CITY_OPTIONS = Array.from(new Set(manufacturers.map((m) => m.city)));
 
 const TIER_STYLES: Record<Tier, string> = {
   gold: "border-primary/40 bg-primary/15 text-primary",
@@ -418,6 +417,32 @@ export default function Manufacturers() {
   const [enquiryTarget, setEnquiryTarget] = useState<{ name: string } | null>(
     null
   );
+
+  const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [manufacturersLoading, setManufacturersLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/manufacturers");
+        const { manufacturers: rows } = (await res.json()) as {
+          manufacturers: ManufacturerRow[];
+        };
+        if (!cancelled) setManufacturers(rows.map(mapManufacturerRow));
+      } catch (error) {
+        console.error("Failed to load manufacturers:", error);
+      } finally {
+        if (!cancelled) setManufacturersLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const CITY_OPTIONS = Array.from(new Set(manufacturers.map((m) => m.city)));
 
   // Mode: "manufacturers" (buyer browsing manufacturers)
   const [searchText, setSearchText] = useState("");
@@ -873,104 +898,124 @@ export default function Manufacturers() {
         </select>
       </div>
 
-      <p className="mt-4 text-[13px] text-text-secondary">
-        Showing {filteredManufacturers.length} verified manufacturers
-      </p>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {filteredManufacturers.map((manufacturer) => (
-          <div
-            key={manufacturer.id}
-            className="rounded-[10px] border border-border-dark bg-card p-4 transition-all hover:border-primary/50 hover:shadow-[0_4px_20px_rgba(242,202,80,0.08)]"
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
-                🏭
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-bold text-white">
-                  {manufacturer.name}
-                </p>
-                <p className="text-xs text-text-secondary">
-                  {manufacturer.city}
-                  {manufacturer.state ? `, ${manufacturer.state}` : ""}
-                </p>
-              </div>
-              <span
-                className={`shrink-0 rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold capitalize ${
-                  TIER_STYLES[manufacturer.tier]
-                }`}
-              >
-                {manufacturer.tier} Verified
-              </span>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {manufacturer.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-[20px] border border-border-dark bg-background px-2 py-[3px] text-[10px] text-text-secondary"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-
-            <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
-              <div>
-                <p className="text-[11px] text-text-secondary">⭐ Rating</p>
-                <p className="text-xs font-semibold text-text-primary">
-                  {manufacturer.rating}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-text-secondary">📦 Orders</p>
-                <p className="text-xs font-semibold text-text-primary">
-                  {manufacturer.orders}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-text-secondary">⏱ Delivery</p>
-                <p className="text-xs font-semibold text-text-primary">
-                  {manufacturer.delivery}% on time
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-text-secondary">
-                Min. {manufacturer.moq} {manufacturer.moqUnit}
-              </p>
-              <div className="flex gap-2">
-                <Link
-                  href={`/manufacturers/${manufacturer.id}`}
-                  className="rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary"
-                >
-                  View Profile
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setSampleModalManufacturer(manufacturer)}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
-                >
-                  Request Sample
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {filteredManufacturers.length === 0 && (
-        <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
-          <div className="text-4xl">🔍</div>
-          <p className="mt-3 text-sm text-text-primary">
-            No manufacturers match your filters
-          </p>
-          <p className="mt-1 text-xs text-text-secondary">
-            Try adjusting your search or clearing filters
-          </p>
+      {manufacturersLoading ? (
+        <div className="mt-6 flex items-center justify-center py-16 text-sm text-text-secondary">
+          Loading manufacturers...
         </div>
+      ) : (
+        <>
+          <p className="mt-4 text-[13px] text-text-secondary">
+            Showing {filteredManufacturers.length} verified manufacturers
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {filteredManufacturers.map((manufacturer) => (
+              <div
+                key={manufacturer.id}
+                className="rounded-[10px] border border-border-dark bg-card p-4 transition-all hover:border-primary/50 hover:shadow-[0_4px_20px_rgba(242,202,80,0.08)]"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
+                    🏭
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[15px] font-bold text-white">
+                      {manufacturer.name}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {manufacturer.city}
+                      {manufacturer.state ? `, ${manufacturer.state}` : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold capitalize ${
+                      TIER_STYLES[manufacturer.tier]
+                    }`}
+                  >
+                    {manufacturer.tier} Verified
+                  </span>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {manufacturer.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-[20px] border border-border-dark bg-background px-2 py-[3px] text-[10px] text-text-secondary"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
+                  <div>
+                    <p className="text-[11px] text-text-secondary">⭐ Rating</p>
+                    <p className="text-xs font-semibold text-text-primary">
+                      {manufacturer.rating}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-text-secondary">📦 Orders</p>
+                    <p className="text-xs font-semibold text-text-primary">
+                      {manufacturer.orders}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-text-secondary">⏱ Delivery</p>
+                    <p className="text-xs font-semibold text-text-primary">
+                      {manufacturer.delivery}% on time
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-text-secondary">
+                    Min. {manufacturer.moq} {manufacturer.moqUnit}
+                  </p>
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/manufacturers/${manufacturer.id}`}
+                      className="rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary"
+                    >
+                      View Profile
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setSampleModalManufacturer(manufacturer)}
+                      className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-navy"
+                    >
+                      Request Sample
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {filteredManufacturers.length === 0 && manufacturers.length === 0 && (
+            <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+              <div className="text-4xl">🏭</div>
+              <p className="mt-3 text-sm font-semibold text-text-primary">
+                No verified manufacturers yet
+              </p>
+              <p className="mt-1 text-xs text-text-secondary">
+                Be the first manufacturer to join FabVerify
+              </p>
+            </div>
+          )}
+
+          {filteredManufacturers.length === 0 && manufacturers.length > 0 && (
+            <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+              <div className="text-4xl">🔍</div>
+              <p className="mt-3 text-sm text-text-primary">
+                No manufacturers match your filters
+              </p>
+              <p className="mt-1 text-xs text-text-secondary">
+                Try adjusting your search or clearing filters
+              </p>
+            </div>
+          )}
+        </>
       )}
     </>
   );
@@ -1710,111 +1755,131 @@ export default function Manufacturers() {
                 ))}
               </div>
 
-              <p className="mt-4 text-[13px] text-text-secondary">
-                Showing {filteredManufacturers.length} verified manufacturers
-              </p>
+              {manufacturersLoading ? (
+                <div className="mt-6 flex items-center justify-center py-16 text-sm text-text-secondary">
+                  Loading manufacturers...
+                </div>
+              ) : (
+                <>
+                  <p className="mt-4 text-[13px] text-text-secondary">
+                    Showing {filteredManufacturers.length} verified manufacturers
+                  </p>
 
-              <div className="mt-4 flex flex-col gap-3">
-                {filteredManufacturers.map((manufacturer) => (
-                  <div
-                    key={manufacturer.id}
-                    className="rounded-[10px] border border-border-dark bg-card p-4"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
-                        🏭
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[15px] font-bold text-white">
-                          {manufacturer.name}
-                        </p>
-                        <p className="text-xs text-text-secondary">
-                          {manufacturer.city}
-                          {manufacturer.state ? `, ${manufacturer.state}` : ""}
-                        </p>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold capitalize ${
-                          TIER_STYLES[manufacturer.tier]
-                        }`}
+                  <div className="mt-4 flex flex-col gap-3">
+                    {filteredManufacturers.map((manufacturer) => (
+                      <div
+                        key={manufacturer.id}
+                        className="rounded-[10px] border border-border-dark bg-card p-4"
                       >
-                        {manufacturer.tier} Verified
-                      </span>
-                    </div>
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] border border-primary bg-navy text-lg">
+                            🏭
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[15px] font-bold text-white">
+                              {manufacturer.name}
+                            </p>
+                            <p className="text-xs text-text-secondary">
+                              {manufacturer.city}
+                              {manufacturer.state ? `, ${manufacturer.state}` : ""}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-[20px] border px-2.5 py-1 text-[10px] font-semibold capitalize ${
+                              TIER_STYLES[manufacturer.tier]
+                            }`}
+                          >
+                            {manufacturer.tier} Verified
+                          </span>
+                        </div>
 
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {manufacturer.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-[20px] border border-border-dark bg-background px-2 py-[3px] text-[10px] text-text-secondary"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {manufacturer.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded-[20px] border border-border-dark bg-background px-2 py-[3px] text-[10px] text-text-secondary"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
 
-                    <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
-                      <div>
-                        <p className="text-[11px] text-text-secondary">
-                          ⭐ Rating
-                        </p>
-                        <p className="text-xs font-semibold text-text-primary">
-                          {manufacturer.rating}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] text-text-secondary">
-                          📦 Orders
-                        </p>
-                        <p className="text-xs font-semibold text-text-primary">
-                          {manufacturer.orders}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] text-text-secondary">
-                          ⏱ Delivery
-                        </p>
-                        <p className="text-xs font-semibold text-text-primary">
-                          {manufacturer.delivery}% on time
-                        </p>
-                      </div>
-                    </div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border-dark pt-3">
+                          <div>
+                            <p className="text-[11px] text-text-secondary">
+                              ⭐ Rating
+                            </p>
+                            <p className="text-xs font-semibold text-text-primary">
+                              {manufacturer.rating}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-text-secondary">
+                              📦 Orders
+                            </p>
+                            <p className="text-xs font-semibold text-text-primary">
+                              {manufacturer.orders}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-text-secondary">
+                              ⏱ Delivery
+                            </p>
+                            <p className="text-xs font-semibold text-text-primary">
+                              {manufacturer.delivery}% on time
+                            </p>
+                          </div>
+                        </div>
 
-                    <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3">
-                      <p className="text-xs text-text-secondary">
-                        Min. {manufacturer.moq} {manufacturer.moqUnit}
-                      </p>
-                      <div className="flex gap-2">
-                        <Link
-                          href={`/manufacturers/${manufacturer.id}`}
-                          className="flex-1 rounded-lg border border-primary px-3 py-2 text-center text-xs font-semibold text-primary"
-                        >
-                          View Profile
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => setSampleModalManufacturer(manufacturer)}
-                          className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-navy"
-                        >
-                          Request Sample
-                        </button>
+                        <div className="mt-4 flex flex-col gap-3 border-t border-border-dark pt-3">
+                          <p className="text-xs text-text-secondary">
+                            Min. {manufacturer.moq} {manufacturer.moqUnit}
+                          </p>
+                          <div className="flex gap-2">
+                            <Link
+                              href={`/manufacturers/${manufacturer.id}`}
+                              className="flex-1 rounded-lg border border-primary px-3 py-2 text-center text-xs font-semibold text-primary"
+                            >
+                              View Profile
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => setSampleModalManufacturer(manufacturer)}
+                              className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-navy"
+                            >
+                              Request Sample
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ))}
+
+                    {filteredManufacturers.length === 0 && manufacturers.length === 0 && (
+                      <div className="flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+                        <div className="text-4xl">🏭</div>
+                        <p className="mt-3 text-sm font-semibold text-text-primary">
+                          No verified manufacturers yet
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          Be the first manufacturer to join FabVerify
+                        </p>
+                      </div>
+                    )}
+
+                    {filteredManufacturers.length === 0 && manufacturers.length > 0 && (
+                      <div className="flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
+                        <div className="text-4xl">🔍</div>
+                        <p className="mt-3 text-sm text-text-primary">
+                          No manufacturers match your filters
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          Try adjusting your search or clearing filters
+                        </p>
+                      </div>
+                    )}
                   </div>
-                ))}
-
-                {filteredManufacturers.length === 0 && (
-                  <div className="flex flex-col items-center justify-center rounded-xl border border-border-dark bg-card px-6 py-12 text-center">
-                    <div className="text-4xl">🔍</div>
-                    <p className="mt-3 text-sm text-text-primary">
-                      No manufacturers match your filters
-                    </p>
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Try adjusting your search or clearing filters
-                    </p>
-                  </div>
-                )}
-              </div>
+                </>
+              )}
             </>
           ) : (
             <>

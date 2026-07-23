@@ -1,4 +1,5 @@
-import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
+import { updateUserType } from "@/app/lib/db";
+import { getErrorMessage } from "@/app/lib/apiError";
 import { NextResponse } from "next/server";
 
 // Dev-mode only (see app/onboarding/type/page.tsx) — updates user_type by
@@ -14,13 +15,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await supabaseAdmin
-    .from("users")
-    .update({ user_type: userType })
-    .eq("phone", phone);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    await updateUserType(phone, userType);
+  } catch (error) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

@@ -92,9 +92,36 @@ export default function ArtisanOnboarding() {
   })();
 
   const handleBack = () => setStep((current) => Math.max(1, current - 1));
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!isStepValid) return;
     if (step === TOTAL_STEPS) {
+      const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+      if (auth.phone) {
+        try {
+          const res = await fetch("/api/profile-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: auth.phone,
+              profileData: {
+                crafts,
+                otherCraft: otherCraft || undefined,
+                monthlyQuantity,
+                teamType,
+                certifications,
+                sampleFile,
+              },
+            }),
+          });
+          if (!res.ok) {
+            const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+            console.error("Profile data save error:", error);
+          }
+        } catch (error) {
+          console.error("Profile data save error:", error);
+        }
+      }
+
       setUser({
         name: "User",
         userType: "artisan",

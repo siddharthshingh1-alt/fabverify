@@ -86,7 +86,7 @@ export default function EnterpriseOnboarding() {
 
   const isValid = companyName.trim() !== "";
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!isValid) return;
     const position = role ? ROLE_TO_POSITION[role] : undefined;
     try {
@@ -105,6 +105,34 @@ export default function EnterpriseOnboarding() {
         localStorage.setItem("fabverify_enterprise_position", position);
       }
     } catch {}
+
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (auth.phone) {
+      try {
+        const res = await fetch("/api/profile-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: auth.phone,
+            profileData: {
+              companyName: companyName.trim(),
+              role,
+              stylesPerSeason,
+              vendorCount,
+              erp,
+              source,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+          console.error("Profile data save error:", error);
+        }
+      } catch (error) {
+        console.error("Profile data save error:", error);
+      }
+    }
+
     if (position) {
       setUser({ enterprisePosition: position });
     }
@@ -221,7 +249,7 @@ export default function EnterpriseOnboarding() {
 
         <button
           type="button"
-          onClick={handleSubmit}
+          onClick={() => void handleSubmit()}
           disabled={!isValid}
           className={`mt-6 w-full rounded-lg py-3.5 font-bold transition-colors ${
             isValid

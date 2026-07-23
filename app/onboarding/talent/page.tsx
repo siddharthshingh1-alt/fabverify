@@ -212,7 +212,40 @@ export default function TalentOnboarding() {
     setStep((current) => Math.min(TOTAL_STEPS, current + 1));
   };
 
-  const finish = (verified: boolean) => {
+  const finish = async (verified: boolean) => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (auth.phone) {
+      try {
+        const res = await fetch("/api/profile-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: auth.phone,
+            profileData: {
+              talentType,
+              yearsExperience,
+              employer: employer || undefined,
+              categories,
+              skills,
+              travelCities,
+              portfolioFiles,
+              projectDescription: projectDescription || undefined,
+              rate,
+              rateMax: config.rateIsRange ? rateMax : undefined,
+              turnaround: talentType === "qc_inspector" ? turnaround : undefined,
+              appliedForVerification: verified,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+          console.error("Profile data save error:", error);
+        }
+      } catch (error) {
+        console.error("Profile data save error:", error);
+      }
+    }
+
     setUser({
       name: fullName || "User",
       userType: talentType,
@@ -476,14 +509,14 @@ export default function TalentOnboarding() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={() => finish(true)}
+                onClick={() => void finish(true)}
                 className="flex-1 rounded-lg bg-primary py-3.5 text-sm font-bold text-navy"
               >
                 Apply for Verification →
               </button>
               <button
                 type="button"
-                onClick={() => finish(false)}
+                onClick={() => void finish(false)}
                 className="flex-1 rounded-lg bg-border-dark py-3.5 text-sm font-bold text-text-secondary"
               >
                 Skip — start as unverified →

@@ -129,9 +129,37 @@ export default function SupplierOnboarding() {
   })();
 
   const handleBack = () => setStep((current) => Math.max(1, current - 1));
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!isStepValid) return;
     if (step === TOTAL_STEPS) {
+      const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+      if (auth.phone) {
+        try {
+          const res = await fetch("/api/profile-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: auth.phone,
+              profileData: {
+                businessName,
+                supplierType,
+                yearsInBusiness,
+                offerings,
+                moq: supplierType === "fabric_mill" ? moq : undefined,
+                moqUnit: supplierType === "fabric_mill" ? moqUnit : undefined,
+                contactMethods,
+              },
+            }),
+          });
+          if (!res.ok) {
+            const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+            console.error("Profile data save error:", error);
+          }
+        } catch (error) {
+          console.error("Profile data save error:", error);
+        }
+      }
+
       setUser({
         name: businessName || "User",
         userType: supplierType,

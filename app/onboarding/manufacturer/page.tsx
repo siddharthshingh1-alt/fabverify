@@ -66,6 +66,10 @@ const LEAD_TIME_OPTIONS = ["7-14 days", "14-21 days", "21-30 days", "30+ days"];
 
 const MOQ_UNITS = ["pieces", "metres", "kg"];
 
+const CATEGORY_LABEL_BY_ID = Object.fromEntries(
+  CATEGORIES.map((category) => [category.id, category.label])
+);
+
 export default function ManufacturerOnboarding() {
   const router = useRouter();
   const { setUser } = useUser();
@@ -117,6 +121,39 @@ export default function ManufacturerOnboarding() {
   const handleContinue = () => {
     if (!isStepValid) return;
     setStep((current) => Math.min(TOTAL_STEPS, current + 1));
+  };
+
+  // Dev-mode only — no real Supabase Auth session yet, so the save route
+  // resolves the real users.id from phone server-side rather than trusting
+  // the synthetic dev-user-<phone> id kept in localStorage.
+  const saveManufacturerProfile = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) return;
+
+    try {
+      const res = await fetch("/api/manufacturer-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: auth.phone,
+          businessName,
+          city,
+          state,
+          categories: categories.map((id) => CATEGORY_LABEL_BY_ID[id] ?? id),
+          minOrder: Number(moq) || 0,
+          capacity,
+          unitType,
+          specialisations: techniques,
+        }),
+      });
+
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+        console.error("Manufacturer profile save error:", error);
+      }
+    } catch (error) {
+      console.error("Manufacturer profile save error:", error);
+    }
   };
 
   const stepLabel = `Step ${step} of ${TOTAL_STEPS}`;
@@ -281,7 +318,8 @@ export default function ManufacturerOnboarding() {
 
         {step === 4 && (
           <VerificationStep
-            onGetVerified={() => {
+            onGetVerified={async () => {
+              await saveManufacturerProfile();
               setUser({
                 name: businessName || "User",
                 userType: "manufacturer",
@@ -291,7 +329,8 @@ export default function ManufacturerOnboarding() {
               });
               router.push("/manufacturer/verification");
             }}
-            onSkip={() => {
+            onSkip={async () => {
+              await saveManufacturerProfile();
               setUser({
                 name: businessName || "User",
                 userType: "manufacturer",
@@ -322,8 +361,8 @@ function VerificationStep({
   onGetVerified,
   onSkip,
 }: {
-  onGetVerified: () => void;
-  onSkip: () => void;
+  onGetVerified: () => Promise<void>;
+  onSkip: () => Promise<void>;
 }) {
   const tiers = [
     {
@@ -391,14 +430,14 @@ function VerificationStep({
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <button
           type="button"
-          onClick={onGetVerified}
+          onClick={() => void onGetVerified()}
           className="flex-1 rounded-lg bg-primary py-3.5 text-sm font-bold text-navy"
         >
           Get Bronze Verified →
         </button>
         <button
           type="button"
-          onClick={onSkip}
+          onClick={() => void onSkip()}
           className="flex-1 rounded-lg bg-border-dark py-3.5 text-sm font-bold text-text-secondary"
         >
           Skip for now →

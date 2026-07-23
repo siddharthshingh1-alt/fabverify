@@ -109,20 +109,48 @@ export default function BrandBuilderOnboarding() {
     setCurrentStep((step) => Math.max(1, step - 1));
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!isStepValid) return;
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep((step) => step + 1);
-    } else {
-      setUser({
-        name: name || "User",
-        userType: "buyer",
-        verificationTier: "bronze",
-        fabscore: 0,
-        city: "",
-      });
-      setIsComplete(true);
+      return;
     }
+
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (auth.phone) {
+      try {
+        const res = await fetch("/api/profile-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: auth.phone,
+            profileData: {
+              categories,
+              customer,
+              ageGroups,
+              budget,
+              quantity,
+              brandName: brandName || undefined,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+          console.error("Profile data save error:", error);
+        }
+      } catch (error) {
+        console.error("Profile data save error:", error);
+      }
+    }
+
+    setUser({
+      name: name || "User",
+      userType: "buyer",
+      verificationTier: "bronze",
+      fabscore: 0,
+      city: "",
+    });
+    setIsComplete(true);
   };
 
   if (isComplete) {
@@ -415,7 +443,7 @@ export default function BrandBuilderOnboarding() {
             )}
             <button
               type="button"
-              onClick={handleContinue}
+              onClick={() => void handleContinue()}
               disabled={!isStepValid}
               className={`rounded-lg px-8 py-3.5 font-bold transition-colors ${
                 isStepValid

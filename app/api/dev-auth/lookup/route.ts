@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
+import { getUserByPhone } from "@/app/lib/db";
 import { NextResponse } from "next/server";
 
 // Dev-mode only (see app/login/page.tsx) — looks up a user by phone using
@@ -10,15 +10,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "phone is required" }, { status: 400 });
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("users")
-    .select("*")
-    .eq("phone", phone)
-    .maybeSingle();
+  const user = await getUserByPhone(phone);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ user: data });
+  return NextResponse.json({ user });
 }

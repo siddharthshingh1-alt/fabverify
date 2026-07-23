@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ThreePanelLayout from "../ThreePanelLayout";
 import TopBar from "../TopBar";
 import SampleRequestModal from "../SampleRequestModal";
 import EnquiryModal from "../EnquiryModal";
 import { useUser } from "../../context/UserContext";
-import { getManufacturerById } from "../../data/manufacturers";
-import type { Tier } from "../../data/manufacturers";
+import type { Manufacturer, Tier } from "../../data/manufacturers";
+import { mapManufacturerRow } from "../../lib/mapManufacturer";
+import type { ManufacturerRow } from "../../lib/mapManufacturer";
 
 const TIER_STYLES: Record<Tier, string> = {
   gold: "border-primary/40 bg-primary/15 text-primary",
@@ -122,10 +123,41 @@ export default function ManufacturerProfile() {
   const router = useRouter();
   const { isBuyer } = useUser();
   const id = params.id as string;
-  const manufacturer = getManufacturerById(id);
+  const [manufacturer, setManufacturer] = useState<Manufacturer | null>(null);
+  const [manufacturerUserId, setManufacturerUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [showEnquiryModal, setShowEnquiryModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/manufacturers/${id}`);
+        if (!res.ok) {
+          if (!cancelled) setManufacturer(null);
+          return;
+        }
+        const { manufacturer: row } = (await res.json()) as {
+          manufacturer: ManufacturerRow;
+        };
+        if (!cancelled) {
+          setManufacturer(mapManufacturerRow(row));
+          setManufacturerUserId(row.user?.id ?? null);
+        }
+      } catch (error) {
+        console.error("Failed to load manufacturer:", error);
+        if (!cancelled) setManufacturer(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const products = manufacturer ? CATALOGUE_BY_ID[manufacturer.id] ?? [] : [];
   const reviews = manufacturer ? REVIEWS_BY_ID[manufacturer.id] ?? [] : [];
@@ -393,7 +425,11 @@ export default function ManufacturerProfile() {
           ? reviewsTab
           : certificationsTab;
 
-  const content = !manufacturer ? (
+  const content = loading ? (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-sm text-text-secondary">
+      Loading manufacturer...
+    </div>
+  ) : !manufacturer ? (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <div className="text-5xl">🏭</div>
       <p className="mt-4 text-base font-bold text-white">
@@ -555,7 +591,11 @@ export default function ManufacturerProfile() {
         onClose={() => setShowSampleModal(false)}
       />
       <EnquiryModal
-        manufacturer={showEnquiryModal ? manufacturer ?? null : null}
+        manufacturer={
+          showEnquiryModal && manufacturer && manufacturerUserId
+            ? { id: manufacturer.id, user_id: manufacturerUserId, name: manufacturer.name }
+            : null
+        }
         onClose={() => setShowEnquiryModal(false)}
       />
     </>

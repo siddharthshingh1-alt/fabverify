@@ -175,3 +175,20 @@ ALTER TABLE fabscore_history ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "own_score_history" ON fabscore_history
   FOR ALL USING (user_id = auth.uid());
+
+-- Migration: generic per-user-type onboarding data + manufacturer profile
+-- fields the onboarding form collects but the original schema didn't store.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_data JSONB DEFAULT '{}';
+
+ALTER TABLE manufacturer_profiles
+  ADD COLUMN IF NOT EXISTS unit_type TEXT,
+  ADD COLUMN IF NOT EXISTS moq_unit TEXT DEFAULT 'pieces',
+  ADD COLUMN IF NOT EXISTS specialisations TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS about TEXT,
+  ADD COLUMN IF NOT EXISTS notable_clients TEXT[];
+
+-- One profile per user — required for the upsert(..., { onConflict: 'user_id' })
+-- in saveManufacturerProfile (app/lib/db.ts) to work; ON CONFLICT needs a
+-- real unique constraint to target, which the original schema never had.
+ALTER TABLE manufacturer_profiles
+  ADD CONSTRAINT manufacturer_profiles_user_id_key UNIQUE (user_id);
