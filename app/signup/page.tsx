@@ -22,6 +22,22 @@ const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
 const DEV_OTP_BYPASS = "123456";
 
+// Real, currently-routable dashboard for each UserContext UserType — see
+// app/context/UserContext.tsx. Anything not in this map (or not yet known)
+// falls back to the generic adaptive /dashboard.
+const DASHBOARD_ROUTE_BY_TYPE: Record<string, string> = {
+  buyer: "/brand/dashboard",
+  manufacturer: "/manufacturer/dashboard",
+  fabric_mill: "/mill/dashboard",
+  trim_supplier: "/supplier/dashboard",
+  artisan: "/artisan/dashboard",
+  job_worker: "/jobworker/dashboard",
+  designer: "/talent/designer/dashboard",
+  master: "/talent/master/dashboard",
+  merchandiser: "/talent/merchandiser/dashboard",
+  qc_inspector: "/talent/qc/dashboard",
+};
+
 // Only allow the dev OTP bypass on localhost — never in production.
 const isDev =
   typeof window !== "undefined" &&
@@ -42,6 +58,29 @@ export default function SignUp() {
   const [waitlistJoined, setWaitlistJoined] = useState(false);
   const [waitlistError, setWaitlistError] = useState("");
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  // Only skip signup for a visitor who has OUR OWN app session (both
+  // fabverify_auth AND a resolved user_type) — checking only for a
+  // Supabase session isn't enough. With phone confirmations off in
+  // Supabase, signInWithOtp() creates a session immediately, before the
+  // OTP is ever verified, so a session can exist for a visitor we've never
+  // actually authenticated. If our own localStorage data isn't there,
+  // treat any such Supabase session as stray and clear it.
+  useEffect(() => {
+    async function checkAuth() {
+      const auth = localStorage.getItem("fabverify_auth");
+      const userType = localStorage.getItem("fabverify_user_type");
+
+      if (auth && userType) {
+        router.replace(postVerifyRoute() ?? DASHBOARD_ROUTE_BY_TYPE[userType] ?? "/dashboard");
+        return;
+      }
+
+      await supabase.auth.signOut();
+    }
+
+    void checkAuth();
+  }, [router]);
 
   useEffect(() => {
     if (step !== "otp") return;

@@ -54,15 +54,32 @@ export default function LogIn() {
   const [waitlistError, setWaitlistError] = useState("");
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
-  // Already has a local session — nothing to log in to. Send them back to
-  // whatever they were trying to reach (e.g. bounced here by
+  // Only skip login for a visitor who has OUR OWN app session (both
+  // fabverify_auth AND a resolved user_type) — checking only for a
+  // Supabase session isn't enough. With phone confirmations off in
+  // Supabase, signInWithOtp() creates a session immediately, before the
+  // OTP is ever verified, so a session can exist for a visitor we've never
+  // actually authenticated. If our own localStorage data isn't there,
+  // treat any such Supabase session as stray and clear it, then send them
+  // back to whatever they were trying to reach (e.g. bounced here by
   // ChatAuthGuard) or their dashboard, same as a fresh login would.
   useEffect(() => {
-    if (localStorage.getItem("fabverify_profile")) {
-      router.replace(consumePendingChatRedirect() ?? "/dashboard");
-      return;
+    async function checkAuth() {
+      const auth = localStorage.getItem("fabverify_auth");
+      const userType = localStorage.getItem("fabverify_user_type");
+
+      if (auth && userType) {
+        router.replace(
+          consumePendingChatRedirect() ?? DASHBOARD_ROUTE_BY_TYPE[userType] ?? "/dashboard"
+        );
+        return;
+      }
+
+      await supabase.auth.signOut();
+      setChatRedirectPending(!!peekPendingChatRedirect());
     }
-    setChatRedirectPending(!!peekPendingChatRedirect());
+
+    void checkAuth();
   }, [router]);
 
   useEffect(() => {
