@@ -222,3 +222,16 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS bronze_verified_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS silver_verified_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS gold_verified_at TIMESTAMPTZ;
+
+-- Waitlist — submitted by signed-out visitors (no user_id), so RLS is
+-- enabled with no policy at all: deny direct anon/authenticated access
+-- entirely, same as every other table here, and rely on the service-role
+-- client (which bypasses RLS) for the one route that writes to it.
+CREATE TABLE IF NOT EXISTS waitlist (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  email TEXT,
+  phone TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE waitlist ENABLE ROW LEVEL SECURITY;

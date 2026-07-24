@@ -732,3 +732,16 @@ export async function updateUserVerificationStatus(userId: string, status: strin
 
   if (error) throw error;
 }
+
+// ── WAITLIST ────────────────────────────────────────────
+
+export async function addToWaitlist(email: string, phone?: string) {
+  const { data, error } = await supabaseAdmin
+    .from("waitlist")
+    .insert({ email, phone: phone || null })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { consumePendingChatRedirect } from "../lib/postAuthRedirect";
+import { supabase } from "../lib/supabase";
+
+const WHATSAPP_NUMBER_DISPLAY = "+91 97739 33279";
+const WHATSAPP_LINK = "https://wa.me/919773933279";
 
 // A profile already existing at this point means this is a returning user
 // re-verifying (e.g. bounced here by ChatAuthGuard), not a brand-new
@@ -18,11 +22,10 @@ const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
 const DEV_OTP_BYPASS = "123456";
 
-// Only allow the dev OTP bypass on localhost — never in production, even if
-// NODE_ENV is misconfigured on the deploy.
+// Only allow the dev OTP bypass on localhost — never in production.
 const isDev =
-  process.env.NODE_ENV === "development" ||
-  (typeof window !== "undefined" && window.location.hostname === "localhost");
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
 export default function SignUp() {
   const router = useRouter();
@@ -33,6 +36,11 @@ export default function SignUp() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [smsUnavailable, setSmsUnavailable] = useState(false);
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [isJoiningWaitlist, setIsJoiningWaitlist] = useState(false);
+  const [waitlistJoined, setWaitlistJoined] = useState(false);
+  const [waitlistError, setWaitlistError] = useState("");
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
@@ -50,12 +58,16 @@ export default function SignUp() {
     setPhone(value.replace(/\D/g, "").slice(0, 10));
   };
 
-  // Development mode — no SMS provider (MSG91) is wired up in Supabase yet,
+  // Dev mode (localhost only) — no SMS provider is wired up in Supabase yet,
   // so real signInWithOtp() throws "unsupported phone provider". Skip
-  // Supabase entirely and just move to the OTP step until MSG91 is connected.
+  // Supabase entirely and just move to the OTP step, where 123456 is
+  // accepted. In production there is no bypass, so we attempt a real send —
+  // it will fail until an SMS provider is configured, and that failure
+  // shows a WhatsApp/waitlist fallback instead of a dead-end OTP screen.
   const sendOtp = async () => {
     setIsSendingOtp(true);
     setErrorMessage("");
+    setSmsUnavailable(false);
 
     if (!phone || phone.length < 10) {
       setErrorMessage("Please enter a valid 10-digit phone number");
@@ -63,10 +75,39 @@ export default function SignUp() {
       return;
     }
 
+    if (!isDev) {
+      const { error } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
+      if (error) {
+        setSmsUnavailable(true);
+        setIsSendingOtp(false);
+        return;
+      }
+    }
+
     setOtp(Array(OTP_LENGTH).fill(""));
     setCountdown(RESEND_SECONDS);
     setStep("otp");
     setIsSendingOtp(false);
+  };
+
+  const joinWaitlist = async () => {
+    if (!waitlistEmail.trim()) return;
+    setIsJoiningWaitlist(true);
+    setWaitlistError("");
+
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: waitlistEmail.trim(), phone }),
+      });
+      if (!res.ok) throw new Error("Failed to join waitlist");
+      setWaitlistJoined(true);
+    } catch {
+      setWaitlistError("Failed to join waitlist. Please try again.");
+    }
+
+    setIsJoiningWaitlist(false);
   };
 
   const handleSendOtp = () => {
@@ -171,7 +212,59 @@ export default function SignUp() {
           Join India&apos;s garment industry platform
         </p>
 
-        {step === "phone" ? (
+        {smsUnavailable ? (
+          <>
+            <p className="text-center text-sm text-text-primary">
+              We are setting up SMS verification. Please contact us on WhatsApp at{" "}
+              {WHATSAPP_NUMBER_DISPLAY} to get early access.
+            </p>
+
+            <a
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-5 block w-full rounded-lg bg-gold py-3.5 text-center font-bold text-navy transition-colors hover:bg-[#dc9420]"
+            >
+              Contact us on WhatsApp →
+            </a>
+
+            {waitlistJoined ? (
+              <p className="mt-6 text-center text-sm text-gold">
+                You&apos;re on the list — we&apos;ll notify you as soon as SMS verification is ready.
+              </p>
+            ) : (
+              <>
+                <p className="mb-2 mt-6 text-center text-sm text-text-secondary">
+                  Or join our waiting list:
+                </p>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={waitlistEmail}
+                  onChange={(event) => setWaitlistEmail(event.target.value)}
+                  className="w-full rounded-lg border border-border-dark bg-navy px-4 py-3 text-text-primary outline-none transition-colors placeholder-text-secondary focus:border-gold"
+                />
+                {waitlistError && (
+                  <p className="mt-2 text-center text-[12px] text-red-400">{waitlistError}</p>
+                )}
+                <button
+                  onClick={() => void joinWaitlist()}
+                  disabled={!waitlistEmail.trim() || isJoiningWaitlist}
+                  className="mt-3 w-full rounded-lg border border-gold py-3.5 font-bold text-gold transition-colors hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isJoiningWaitlist ? "Joining..." : "Join Waitlist →"}
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={() => setSmsUnavailable(false)}
+              className="mt-6 block w-full text-center text-sm text-text-secondary hover:underline"
+            >
+              ← Back
+            </button>
+          </>
+        ) : step === "phone" ? (
           <>
             <label
               htmlFor="phone"
