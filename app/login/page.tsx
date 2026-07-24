@@ -110,8 +110,13 @@ export default function LogIn() {
 
     if (!isDev) {
       try {
-        const { error } = await supabase.auth.signInWithOtp({ phone: formattedPhone });
+        const { error } = await supabase.auth.signInWithOtp({
+          phone: formattedPhone,
+          options: { channel: "sms" },
+        });
         if (error) {
+          console.error("OTP error:", error.message, error);
+
           // Only fall back to WhatsApp/waitlist when the SMS provider
           // itself isn't set up — a transient/network error should let
           // the user retry instead of getting routed to a dead end.
