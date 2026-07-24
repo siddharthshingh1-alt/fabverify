@@ -120,47 +120,107 @@ export default function SignUp() {
     void sendOtp().then(() => otpRefs.current[0]?.focus());
   };
 
-  // Development mode — no SMS provider (MSG91) is wired up yet, so there's
-  // no real code to check against. Accept a fixed test code instead of
-  // calling Supabase phone auth, and derive a stable per-phone-number id so
-  // the same test phone number consistently maps back to the same "user".
+  // Dev mode (localhost only) — accept a fixed test code and derive a
+  // stable per-phone-number id, since there's no real Supabase session to
+  // pull an id from. In production, verify the real code Twilio sent via
+  // Supabase phone auth and use the real auth user id.
   const verifyOtp = async (code: string) => {
     setIsVerifying(true);
     setErrorMessage("");
 
-    if (!isDev) {
+    if (isDev) {
+      if (code !== DEV_OTP_BYPASS) {
+        setErrorMessage("Development mode: enter 123456 to continue");
+        setIsVerifying(false);
+        return;
+      }
+
+      const mockUserId = "dev-user-" + phone.replace(/\D/g, "");
+
+      const existingProfile = localStorage.getItem("fabverify_profile");
+      const existingAuth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+
+      localStorage.setItem(
+        "fabverify_auth",
+        JSON.stringify({
+          userId: mockUserId,
+          phone,
+          verified: true,
+          verifiedAt: new Date().toISOString(),
+          devMode: true,
+        })
+      );
+
+      if (existingAuth.phone === phone && existingProfile) {
+        const userType = localStorage.getItem("fabverify_user_type");
+        router.push(postVerifyRoute() ?? (userType ? "/dashboard" : "/onboarding/type"));
+        setIsVerifying(false);
+        return;
+      }
+
+      router.push(postVerifyRoute() ?? "/onboarding/profile");
+      setIsVerifying(false);
+      return;
+    }
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone: `+91${phone}`,
+      token: code,
+      type: "sms",
+    });
+
+    if (error || !data.user) {
       setErrorMessage("Invalid OTP. Please try again.");
       setIsVerifying(false);
       return;
     }
 
-    if (code !== DEV_OTP_BYPASS) {
-      setErrorMessage("Development mode: enter 123456 to continue");
-      setIsVerifying(false);
-      return;
-    }
-
-    const mockUserId = "dev-user-" + phone.replace(/\D/g, "");
-
-    const existingProfile = localStorage.getItem("fabverify_profile");
-    const existingAuth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-
     localStorage.setItem(
       "fabverify_auth",
       JSON.stringify({
-        userId: mockUserId,
+        userId: data.user.id,
         phone,
         verified: true,
         verifiedAt: new Date().toISOString(),
-        devMode: true,
+        devMode: false,
       })
     );
 
-    if (existingAuth.phone === phone && existingProfile) {
-      const userType = localStorage.getItem("fabverify_user_type");
-      router.push(postVerifyRoute() ?? (userType ? "/dashboard" : "/onboarding/type"));
-      setIsVerifying(false);
-      return;
+    try {
+      const res = await fetch("/api/dev-auth/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const { user: dbUser } = await res.json();
+
+      if (dbUser?.user_type) {
+        localStorage.setItem(
+          "fabverify_profile",
+          JSON.stringify({
+            name: dbUser.name,
+            email: dbUser.email,
+            city: dbUser.city,
+            state: dbUser.state,
+          })
+        );
+        localStorage.setItem("fabverify_user_type", dbUser.user_type);
+        router.push(postVerifyRoute() ?? "/dashboard");
+        setIsVerifying(false);
+        return;
+      }
+
+      if (dbUser) {
+        localStorage.setItem(
+          "fabverify_profile",
+          JSON.stringify({ name: dbUser.name, email: dbUser.email, city: dbUser.city })
+        );
+        router.push(postVerifyRoute() ?? "/onboarding/type");
+        setIsVerifying(false);
+        return;
+      }
+    } catch {
+      // Lookup failed (e.g. network error) — fall through to new-user path below.
     }
 
     router.push(postVerifyRoute() ?? "/onboarding/profile");

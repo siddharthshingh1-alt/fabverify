@@ -142,38 +142,49 @@ export default function LogIn() {
     void sendOtp().then(() => otpRefs.current[0]?.focus());
   };
 
-  // Development mode — no SMS provider (MSG91) is wired up yet, so there's
-  // no real code to check against. Accept a fixed test code instead of
-  // calling Supabase phone auth, then look the phone number up in the
-  // database (not just localStorage) so a returning user on a fresh
-  // browser/device still lands on their real dashboard instead of
-  // /onboarding/profile.
+  // Dev mode (localhost only) — accept a fixed test code and derive a
+  // stable per-phone-number id, since there's no real Supabase session to
+  // pull an id from. In production, verify the real code Twilio sent via
+  // Supabase phone auth and use the real auth user id. Either way, look the
+  // phone number up in the database (not just localStorage) so a returning
+  // user on a fresh browser/device still lands on their real dashboard
+  // instead of /onboarding/profile.
   const verifyOtp = async (code: string) => {
     setIsVerifying(true);
     setErrorMessage("");
 
-    if (!isDev) {
-      setErrorMessage("Invalid OTP. Please try again.");
-      setIsVerifying(false);
-      return;
-    }
+    let userId: string;
 
-    if (code !== DEV_OTP_BYPASS) {
-      setErrorMessage("Development mode: enter 123456 to continue");
-      setIsVerifying(false);
-      return;
-    }
+    if (isDev) {
+      if (code !== DEV_OTP_BYPASS) {
+        setErrorMessage("Development mode: enter 123456 to continue");
+        setIsVerifying(false);
+        return;
+      }
+      userId = "dev-user-" + phone.replace(/\D/g, "");
+    } else {
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: `+91${phone}`,
+        token: code,
+        type: "sms",
+      });
 
-    const mockUserId = "dev-user-" + phone.replace(/\D/g, "");
+      if (error || !data.user) {
+        setErrorMessage("Invalid OTP. Please try again.");
+        setIsVerifying(false);
+        return;
+      }
+      userId = data.user.id;
+    }
 
     localStorage.setItem(
       "fabverify_auth",
       JSON.stringify({
-        userId: mockUserId,
+        userId,
         phone,
         verified: true,
         verifiedAt: new Date().toISOString(),
-        devMode: true,
+        devMode: isDev,
       })
     );
 
