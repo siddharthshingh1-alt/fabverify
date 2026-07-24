@@ -620,3 +620,115 @@ export async function updateSampleBriefStatus(id: string, status: string) {
 
   if (error) throw error;
 }
+
+// ── VERIFICATION ────────────────────────────────────────
+
+export async function getVerificationStatus(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select(
+      `
+      verification_tier,
+      verification_status,
+      bronze_verified_at,
+      silver_verified_at,
+      gold_verified_at
+    `
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) return null;
+  return data;
+}
+
+export async function getLatestVerificationApplication(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("verification_applications")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return null;
+  return data;
+}
+
+export async function submitVerificationApplication(
+  userId: string,
+  tier: string,
+  documents: object,
+  videoCallScheduled?: string | null
+) {
+  const { data, error } = await supabaseAdmin
+    .from("verification_applications")
+    .insert({
+      user_id: userId,
+      tier,
+      status: "pending",
+      documents,
+      video_call_scheduled: videoCallScheduled ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateVerificationApplicationStatus(
+  applicationId: string,
+  status: string
+) {
+  const { error } = await supabaseAdmin
+    .from("verification_applications")
+    .update({ status, reviewed_at: new Date().toISOString() })
+    .eq("id", applicationId);
+
+  if (error) throw error;
+}
+
+const VERIFICATION_TIER_COLUMN: Record<string, string> = {
+  bronze: "bronze_verified_at",
+  silver: "silver_verified_at",
+  gold: "gold_verified_at",
+};
+
+export async function updateVerificationTier(userId: string, tier: string) {
+  const tierColumn = VERIFICATION_TIER_COLUMN[tier];
+  const update: Record<string, string> = {
+    verification_tier: tier,
+    verification_status: "verified",
+  };
+  if (tierColumn) update[tierColumn] = new Date().toISOString();
+
+  const { error } = await supabaseAdmin.from("users").update(update).eq("id", userId);
+
+  if (error) throw error;
+
+  // manufacturer_profiles has its own verification_tier column (used by the
+  // discovery-page badge/filter) that defaults to 'bronze' at profile
+  // creation, independent of this real verification flow. Propagate real
+  // silver/gold upgrades onto it so the discovery card doesn't understate a
+  // manufacturer's actual status — a no-op update for every other user type
+  // (and for bronze, since that's already the profile's default).
+  if (tier === "silver" || tier === "gold") {
+    const { error: profileError } = await supabaseAdmin
+      .from("manufacturer_profiles")
+      .update({ verification_tier: tier })
+      .eq("user_id", userId);
+    if (profileError) {
+      console.error("Failed to sync manufacturer_profiles verification_tier:", profileError);
+    }
+  }
+}
+
+export async function updateUserVerificationStatus(userId: string, status: string) {
+  const { error } = await supabaseAdmin
+    .from("users")
+    .update({ verification_status: status })
+    .eq("id", userId);
+
+  if (error) throw error;
+}

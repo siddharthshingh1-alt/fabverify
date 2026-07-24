@@ -192,3 +192,33 @@ ALTER TABLE manufacturer_profiles
 -- real unique constraint to target, which the original schema never had.
 ALTER TABLE manufacturer_profiles
   ADD CONSTRAINT manufacturer_profiles_user_id_key UNIQUE (user_id);
+
+-- Verification applications (generic — applies to any user type, not just
+-- manufacturers; manufacturer_profiles.verification_tier is a separate,
+-- pre-existing column used only for the discovery-page badge/filter and is
+-- intentionally left alone here).
+CREATE TABLE IF NOT EXISTS verification_applications (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES users(id),
+  tier TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  submitted_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  reviewer_notes TEXT,
+  documents JSONB DEFAULT '{}',
+  video_call_scheduled TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE verification_applications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own_applications" ON verification_applications
+  FOR ALL USING (user_id = auth.uid());
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS verification_tier TEXT DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'unverified',
+  ADD COLUMN IF NOT EXISTS bronze_verified_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS silver_verified_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS gold_verified_at TIMESTAMPTZ;

@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import theme from '../theme'
 import content from '../content'
 import { useUser } from '../context/UserContext'
@@ -72,6 +73,30 @@ export default function LeftPanel() {
       : undefined
 
   const unreadMessages = mounted ? getUnreadCount(user.userType, Boolean(user.position)) : 0
+
+  const [verificationTier, setVerificationTier] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!mounted) return
+    const auth = JSON.parse(localStorage.getItem('fabverify_auth') || '{}')
+    if (!auth.phone) return
+    let cancelled = false
+    fetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.verification) setVerificationTier(data.verification.currentTier)
+      })
+      .catch((error) => console.error('Failed to load verification status:', error))
+    return () => {
+      cancelled = true
+    }
+  }, [mounted])
+
+  const VERIFICATION_BADGE: Record<string, { label: string; color: string }> = {
+    gold: { label: '🥇 Gold Verified', color: theme.colors.primary },
+    silver: { label: '🥈 Silver Verified', color: '#94a3b8' },
+    bronze: { label: '🥉 Bronze Verified', color: '#CD7F32' },
+  }
 
   // Manufacturer/mill/supplier/artisan/job-worker have no fabmerch route of
   // their own — "Book QC Inspector" reuses the brand's shared marketplace.
@@ -225,6 +250,28 @@ export default function LeftPanel() {
           }}>
             {mounted ? userLabel : 'Member'}
           </span>
+          {mounted && (
+            verificationTier && VERIFICATION_BADGE[verificationTier] ? (
+              <div style={{
+                marginTop: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: VERIFICATION_BADGE[verificationTier].color,
+              }}>
+                {VERIFICATION_BADGE[verificationTier].label}
+              </div>
+            ) : (
+              <Link href="/verification" style={{
+                display: 'block',
+                marginTop: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: theme.colors.primary,
+              }}>
+                Get Verified →
+              </Link>
+            )
+          )}
         </div>
       </div>
 

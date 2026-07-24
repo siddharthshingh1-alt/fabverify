@@ -3004,6 +3004,8 @@ function IdentityVerificationWizard() {
     setStepIndex(0);
   };
 
+  const applicationSubmittedRef = useRef(false);
+
   useEffect(() => {
     if (!mounted || (currentKind !== "complete" && currentKind !== "intl_complete")) return;
     const alreadyAtOrAboveTier =
@@ -3012,6 +3014,32 @@ function IdentityVerificationWizard() {
     if (!alreadyAtOrAboveTier) {
       setUser({ verificationTier: tier });
     }
+
+    if (!applicationSubmittedRef.current && !alreadyAtOrAboveTier) {
+      applicationSubmittedRef.current = true;
+      const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+      if (auth.phone) {
+        fetch("/api/verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: auth.phone,
+            tier,
+            documents: {
+              flowGroup,
+              region,
+              stepsCompleted: stepKinds,
+              fieldVisitScheduled: Boolean(fieldVisitSchedule),
+            },
+            videoCallDate: videoSchedule?.date,
+            videoCallTime: videoSchedule?.time,
+          }),
+        }).catch((error) => {
+          console.error("Failed to submit verification application:", error);
+        });
+      }
+    }
+
     try {
       localStorage.removeItem("fabverify_verify_step");
       localStorage.removeItem("fabverify_user_region");

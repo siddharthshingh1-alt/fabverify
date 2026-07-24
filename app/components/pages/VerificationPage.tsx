@@ -771,6 +771,75 @@ export default function Verification() {
   const userType = mounted ? user.userType : "buyer";
   const config = VERIFICATION_CONFIG[userType];
 
+  const [verificationData, setVerificationData] = useState<{
+    currentTier: string;
+    status: string;
+    bronzeVerifiedAt: string | null;
+    silverVerifiedAt: string | null;
+    goldVerifiedAt: string | null;
+    latestApplication: { tier: string; status: string } | null;
+  } | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(true);
+  const [bronzeSubmitting, setBronzeSubmitting] = useState(false);
+
+  const loadVerification = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      setVerificationLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`);
+      if (res.ok) {
+        const { verification } = await res.json();
+        setVerificationData(verification);
+      }
+    } catch (error) {
+      console.error("Failed to load verification status:", error);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadVerification();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const getBronzeVerified = async () => {
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) return;
+    setBronzeSubmitting(true);
+    try {
+      await fetch("/api/verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: auth.phone, tier: "bronze", documents: {} }),
+      });
+      await loadVerification();
+    } catch (error) {
+      console.error("Failed to submit bronze verification:", error);
+    }
+    setBronzeSubmitting(false);
+  };
+
+  const isBronzeDone = Boolean(
+    verificationData?.bronzeVerifiedAt ||
+      ["bronze", "silver", "gold"].includes(verificationData?.currentTier ?? "")
+  );
+  const isSilverDone = Boolean(
+    verificationData?.silverVerifiedAt || ["silver", "gold"].includes(verificationData?.currentTier ?? "")
+  );
+  const isGoldDone = Boolean(
+    verificationData?.goldVerifiedAt || verificationData?.currentTier === "gold"
+  );
+  const isSilverUnderReview =
+    verificationData?.latestApplication?.tier === "silver" &&
+    verificationData?.latestApplication?.status === "pending";
+  const isGoldUnderReview =
+    verificationData?.latestApplication?.tier === "gold" &&
+    verificationData?.latestApplication?.status === "pending";
+
   const bronzeRequirements = config.bronze.requirements.map(parseRequirement);
   const bronzeBenefits = config.bronze.benefits.map(parseBenefit);
   const silverRequirements = config.silver.requirements.map(parseRequirement);
@@ -781,11 +850,6 @@ export default function Verification() {
   const unlockItems = silverBenefits
     .filter((b) => b.ok && b.text !== "Everything in Bronze")
     .map((b) => b.text);
-
-  const isSilverComplete =
-    user.verificationTier === "silver" ||
-    user.verificationTier === "gold" ||
-    user.verificationTier === "platinum";
 
   const [resumeAvailable, setResumeAvailable] = useState(false);
   useEffect(() => {
@@ -804,6 +868,15 @@ export default function Verification() {
     </div>
   );
 
+  const CURRENT_TIER_DISPLAY: Record<string, { emoji: string; label: string; color: string }> = {
+    gold: { emoji: "🥇", label: "Gold Verified", color: "#f2ca50" },
+    silver: { emoji: "🥈", label: "Silver Verified", color: "#94a3b8" },
+    bronze: { emoji: "🥉", label: "Bronze Verified", color: "#CD7F32" },
+    none: { emoji: "🔓", label: "Unverified", color: "#7A8FA8" },
+  };
+  const currentTierDisplay =
+    CURRENT_TIER_DISPLAY[verificationData?.currentTier ?? "none"] ?? CURRENT_TIER_DISPLAY.none;
+
   const currentStatusCard = (
     <div className="rounded-[12px] border border-border-dark bg-card p-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -811,36 +884,42 @@ export default function Verification() {
           <p className="text-[11px] font-bold uppercase tracking-wide text-text-secondary">
             Your current tier
           </p>
-          <p className="mt-2 font-display text-xl font-bold text-[#CD7F32]">
-            🥉 Bronze Verified
+          <p className="mt-2 font-display text-xl font-bold" style={{ color: currentTierDisplay.color }}>
+            {currentTierDisplay.emoji} {currentTierDisplay.label}
           </p>
           <p className="mt-1 text-xs text-text-secondary">
-            {STATUS_MESSAGES[userType]}
+            {isSilverDone
+              ? "You are verified as a Silver member."
+              : isBronzeDone
+                ? STATUS_MESSAGES[userType]
+                : "Complete Bronze verification to get started."}
           </p>
         </div>
 
-        <div>
-          <p className="text-xs text-text-secondary">
-            Upgrade to Silver to unlock:
-          </p>
-          <div className="mt-2 flex flex-col gap-1.5">
-            {unlockItems.map((item) => (
-              <div
-                key={item}
-                className="flex items-center gap-2 text-xs text-text-secondary"
-              >
-                <span className="opacity-60">🔒</span>
-                {item}
-              </div>
-            ))}
+        {!isSilverDone && (
+          <div>
+            <p className="text-xs text-text-secondary">
+              Upgrade to Silver to unlock:
+            </p>
+            <div className="mt-2 flex flex-col gap-1.5">
+              {unlockItems.map((item) => (
+                <div
+                  key={item}
+                  className="flex items-center gap-2 text-xs text-text-secondary"
+                >
+                  <span className="opacity-60">🔒</span>
+                  {item}
+                </div>
+              ))}
+            </div>
+            <Link
+              href="/verification/identity"
+              className="mt-4 inline-block rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-navy"
+            >
+              Upgrade to Silver →
+            </Link>
           </div>
-          <Link
-            href="/verification/identity"
-            className="mt-4 inline-block rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-navy"
-          >
-            Upgrade to Silver →
-          </Link>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -856,9 +935,20 @@ export default function Verification() {
         benefits={bronzeBenefits}
         requirements={bronzeRequirements}
         footer={
-          <span className="inline-block rounded-[20px] border border-green-500/60 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-400">
-            ✅ Completed
-          </span>
+          isBronzeDone ? (
+            <span className="inline-block rounded-[20px] border border-green-500/60 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-400">
+              ✅ Completed
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void getBronzeVerified()}
+              disabled={bronzeSubmitting}
+              className="w-full rounded-lg bg-primary py-2.5 text-sm font-bold text-navy disabled:cursor-not-allowed disabled:bg-primary/40"
+            >
+              {bronzeSubmitting ? "Submitting..." : "Get Bronze Verified →"}
+            </button>
+          )
         }
       />
 
@@ -872,17 +962,27 @@ export default function Verification() {
         benefits={silverBenefits}
         requirements={silverRequirements}
         footer={
-          <>
-            <Link
-              href="/verification/identity"
-              className="block w-full rounded-lg bg-primary py-2.5 text-center text-sm font-bold text-navy"
-            >
-              → Start Verification
-            </Link>
-            <p className="mt-2 text-center text-[11px] text-text-secondary">
-              ₹999 one-time fee
-            </p>
-          </>
+          isSilverDone ? (
+            <span className="inline-block rounded-[20px] border border-green-500/60 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-400">
+              ✅ Completed
+            </span>
+          ) : isSilverUnderReview ? (
+            <span className="inline-block rounded-[20px] border border-amber-500/60 bg-amber-500/15 px-3 py-1.5 text-xs font-semibold text-amber-400">
+              ⏳ Under Review
+            </span>
+          ) : (
+            <>
+              <Link
+                href="/verification/identity"
+                className="block w-full rounded-lg bg-primary py-2.5 text-center text-sm font-bold text-navy"
+              >
+                → Start Verification
+              </Link>
+              <p className="mt-2 text-center text-[11px] text-text-secondary">
+                ₹999 one-time fee
+              </p>
+            </>
+          )
         }
       />
 
@@ -912,7 +1012,15 @@ export default function Verification() {
               ))}
             </ul>
 
-            {isSilverComplete ? (
+            {isGoldDone ? (
+              <span className="mt-4 inline-block rounded-[20px] border border-green-500/60 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-400">
+                ✅ Completed
+              </span>
+            ) : isGoldUnderReview ? (
+              <span className="mt-4 inline-block rounded-[20px] border border-amber-500/60 bg-amber-500/15 px-3 py-1.5 text-xs font-semibold text-amber-400">
+                ⏳ Under Review
+              </span>
+            ) : isSilverDone ? (
               <Link
                 href="/verification/identity?tier=gold"
                 className="mt-4 block w-full rounded-lg bg-primary py-2.5 text-center text-sm font-bold text-navy"
