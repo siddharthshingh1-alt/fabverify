@@ -11,4 +11,19 @@ const supabaseUrl =
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key";
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// supabase-js appends its own /auth/v1, /rest/v1, etc. suffixes — the env
+// var must be the bare project URL with no path or trailing slash, or auth
+// calls end up double-pathed (e.g. /rest/v1/auth/v1/otp).
+const cleanUrl = supabaseUrl.replace(/\/(rest|auth|realtime|storage)\/v1\/?$/, "").replace(/\/$/, "");
+
+if (typeof window !== "undefined") {
+  console.log("Supabase URL:", cleanUrl);
+}
+
+export const supabase = createClient(cleanUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+  },
+});
