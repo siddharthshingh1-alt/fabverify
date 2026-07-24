@@ -69,15 +69,26 @@ export default function SignUp() {
     setErrorMessage("");
     setSmsUnavailable(false);
 
-    if (!phone || phone.length < 10) {
-      setErrorMessage("Please enter a valid 10-digit phone number");
+    // Strip spaces, dashes, and any non-digit characters, then take the
+    // last 10 digits — Twilio rejects anything that isn't clean E.164.
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+    const formattedPhone = "+91" + cleanPhone;
+
+    if (cleanPhone.length !== 10) {
+      setErrorMessage("Please enter a valid 10-digit mobile number");
+      setIsSendingOtp(false);
+      return;
+    }
+
+    if (!["6", "7", "8", "9"].includes(cleanPhone[0])) {
+      setErrorMessage("Please enter a valid Indian mobile number");
       setIsSendingOtp(false);
       return;
     }
 
     if (!isDev) {
       try {
-        const { error } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
+        const { error } = await supabase.auth.signInWithOtp({ phone: formattedPhone });
         if (error) {
           // Only fall back to WhatsApp/waitlist when the SMS provider
           // itself isn't set up — a transient/network error should let
@@ -181,8 +192,11 @@ export default function SignUp() {
       return;
     }
 
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+    const formattedPhone = "+91" + cleanPhone;
+
     const { data, error } = await supabase.auth.verifyOtp({
-      phone: `+91${phone}`,
+      phone: formattedPhone,
       token: code,
       type: "sms",
     });
