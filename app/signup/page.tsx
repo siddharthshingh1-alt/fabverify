@@ -76,9 +76,27 @@ export default function SignUp() {
     }
 
     if (!isDev) {
-      const { error } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
-      if (error) {
-        setSmsUnavailable(true);
+      try {
+        const { error } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
+        if (error) {
+          // Only fall back to WhatsApp/waitlist when the SMS provider
+          // itself isn't set up — a transient/network error should let
+          // the user retry instead of getting routed to a dead end.
+          const message = error.message.toLowerCase();
+          if (
+            message.includes("not configured") ||
+            message.includes("provider") ||
+            message.includes("sms")
+          ) {
+            setSmsUnavailable(true);
+          } else {
+            setErrorMessage(error.message);
+          }
+          setIsSendingOtp(false);
+          return;
+        }
+      } catch {
+        setErrorMessage("Something went wrong. Please try again.");
         setIsSendingOtp(false);
         return;
       }
