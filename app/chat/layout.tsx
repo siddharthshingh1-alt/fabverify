@@ -14,8 +14,8 @@ export const metadata: Metadata = {
   manifest: "/chat-manifest.json",
 };
 
-// themeColor lives on `viewport`, not `metadata`, as of the Next.js version
-// this app is on (see node_modules/next/dist/docs/.../generate-viewport.md) —
+// themeColor moved from `metadata` to `viewport` in the Next.js App Router
+// Metadata API (see https://nextjs.org/docs/app/api-reference/functions/generate-viewport) —
 // nesting it under `metadata` as older Next versions did is a build warning here.
 export const viewport: Viewport = {
   width: "device-width",
