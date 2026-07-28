@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
 import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 const TOTAL_STEPS = 5;
 
@@ -63,6 +64,7 @@ export default function BrandBuilderOnboarding() {
   const [name, setName] = useState("");
   const [brandName, setBrandName] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (!isComplete) return;
@@ -117,30 +119,39 @@ export default function BrandBuilderOnboarding() {
     }
 
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-    if (auth.phone) {
-      try {
-        const res = await fetch("/api/profile-data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phone: auth.phone,
-            profileData: {
-              categories,
-              customer,
-              ageGroups,
-              budget,
-              quantity,
-              brandName: brandName || undefined,
-            },
-          }),
-        });
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-          console.error("Profile data save error:", error);
-        }
-      } catch (error) {
-        console.error("Profile data save error:", error);
+    if (!auth.phone) {
+      setSaveError("Your session has expired. Please log in again.");
+      return;
+    }
+
+    setSaveError("");
+
+    // A failed save must stop here — advancing anyway left the profile in
+    // the browser only, with no row in the database.
+    try {
+      const res = await authFetch("/api/profile-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: auth.phone,
+          profileData: {
+            categories,
+            customer,
+            ageGroups,
+            budget,
+            quantity,
+            brandName: brandName || undefined,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        setSaveError(await readSaveError(res));
+        return;
       }
+    } catch {
+      setSaveError(NETWORK_ERROR_MESSAGE);
+      return;
     }
 
     setUser({
@@ -424,6 +435,12 @@ export default function BrandBuilderOnboarding() {
               later
             </p>
           </div>
+        )}
+
+        {saveError && (
+          <p className="mt-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+            {saveError}
+          </p>
         )}
 
         <div className="mt-10">

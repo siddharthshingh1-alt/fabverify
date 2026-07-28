@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 import { StateDropdown } from "../components";
 
 const INDIAN_CITIES = [
@@ -59,6 +60,7 @@ export default function ProfileSetup() {
   const [showCitySuggestions, setShowCitySuggestions] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -155,25 +157,35 @@ export default function ProfileSetup() {
 
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
 
-    // Dev-mode auth has no real Supabase session/auth.uid() behind it yet,
-    // so this goes through the service-role-backed dev-auth API rather than
-    // a direct RLS-protected client call. Keyed by phone since there's no
-    // real auth-linked id available in dev mode.
-    const res = await fetch("/api/dev-auth/save-profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: auth.phone,
-        name: name.trim(),
-        email: email.trim(),
-        city: city.trim(),
-        state,
-      }),
-    });
+    // authFetch attaches proof of identity — a real Supabase session token
+    // in production, the dev-phone header on localhost — which the route
+    // verifies before writing. The write is still server-side (service role
+    // via db.ts) because dev-mode auth has no auth.uid() for RLS.
+    // A failed save must STOP here. Advancing anyway used to leave the
+    // account existing only in localStorage while the database had no row
+    // at all — a phantom account that then behaved as if logged in.
+    try {
+      const res = await authFetch("/api/dev-auth/save-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: auth.phone,
+          name: name.trim(),
+          email: email.trim(),
+          city: city.trim(),
+          state,
+        }),
+      });
 
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-      console.error("Profile save error:", error);
+      if (!res.ok) {
+        setSaveError(await readSaveError(res));
+        setIsSaving(false);
+        return;
+      }
+    } catch {
+      setSaveError(NETWORK_ERROR_MESSAGE);
+      setIsSaving(false);
+      return;
     }
 
     setUser({
@@ -430,6 +442,12 @@ export default function ProfileSetup() {
             </a>
           </span>
         </label>
+
+        {saveError && (
+          <p className="mt-6 rounded-[8px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+            {saveError}
+          </p>
+        )}
 
         {/* Continue button */}
         <button

@@ -110,6 +110,11 @@ export default function LeftPanel() {
 
   const navItems: NavItem[] = positionNav ?? [
     { href: `${basePath}/dashboard`, icon: '🏠', label: content.nav.home },
+    // Enterprise accounts browse the marketplace with the 'buyer' persona,
+    // so they get this nav — give them a way back to their own workspace.
+    ...(user.isEnterprise
+      ? [{ href: '/enterprise/dashboard', icon: '🏢', label: 'Enterprise Workspace' }]
+      : []),
     ...(isSupplySide || isTalent
       ? [{ href: `${basePath}/enquiries`, icon: '📬', label: 'Enquiries' }]
       : []),

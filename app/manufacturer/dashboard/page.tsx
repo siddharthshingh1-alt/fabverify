@@ -11,6 +11,7 @@ import { makingCharges } from "@/app/data/fabprice";
 import { getEnquiries } from "@/app/data/enquiries";
 import { mapOrderRowToPendingOrder } from "@/app/lib/mapOrder";
 import type { OrderRow, PendingOrder } from "@/app/lib/mapOrder";
+import { authFetch } from "@/app/lib/apiClient";
 import {
   StatGrid,
   StatCard,
@@ -53,7 +54,7 @@ export default function ManufacturerDashboard() {
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
     if (!auth.phone) return;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/orders?phone=${encodeURIComponent(auth.phone)}&role=manufacturer`
       );
       const { orders } = (await res.json()) as { orders: OrderRow[] };
@@ -71,7 +72,7 @@ export default function ManufacturerDashboard() {
   }, []);
 
   const acceptOrder = async (orderId: string) => {
-    await fetch(`/api/orders/${orderId}`, {
+    await authFetch(`/api/orders/${orderId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "confirmed" }),

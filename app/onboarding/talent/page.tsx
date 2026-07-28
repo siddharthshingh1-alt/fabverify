@@ -12,6 +12,7 @@ import {
 import { useUser } from "../../context/UserContext";
 import { getBasePath } from "../../lib/routing";
 import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 const TOTAL_STEPS = 4;
 
@@ -141,6 +142,7 @@ export default function TalentOnboarding() {
   const { setUser } = useUser();
   const [talentType, setTalentType] = useState<TalentType>("designer");
   const [step, setStep] = useState(1);
+  const [saveError, setSaveError] = useState("");
 
   const [fullName, setFullName] = useState("");
   const [city, setCity] = useState("");
@@ -214,36 +216,45 @@ export default function TalentOnboarding() {
 
   const finish = async (verified: boolean) => {
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-    if (auth.phone) {
-      try {
-        const res = await fetch("/api/profile-data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phone: auth.phone,
-            profileData: {
-              talentType,
-              yearsExperience,
-              employer: employer || undefined,
-              categories,
-              skills,
-              travelCities,
-              portfolioFiles,
-              projectDescription: projectDescription || undefined,
-              rate,
-              rateMax: config.rateIsRange ? rateMax : undefined,
-              turnaround: talentType === "qc_inspector" ? turnaround : undefined,
-              appliedForVerification: verified,
-            },
-          }),
-        });
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-          console.error("Profile data save error:", error);
-        }
-      } catch (error) {
-        console.error("Profile data save error:", error);
+    if (!auth.phone) {
+      setSaveError("Your session has expired. Please log in again.");
+      return;
+    }
+
+    setSaveError("");
+
+    // A failed save must stop here — advancing anyway left the profile in
+    // the browser only, with no row in the database.
+    try {
+      const res = await authFetch("/api/profile-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: auth.phone,
+          profileData: {
+            talentType,
+            yearsExperience,
+            employer: employer || undefined,
+            categories,
+            skills,
+            travelCities,
+            portfolioFiles,
+            projectDescription: projectDescription || undefined,
+            rate,
+            rateMax: config.rateIsRange ? rateMax : undefined,
+            turnaround: talentType === "qc_inspector" ? turnaround : undefined,
+            appliedForVerification: verified,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        setSaveError(await readSaveError(res));
+        return;
       }
+    } catch {
+      setSaveError(NETWORK_ERROR_MESSAGE);
+      return;
     }
 
     setUser({
@@ -522,6 +533,12 @@ export default function TalentOnboarding() {
                 Skip — start as unverified →
               </button>
             </div>
+            {saveError && (
+              <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+                {saveError}
+              </p>
+            )}
+
             <p className="mt-3 text-center text-xs text-text-secondary">
               Unverified profiles get fewer enquiries and appear lower in search
             </p>

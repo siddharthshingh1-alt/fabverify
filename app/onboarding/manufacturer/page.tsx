@@ -12,6 +12,7 @@ import {
 } from "../components";
 import { useUser } from "../../context/UserContext";
 import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 const TOTAL_STEPS = 4;
 
@@ -74,6 +75,7 @@ export default function ManufacturerOnboarding() {
   const router = useRouter();
   const { setUser } = useUser();
   const [step, setStep] = useState(1);
+  const [saveError, setSaveError] = useState("");
 
   const [businessName, setBusinessName] = useState("");
   const [city, setCity] = useState("");
@@ -123,15 +125,18 @@ export default function ManufacturerOnboarding() {
     setStep((current) => Math.min(TOTAL_STEPS, current + 1));
   };
 
-  // Dev-mode only — no real Supabase Auth session yet, so the save route
-  // resolves the real users.id from phone server-side rather than trusting
-  // the synthetic dev-user-<phone> id kept in localStorage.
-  const saveManufacturerProfile = async () => {
+  // The save route resolves the real users.id from the VERIFIED session
+  // server-side, rather than trusting the synthetic dev-user-<phone> id kept
+  // in localStorage (which is not the actual UUID) or the phone in the body.
+  // Returns null on success, or a message to show the user on failure. The
+  // caller must not advance unless this returns null — advancing on failure
+  // left the profile saved only in the browser, never in the database.
+  const saveManufacturerProfile = async (): Promise<string | null> => {
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-    if (!auth.phone) return;
+    if (!auth.phone) return "Your session has expired. Please log in again.";
 
     try {
-      const res = await fetch("/api/manufacturer-profile", {
+      const res = await authFetch("/api/manufacturer-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -147,13 +152,12 @@ export default function ManufacturerOnboarding() {
         }),
       });
 
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-        console.error("Manufacturer profile save error:", error);
-      }
-    } catch (error) {
-      console.error("Manufacturer profile save error:", error);
+      if (!res.ok) return await readSaveError(res);
+    } catch {
+      return NETWORK_ERROR_MESSAGE;
     }
+
+    return null;
   };
 
   const stepLabel = `Step ${step} of ${TOTAL_STEPS}`;
@@ -317,30 +321,47 @@ export default function ManufacturerOnboarding() {
         )}
 
         {step === 4 && (
-          <VerificationStep
-            onGetVerified={async () => {
-              await saveManufacturerProfile();
-              setUser({
-                name: businessName || "User",
-                userType: "manufacturer",
-                verificationTier: "bronze",
-                fabscore: 0,
-                city,
-              });
-              router.push("/manufacturer/verification");
-            }}
-            onSkip={async () => {
-              await saveManufacturerProfile();
-              setUser({
-                name: businessName || "User",
-                userType: "manufacturer",
-                verificationTier: "bronze",
-                fabscore: 0,
-                city,
-              });
-              router.push(consumePendingChatRedirect() ?? "/manufacturer/dashboard");
-            }}
-          />
+          <>
+            {saveError && (
+              <p className="mx-auto mb-4 max-w-[520px] rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+                {saveError}
+              </p>
+            )}
+            <VerificationStep
+              onGetVerified={async () => {
+                setSaveError("");
+                const error = await saveManufacturerProfile();
+                if (error) {
+                  setSaveError(error);
+                  return;
+                }
+                setUser({
+                  name: businessName || "User",
+                  userType: "manufacturer",
+                  verificationTier: "bronze",
+                  fabscore: 0,
+                  city,
+                });
+                router.push("/manufacturer/verification");
+              }}
+              onSkip={async () => {
+                setSaveError("");
+                const error = await saveManufacturerProfile();
+                if (error) {
+                  setSaveError(error);
+                  return;
+                }
+                setUser({
+                  name: businessName || "User",
+                  userType: "manufacturer",
+                  verificationTier: "bronze",
+                  fabscore: 0,
+                  city,
+                });
+                router.push(consumePendingChatRedirect() ?? "/manufacturer/dashboard");
+              }}
+            />
+          </>
         )}
 
         {step < TOTAL_STEPS && (

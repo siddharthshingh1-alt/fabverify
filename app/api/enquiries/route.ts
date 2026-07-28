@@ -1,38 +1,49 @@
-import { getUserByPhone, sendEnquiry } from "@/app/lib/db";
-import { getErrorMessage } from "@/app/lib/apiError";
+import { getUserById, sendEnquiry } from "@/app/lib/db";
+import { authErrorResponse, getVerifiedUser } from "@/app/lib/auth";
+import { dbErrorResponse } from "@/app/lib/apiError";
 import { NextResponse } from "next/server";
 
-// Dev-mode only — resolves the sender's real users.id from phone
-// server-side, since the dev-mode "userId" kept in localStorage is a
-// synthetic dev-user-<phone> string, not the actual UUID enquiries.sender_id
-// needs to reference.
+// Sends an enquiry AS THE CALLER.
+//
+// sender_id comes from the verified session and senderPhone is no longer read
+// from the body at all — the field is absent rather than validated, so there
+// is nothing to spoof. This route previously accepted any senderPhone, which
+// meant anyone could send an enquiry in another user's name AND seed a
+// conversation that appeared, to the recipient, to have been started by them.
 export async function POST(request: Request) {
-  const { senderPhone, receiverId, subject, message } = await request.json();
+  const { receiverId, subject, message } = await request.json();
 
-  if (!senderPhone || !receiverId || !message) {
+  if (!receiverId || !message) {
     return NextResponse.json(
-      { error: "senderPhone, receiverId and message are required" },
+      { error: "receiverId and message are required" },
       { status: 400 }
     );
   }
 
-  const sender = await getUserByPhone(senderPhone);
-  if (!sender) {
-    return NextResponse.json(
-      { error: "No user found for this phone number" },
-      { status: 404 }
-    );
-  }
+  const caller = await getVerifiedUser(request);
+  if (!caller.ok) return authErrorResponse(caller);
 
   try {
-    const enquiry = await sendEnquiry({
-      sender_id: sender.id,
+    // The recipient is a real other user, so it stays a body parameter — but
+    // it must actually exist, or the enquiry and its seeded message would
+    // point at nothing.
+    const receiver = await getUserById(receiverId);
+    if (!receiver) {
+      return NextResponse.json({ error: "Recipient not found" }, { status: 404 });
+    }
+
+    const { enquiry, conversationSeeded } = await sendEnquiry({
+      sender_id: caller.user.id,
       receiver_id: receiverId,
       subject: subject ?? "",
       message,
     });
-    return NextResponse.json({ enquiry });
+
+    // conversationSeeded is passed through so the client can tell the user
+    // their enquiry was saved but the chat thread was not. The enquiry still
+    // succeeded — reporting it is the point, not failing the request.
+    return NextResponse.json({ enquiry, conversationSeeded });
   } catch (error) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return dbErrorResponse(error);
   }
 }

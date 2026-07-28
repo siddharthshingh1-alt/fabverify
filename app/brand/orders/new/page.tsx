@@ -6,6 +6,7 @@ import { useTypeGuard } from "@/app/hooks/useTypeGuard";
 import { useUser } from "@/app/context/UserContext";
 import { mapManufacturerRow } from "@/app/lib/mapManufacturer";
 import type { ManufacturerRow } from "@/app/lib/mapManufacturer";
+import { authFetch } from "@/app/lib/apiClient";
 
 const TOTAL_STEPS = 8;
 
@@ -598,11 +599,13 @@ function PlaceBulkOrderInner() {
     setIsSubmitting(true);
 
     try {
-      const res = await fetch("/api/orders", {
+      // No buyerPhone: the server takes buyer_id from the verified session,
+      // so sending it would be ignored at best and misleading at worst.
+      // manufacturerPhone stays — that is a real counterparty, not us.
+      const res = await authFetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerPhone: auth.phone,
           manufacturerPhone,
           styleName,
           quantity: totalQty,

@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useUser } from "../../context/UserContext";
-import type { UserType } from "../../context/UserContext";
+import { resolveAccount } from "../../lib/accountType";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 type UserTypeCard = {
   id: string;
@@ -98,9 +99,15 @@ const ROUTE_BY_TYPE: Record<string, string> = {
   "qc-inspector": "/onboarding/talent",
 };
 
+// The value persisted to users.user_type. 'enterprise' is a real account
+// type, not a marketplace persona — app/lib/accountType.ts resolves it to
+// the 'buyer' persona so enterprise accounts keep full marketplace access
+// (discovery, sourcing, orders) on top of the /enterprise/* workspace.
+// This previously stored "buyer" for enterprise, which meant enterprise
+// identity existed only in localStorage and was lost on every re-login.
 const STORAGE_TYPE_BY_ID: Record<string, string> = {
   "brand-buyer": "buyer",
-  "enterprise-brand": "buyer",
+  "enterprise-brand": "enterprise",
   manufacturer: "manufacturer",
   "fabric-mill": "fabric_mill",
   "trim-supplier": "trim_supplier",
@@ -117,40 +124,61 @@ export default function UserTypeSelection() {
   const { setUser } = useUser();
   const [selected, setSelected] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const selectedCard = USER_TYPES.find((card) => card.id === selected);
 
-  const saveUserType = async (type: string) => {
+  // Persists users.user_type (the DB truth). Returns null on success, or a
+  // message to show the user on failure — the caller must not advance
+  // unless this returns null.
+  //
+  // authFetch attaches proof of identity, which the route verifies before
+  // writing. The write itself stays server-side (service role via db.ts)
+  // because dev-mode auth has no auth.uid() for RLS.
+  const saveUserType = async (type: string): Promise<string | null> => {
     const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-    if (!auth.phone) return;
+    if (!auth.phone) return "Your session has expired. Please log in again.";
 
-    // Dev-mode auth has no real Supabase session/auth.uid() yet, so this
-    // goes through the service-role-backed dev-auth API instead of a
-    // direct RLS-protected client call.
-    const res = await fetch("/api/dev-auth/save-user-type", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: auth.phone, userType: type }),
-    });
+    try {
+      const res = await authFetch("/api/dev-auth/save-user-type", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: auth.phone, userType: type }),
+      });
 
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-      console.error("User type save error:", error);
+      if (!res.ok) return await readSaveError(res);
+    } catch {
+      return NETWORK_ERROR_MESSAGE;
     }
 
-    localStorage.setItem("fabverify_user_type", type);
+    return null;
   };
 
   const handleContinue = async () => {
     if (!selectedCard || isSaving) return;
-    const userType = STORAGE_TYPE_BY_ID[selectedCard.id];
-    if (userType) {
-      setIsSaving(true);
-      localStorage.setItem("userType", userType);
-      setUser({ userType: userType as UserType });
-      await saveUserType(userType);
+    const accountType = STORAGE_TYPE_BY_ID[selectedCard.id];
+    if (!accountType) return;
+
+    setIsSaving(true);
+    setSaveError("");
+
+    const error = await saveUserType(accountType);
+    if (error) {
+      // STOP. Writing the type to localStorage after a failed save is
+      // exactly what created accounts that existed only in the browser
+      // while the database had no row for them.
+      setSaveError(error);
       setIsSaving(false);
+      return;
     }
+
+    // Saved to the database — only now mirror it locally and advance.
+    // Store the raw account type (the DB truth) and derive the marketplace
+    // persona from it, never the other way round.
+    localStorage.setItem("userType", accountType);
+    localStorage.setItem("fabverify_user_type", accountType);
+    setUser(resolveAccount(accountType));
+
     try {
       // Marks whether /onboarding/position was reached via the Enterprise
       // Brand path — checked by that page to bounce regular Brand/Buyer
@@ -160,6 +188,8 @@ export default function UserTypeSelection() {
         selectedCard.id === "enterprise-brand" ? "enterprise" : "standard"
       );
     } catch {}
+
+    setIsSaving(false);
     router.push(ROUTE_BY_TYPE[selectedCard.id] ?? "/dashboard");
   };
 
@@ -242,6 +272,12 @@ export default function UserTypeSelection() {
             Select Brand / Buyer ↑
           </button>
         </p>
+
+        {saveError && (
+          <p className="mx-auto mt-6 max-w-[420px] rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+            {saveError}
+          </p>
+        )}
 
         <div className="mt-8 flex justify-center">
           <button

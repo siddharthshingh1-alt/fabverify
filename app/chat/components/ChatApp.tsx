@@ -5,6 +5,7 @@ import { useUser, type UserType } from "@/app/context/UserContext";
 import { getBasePath, getOrdersSlug, getDiscoverySlug } from "@/app/lib/routing";
 import { mapConversationRowToConversation } from "@/app/lib/mapMessage";
 import type { ConversationRow } from "@/app/lib/mapMessage";
+import { authFetch } from "@/app/lib/apiClient";
 import { useChatTab } from "../context";
 import { getRoleChatData, type ChatRole } from "../data";
 import type { Conversation } from "../types";
@@ -38,7 +39,7 @@ export default function ChatApp({ role }: { role: ChatRole }) {
         return;
       }
       try {
-        const res = await fetch(`/api/conversations?phone=${encodeURIComponent(auth.phone)}`);
+        const res = await authFetch(`/api/conversations?phone=${encodeURIComponent(auth.phone)}`);
         const { conversations: rows } = (await res.json()) as { conversations: ConversationRow[] };
         if (!cancelled) setConversations((rows ?? []).map(mapConversationRowToConversation));
       } catch (error) {

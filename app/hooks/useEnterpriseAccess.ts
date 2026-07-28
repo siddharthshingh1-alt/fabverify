@@ -6,10 +6,21 @@ import { useUser } from "../context/UserContext";
 
 /**
  * Gates access to /enterprise/* pages.
- * Authorized when the signed-in position is MD/CEO or Head of Operations
- * (the Brand/Buyer positions this section was built for), or when the
- * separate Enterprise Brand onboarding flow has run (fabverify_enterprise
- * profile present). Anyone else is bounced to /dashboard.
+ *
+ * Authorized only when the DATABASE says this account is an enterprise
+ * (users.user_type = 'enterprise', surfaced as user.isEnterprise via
+ * app/lib/accountType.ts). Anyone else is bounced to /dashboard.
+ *
+ * This previously authorized on `position === "md_ceo" || position ===
+ * "head_operations"` or the mere presence of a `fabverify_enterprise`
+ * localStorage key. Both were unsound: the Position union (solo_founder,
+ * md_ceo, …) overlaps EnterprisePosition on exactly those two values, so a
+ * solo Brand Builder who picked "MD / CEO" during /onboarding/position
+ * passed this gate — and a localStorage key is client-writable, so anyone
+ * could set it. Capability now comes from a real server-side fact.
+ *
+ * Still a client-side UX guard, not authorization — the enforcing check is
+ * the server-side one in the API routes (app/lib/auth.ts).
  */
 export function useEnterpriseAccess() {
   const { user, mounted } = useUser();
@@ -19,18 +30,7 @@ export function useEnterpriseAccess() {
   useEffect(() => {
     if (!mounted) return;
 
-    let storedPosition: string | null = null;
-    let hasEnterpriseProfile = false;
-    try {
-      storedPosition = localStorage.getItem("fabverify_position");
-      hasEnterpriseProfile = !!localStorage.getItem("fabverify_enterprise");
-    } catch {}
-
-    const position = user.position ?? storedPosition;
-    const isEnterprise =
-      position === "md_ceo" || position === "head_operations" || hasEnterpriseProfile;
-
-    if (!isEnterprise) {
+    if (!user.isEnterprise) {
       router.replace("/dashboard");
       return;
     }

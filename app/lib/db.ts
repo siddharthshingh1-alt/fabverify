@@ -34,6 +34,23 @@ export async function getUserByPhone(phone: string) {
   return data;
 }
 
+// Same lookup as getUserByPhone, but THROWS when the database itself fails
+// instead of returning null. getUserByPhone swallows errors, which makes
+// "no such user" and "database unreachable" indistinguishable — and any
+// auth check built on it reports a database outage as "not authenticated".
+// Use this wherever that distinction matters. Returns null only for a
+// genuine no-match.
+export async function getUserByPhoneOrThrow(phone: string) {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("*")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function getUserById(id: string) {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -72,6 +89,34 @@ export async function updateUserType(phone: string, userType: string) {
     .eq("phone", phone);
 
   if (error) throw error;
+}
+
+// The role a user holds inside an enterprise (md_ceo, cfo, …). Stored on
+// users.position so enterprise position survives logout — it used to live
+// only in localStorage, which meant a re-login lost it entirely.
+export async function updateUserPosition(phone: string, position: string) {
+  const { error } = await supabaseAdmin
+    .from("users")
+    .update({ position })
+    .eq("phone", phone);
+
+  if (error) throw error;
+}
+
+// Validates a Supabase auth access token (the real, tamper-proof session
+// issued by signInWithOtp/verifyOtp) and returns the phone number Supabase
+// itself attests to — not a phone the caller merely claims in the request.
+// Returns null when the token is missing, invalid or expired.
+//
+// Only the TOKEN is checked here. Resolving that phone to a users row is a
+// separate step (getUserByPhoneOrThrow) so a database failure can't be
+// mistaken for a bad token. users.id is a separate generated UUID, not
+// auth.uid(), so phone is the durable link between the two.
+export async function getPhoneFromAccessToken(accessToken: string) {
+  const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+  if (error || !data.user?.phone) return null;
+
+  return data.user.phone.replace(/\D/g, "").slice(-10);
 }
 
 // Generic per-user-type onboarding data (crafts, skills, portfolio, rates,
@@ -239,19 +284,32 @@ export async function updateOrderStatus(orderId: string, status: string) {
   if (error) throw error;
 }
 
+// Scoped to the parent order ON PURPOSE. Without the order_id filter, a
+// caller authorised on ONE order could advance a milestone belonging to a
+// DIFFERENT order just by naming its id — the route's party check proves
+// which order you may touch, not which milestone. Filtering here makes the
+// two agree in a single atomic statement rather than a read-then-write.
+//
+// Returns false when nothing matched (wrong order, or no such milestone) so
+// the caller can answer 404 instead of reporting a success that never
+// happened — a Supabase update matching zero rows is not an error.
 export async function updateMilestoneStatus(
   milestoneId: string,
-  status: string
-) {
-  const { error } = await supabaseAdmin
+  status: string,
+  orderId: string
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
     .from("order_milestones")
     .update({
       status,
       completed_at: status === "completed" ? new Date().toISOString() : null,
     })
-    .eq("id", milestoneId);
+    .eq("id", milestoneId)
+    .eq("order_id", orderId)
+    .select("id");
 
   if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }
 
 export async function getOrdersByUser(
@@ -324,6 +382,14 @@ export async function sendEnquiry(enquiry: {
   // An enquiry is also the first message of a conversation from the
   // recipient's point of view — seed it so FabChat shows this thread
   // immediately, without a separate "start chat" step.
+  //
+  // A failure here does NOT fail the enquiry: the enquiry row is already
+  // committed, so throwing would leave the caller believing nothing was
+  // saved when in fact it was. Instead the outcome is REPORTED — the route
+  // passes conversationSeeded to the client, which tells the user their
+  // enquiry arrived but the chat thread did not. Previously this failure
+  // existed only as a console.error on the server, invisible to the user
+  // and to anyone not watching the terminal.
   const { error: messageError } = await supabaseAdmin.from("messages").insert({
     sender_id: enquiry.sender_id,
     receiver_id: enquiry.receiver_id,
@@ -334,7 +400,7 @@ export async function sendEnquiry(enquiry: {
     console.error("Failed to seed conversation from enquiry:", messageError);
   }
 
-  return data;
+  return { enquiry: data, conversationSeeded: !messageError };
 }
 
 export async function getEnquiries(

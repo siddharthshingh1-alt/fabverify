@@ -1,10 +1,14 @@
-import { createOrder, getOrdersByUser, getUserByPhone } from "@/app/lib/db";
-import { getErrorMessage } from "@/app/lib/apiError";
+import { createOrder, getOrdersByUser, getUserByPhoneOrThrow } from "@/app/lib/db";
+import { authErrorResponse, getVerifiedUser, normalisePhone } from "@/app/lib/auth";
+import { isEnterpriseAccount } from "@/app/lib/accountType";
+import { dbErrorResponse } from "@/app/lib/apiError";
 import { NextResponse } from "next/server";
 
-// Dev-mode only — resolves real users.id from phone server-side, since the
-// dev-mode "userId" kept in localStorage is a synthetic dev-user-<phone>
-// string, not the actual UUID orders.buyer_id/manufacturer_id needs.
+// Lists the CALLER'S OWN orders. The buyer_id/manufacturer_id filter is
+// applied to the verified session's users.id, so the result set is scoped by
+// construction — this route previously accepted any phone in the query
+// string and returned that account's entire order book, including style
+// names, quantities, prices and total values.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const phone = searchParams.get("phone");
@@ -14,18 +18,31 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "phone is required" }, { status: 400 });
   }
 
-  const user = await getUserByPhone(phone);
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  const caller = await getVerifiedUser(request);
+  if (!caller.ok) return authErrorResponse(caller);
+
+  if (normalisePhone(caller.user.phone) !== normalisePhone(phone)) {
+    return NextResponse.json(
+      { error: "Not authorised for this account" },
+      { status: 403 }
+    );
   }
 
-  const orders = await getOrdersByUser(user.id, role);
-  return NextResponse.json({ orders });
+  try {
+    // The verified id, never a phone from the query string.
+    const orders = await getOrdersByUser(caller.user.id, role);
+    return NextResponse.json({ orders });
+  } catch (error) {
+    return dbErrorResponse(error);
+  }
 }
 
+// Places an order. buyer_id is FORCED to the logged-in user — the single
+// most important line in this file. The route used to take buyerPhone from
+// the body and look it up, which meant anyone could create an order in
+// someone else's name, committing them to a purchase they never made.
 export async function POST(request: Request) {
   const {
-    buyerPhone,
     manufacturerPhone,
     styleName,
     quantity,
@@ -34,29 +51,58 @@ export async function POST(request: Request) {
     milestoneSchedule,
   } = await request.json();
 
-  if (!buyerPhone || !manufacturerPhone || !styleName || !quantity || !pricePerPiece) {
+  if (!manufacturerPhone || !styleName || !quantity || !pricePerPiece) {
     return NextResponse.json(
       {
         error:
-          "buyerPhone, manufacturerPhone, styleName, quantity and pricePerPiece are required",
+          "manufacturerPhone, styleName, quantity and pricePerPiece are required",
       },
       { status: 400 }
     );
   }
 
-  const buyer = await getUserByPhone(buyerPhone);
-  if (!buyer) {
-    return NextResponse.json({ error: "Buyer not found" }, { status: 404 });
-  }
+  const caller = await getVerifiedUser(request);
+  if (!caller.ok) return authErrorResponse(caller);
 
-  const manufacturer = await getUserByPhone(manufacturerPhone);
-  if (!manufacturer) {
-    return NextResponse.json({ error: "Manufacturer not found" }, { status: 404 });
+  // Buying is allowed for a plain buyer AND for an enterprise account:
+  // enterprise access is ADDITIVE, not exclusive (DECISIONS I3) — a large
+  // brand buys from the same vendors as everyone else.
+  //
+  // Deliberately NOT written as resolveAccount(...).userType === 'buyer'.
+  // resolveAccount falls back to the buyer persona for unknown or missing
+  // values, so an account with a null user_type would silently inherit
+  // permission to buy. An authorisation gate must not lean on a permissive
+  // default; both accepted values are named explicitly.
+  const callerType = caller.user.user_type;
+  const mayPlaceOrders = callerType === "buyer" || isEnterpriseAccount(callerType);
+
+  if (!mayPlaceOrders) {
+    return NextResponse.json(
+      { error: "This account type cannot place orders" },
+      { status: 403 }
+    );
   }
 
   try {
+    // Lightweight counterparty validation: enough to stop orphan orders
+    // pointing at a non-existent or wrong-type account, and no more.
+    // getUserByPhoneOrThrow (not getUserByPhone) so an unreachable database
+    // surfaces as 503 rather than a misleading "Manufacturer not found".
+    const manufacturer = await getUserByPhoneOrThrow(manufacturerPhone);
+
+    if (!manufacturer) {
+      return NextResponse.json({ error: "Manufacturer not found" }, { status: 404 });
+    }
+
+    if (manufacturer.user_type !== "manufacturer") {
+      return NextResponse.json(
+        { error: "That account is not a manufacturer" },
+        { status: 400 }
+      );
+    }
+
     const order = await createOrder({
-      buyer_id: buyer.id,
+      buyer_id: caller.user.id,
       manufacturer_id: manufacturer.id,
       style_name: styleName,
       quantity: Number(quantity),
@@ -65,8 +111,9 @@ export async function POST(request: Request) {
       delivery_date: deliveryDate,
       milestones: milestoneSchedule,
     });
+
     return NextResponse.json({ success: true, order, orderNumber: order.order_number });
   } catch (error) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return dbErrorResponse(error);
   }
 }

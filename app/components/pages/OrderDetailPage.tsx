@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import ThreePanelLayout from "../ThreePanelLayout";
 import { qcInspectors } from "../../data/qcInspectors";
 import type { OrderRow } from "../../lib/mapOrder";
+import { authFetch } from "../../lib/apiClient";
 
 type MilestoneStatus = "complete" | "active" | "pending";
 
@@ -388,7 +389,7 @@ export default function OrderDetail() {
     }
     let cancelled = false;
     setLoadingOrder(true);
-    fetch(`/api/orders/${orderId}`)
+    authFetch(`/api/orders/${orderId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { order: OrderRow } | null) => {
         if (cancelled) return;

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useUser } from "../../context/UserContext";
 import type { EnterprisePosition } from "../../context/UserContext";
 import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 const ROLES = [
   "MD / CEO",
@@ -83,12 +84,55 @@ export default function EnterpriseOnboarding() {
   const [vendorCount, setVendorCount] = useState<string | null>(null);
   const [erp, setErp] = useState("");
   const [source, setSource] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   const isValid = companyName.trim() !== "";
 
   const handleSubmit = async () => {
     if (!isValid) return;
     const position = role ? ROLE_TO_POSITION[role] : undefined;
+
+    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
+    if (!auth.phone) {
+      setSaveError("Your session has expired. Please log in again.");
+      return;
+    }
+
+    setSaveError("");
+
+    // The database write happens FIRST and must succeed. The localStorage
+    // mirror used to be written before this call and kept even when the
+    // call failed, which produced an enterprise workspace that existed only
+    // in the browser.
+    try {
+      const res = await authFetch("/api/profile-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: auth.phone,
+          // Persisted to users.position so the enterprise role survives
+          // logout — it used to live only in localStorage.
+          position,
+          profileData: {
+            companyName: companyName.trim(),
+            role,
+            stylesPerSeason,
+            vendorCount,
+            erp,
+            source,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        setSaveError(await readSaveError(res));
+        return;
+      }
+    } catch {
+      setSaveError(NETWORK_ERROR_MESSAGE);
+      return;
+    }
+
     try {
       localStorage.setItem(
         "fabverify_enterprise",
@@ -105,33 +149,6 @@ export default function EnterpriseOnboarding() {
         localStorage.setItem("fabverify_enterprise_position", position);
       }
     } catch {}
-
-    const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-    if (auth.phone) {
-      try {
-        const res = await fetch("/api/profile-data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phone: auth.phone,
-            profileData: {
-              companyName: companyName.trim(),
-              role,
-              stylesPerSeason,
-              vendorCount,
-              erp,
-              source,
-            },
-          }),
-        });
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-          console.error("Profile data save error:", error);
-        }
-      } catch (error) {
-        console.error("Profile data save error:", error);
-      }
-    }
 
     if (position) {
       setUser({ enterprisePosition: position });
@@ -246,6 +263,12 @@ export default function EnterpriseOnboarding() {
             <PillGroup options={HEARD_ABOUT} selected={source} onSelect={setSource} />
           </div>
         </div>
+
+        {saveError && (
+          <p className="mt-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+            {saveError}
+          </p>
+        )}
 
         <button
           type="button"

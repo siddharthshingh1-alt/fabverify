@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { consumePendingChatRedirect } from "../lib/postAuthRedirect";
 import { supabase } from "../lib/supabase";
+import { useUser } from "../context/UserContext";
+import { getLandingRoute } from "../lib/routing";
 
 const WHATSAPP_NUMBER_DISPLAY = "+91 97739 33279";
 const WHATSAPP_LINK = "https://wa.me/919773933279";
@@ -25,19 +27,6 @@ const DEV_OTP_BYPASS = "123456";
 // Real, currently-routable dashboard for each UserContext UserType — see
 // app/context/UserContext.tsx. Anything not in this map (or not yet known)
 // falls back to the generic adaptive /dashboard.
-const DASHBOARD_ROUTE_BY_TYPE: Record<string, string> = {
-  buyer: "/brand/dashboard",
-  manufacturer: "/manufacturer/dashboard",
-  fabric_mill: "/mill/dashboard",
-  trim_supplier: "/supplier/dashboard",
-  artisan: "/artisan/dashboard",
-  job_worker: "/jobworker/dashboard",
-  designer: "/talent/designer/dashboard",
-  master: "/talent/master/dashboard",
-  merchandiser: "/talent/merchandiser/dashboard",
-  qc_inspector: "/talent/qc/dashboard",
-};
-
 // Only allow the dev OTP bypass on localhost — never in production.
 const isDev =
   typeof window !== "undefined" &&
@@ -45,6 +34,7 @@ const isDev =
 
 export default function SignUp() {
   const router = useRouter();
+  const { applyIdentity } = useUser();
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
@@ -72,7 +62,7 @@ export default function SignUp() {
       const userType = localStorage.getItem("fabverify_user_type");
 
       if (auth && userType) {
-        router.replace(postVerifyRoute() ?? DASHBOARD_ROUTE_BY_TYPE[userType] ?? "/dashboard");
+        router.replace(postVerifyRoute() ?? getLandingRoute(userType));
         return;
       }
 
@@ -201,6 +191,10 @@ export default function SignUp() {
     setIsVerifying(true);
     setErrorMessage("");
 
+    // The dev branch used to short-circuit here and route from localStorage
+    // alone, never consulting the database. That reproduced the stale-
+    // identity bug on signup, so both modes now establish the session and
+    // then fall through to the same database lookup below.
     if (isDev) {
       if (code !== DEV_OTP_BYPASS) {
         setErrorMessage("Development mode: enter 123456 to continue");
@@ -208,59 +202,43 @@ export default function SignUp() {
         return;
       }
 
-      const mockUserId = "dev-user-" + phone.replace(/\D/g, "");
-
-      const existingProfile = localStorage.getItem("fabverify_profile");
-      const existingAuth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-
       localStorage.setItem(
         "fabverify_auth",
         JSON.stringify({
-          userId: mockUserId,
+          userId: "dev-user-" + phone.replace(/\D/g, ""),
           phone,
           verified: true,
           verifiedAt: new Date().toISOString(),
           devMode: true,
         })
       );
+    } else {
+      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+      const formattedPhone = "+91" + cleanPhone;
 
-      if (existingAuth.phone === phone && existingProfile) {
-        const userType = localStorage.getItem("fabverify_user_type");
-        router.push(postVerifyRoute() ?? (userType ? "/dashboard" : "/onboarding/type"));
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: formattedPhone,
+        token: code,
+        type: "sms",
+      });
+
+      if (error || !data.user) {
+        setErrorMessage("Invalid OTP. Please try again.");
         setIsVerifying(false);
         return;
       }
 
-      router.push(postVerifyRoute() ?? "/onboarding/profile");
-      setIsVerifying(false);
-      return;
+      localStorage.setItem(
+        "fabverify_auth",
+        JSON.stringify({
+          userId: data.user.id,
+          phone,
+          verified: true,
+          verifiedAt: new Date().toISOString(),
+          devMode: false,
+        })
+      );
     }
-
-    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-    const formattedPhone = "+91" + cleanPhone;
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone: formattedPhone,
-      token: code,
-      type: "sms",
-    });
-
-    if (error || !data.user) {
-      setErrorMessage("Invalid OTP. Please try again.");
-      setIsVerifying(false);
-      return;
-    }
-
-    localStorage.setItem(
-      "fabverify_auth",
-      JSON.stringify({
-        userId: data.user.id,
-        phone,
-        verified: true,
-        verifiedAt: new Date().toISOString(),
-        devMode: false,
-      })
-    );
 
     try {
       const res = await fetch("/api/dev-auth/lookup", {
@@ -270,28 +248,22 @@ export default function SignUp() {
       });
       const { user: dbUser } = await res.json();
 
+      // ORDER MATTERS: postVerifyRoute() reads the fabverify_profile key to
+      // tell a returning user from a first-time signup, and applyIdentity()
+      // rewrites that key. Resolve the route FIRST, then load the identity,
+      // or the returning-user branch silently changes behaviour.
       if (dbUser?.user_type) {
-        localStorage.setItem(
-          "fabverify_profile",
-          JSON.stringify({
-            name: dbUser.name,
-            email: dbUser.email,
-            city: dbUser.city,
-            state: dbUser.state,
-          })
-        );
-        localStorage.setItem("fabverify_user_type", dbUser.user_type);
-        router.push(postVerifyRoute() ?? "/dashboard");
+        const next = postVerifyRoute() ?? getLandingRoute(dbUser.user_type);
+        applyIdentity(dbUser);
+        router.push(next);
         setIsVerifying(false);
         return;
       }
 
       if (dbUser) {
-        localStorage.setItem(
-          "fabverify_profile",
-          JSON.stringify({ name: dbUser.name, email: dbUser.email, city: dbUser.city })
-        );
-        router.push(postVerifyRoute() ?? "/onboarding/type");
+        const next = postVerifyRoute() ?? "/onboarding/type";
+        applyIdentity(dbUser);
+        router.push(next);
         setIsVerifying(false);
         return;
       }
@@ -299,7 +271,11 @@ export default function SignUp() {
       // Lookup failed (e.g. network error) — fall through to new-user path below.
     }
 
-    router.push(postVerifyRoute() ?? "/onboarding/profile");
+    // Brand-new (or unresolvable) account — reset to a blank identity so no
+    // previous occupant of this browser bleeds into onboarding.
+    const next = postVerifyRoute() ?? "/onboarding/profile";
+    applyIdentity(null);
+    router.push(next);
     setIsVerifying(false);
   };
 

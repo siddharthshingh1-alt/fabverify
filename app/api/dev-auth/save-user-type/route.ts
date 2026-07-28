@@ -1,10 +1,12 @@
 import { updateUserType } from "@/app/lib/db";
-import { getErrorMessage } from "@/app/lib/apiError";
+import { authErrorResponse, getVerifiedUser, normalisePhone } from "@/app/lib/auth";
+import { dbErrorResponse } from "@/app/lib/apiError";
 import { NextResponse } from "next/server";
 
-// Dev-mode only (see app/onboarding/type/page.tsx) — updates user_type by
-// phone using the service-role client so it works without a real Supabase
-// auth session.
+// Sets the caller's OWN account type. Runs after /onboarding/profile has
+// created the users row, so the caller must resolve to a real account.
+// Previously any caller could change any account's user_type just by naming
+// its phone number.
 export async function POST(request: Request) {
   const { phone, userType } = await request.json();
 
@@ -15,10 +17,20 @@ export async function POST(request: Request) {
     );
   }
 
+  const caller = await getVerifiedUser(request);
+  if (!caller.ok) return authErrorResponse(caller);
+
+  if (normalisePhone(caller.user.phone) !== normalisePhone(phone)) {
+    return NextResponse.json(
+      { error: "Not authorised for this account" },
+      { status: 403 }
+    );
+  }
+
   try {
     await updateUserType(phone, userType);
   } catch (error) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return dbErrorResponse(error);
   }
 
   return NextResponse.json({ success: true });

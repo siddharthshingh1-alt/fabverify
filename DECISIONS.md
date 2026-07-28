@@ -103,6 +103,32 @@
 
 **[P13] Design uses different tools (Illustrator/CAD/AI) — FabVerify does NOT build design tools.** It handles everything around design: brief, delivery, version control, hand-off to manufacturing. — Out-of-scope boundary.
 
+**[P14] The enterprise Vendors area is ONE page with a two-tab toggle — never a separate URL.** (2026-07-26)
+- **Tab 1 "My Vendors"** — who the enterprise already works with. This is the DEFAULT view, so the CEO glance-view stays clean (P4).
+- **Tab 2 "Find Vendors"** — browse the full marketplace of verified partners WITHOUT leaving the enterprise workspace: same look, same nav, reusing the existing marketplace discovery underneath rather than a second implementation.
+- Adding a vendor from "Find Vendors" moves them into "My Vendors".
+- There is never a separate URL for finding vendors; it is a tab, not a route.
+— Keeps sourcing inside the enterprise workspace instead of bouncing the user out to the public marketplace and losing context, and avoids a duplicate discovery implementation. Extends P7 (enterprise onboards vendors who then use the platform).
+
+**[P15] FabChat is the universal communication hub of the platform — not a side feature.** (2026-07-27) — VISION RECORDED, NOT BUILT.
+
+The vision:
+- **Every message between any parties** — buyer, manufacturer, artisan, mill, freelancer, enterprise — flows through FabChat, WhatsApp-style.
+- **Persistent, searchable HISTORY** — unlike WhatsApp's endless scroll or scattered email threads.
+- **ORDER / ENQUIRY LINKING** — every conversation is tied to the order or enquiry it is about, click through to it, context never lost.
+- **IMAGES and media inside conversations** — samples, defects, fabric, tech packs.
+- **FUTURE, its own major project: external EMAIL INTEGRATION** — connect Gmail, Outlook and other mail services to view and send external email from inside FabChat, making it one inbox for the user's entire work life (internal messages + external email), all tied to orders and history.
+
+**BUILD ORDER (locked):**
+1. Finish the auth security batch.
+2. Make basic conversations work (wire enquiry → conversation).
+3. Internal chat backbone done well — history, order-linking, images.
+4. External email integration as its own dedicated, security-reviewed project, AFTER the foundation is solid.
+
+**Email integration is NOT to be started until auth is fully hardened and internal chat works.** It involves OAuth with Google/Microsoft and access to users' real email — security- and privacy-heavy, and a category of risk unlike anything else in the platform. Starting it on a half-hardened auth layer would put real mailboxes behind checks we have not finished writing.
+
+— Communication is where trust is actually built or lost in this industry, and today it is scattered across WhatsApp, email and phone calls with no history and no link to the order it concerns. Owning that surface — with history and order context — is a genuine moat. The staged build order exists because each stage is worthless if the one beneath it is not solid.
+
 ---
 
 ## BUSINESS DECISIONS
@@ -132,6 +158,24 @@
 ## THE DESIGN-SYSTEM CONSTANTS (locked)
 
 Background `#07122a` · Cards `#0D1B33` · Border `#1C3050` · Gold accent `#f2ca50` · Text primary `#E2E8F0` · Text secondary `#7A8FA8` · Headings Montserrat · Body Inter · Danger `#e34948`.
+
+---
+
+## IDENTITY DECISIONS (2026-07-26)
+
+**[I1] Account identity is a server-side database fact, never localStorage.** `users.user_type` is the single source of truth for what an account is. localStorage (`fabverify_user_type`, `fabverify_enterprise`, `fabverify_enterprise_position`, …) is a display MIRROR written from the database at login, never read as identity. Losing it must degrade to "logged out", never to "wrong identity". — Enterprise identity previously lived only in localStorage, so every logout silently downgraded an enterprise CEO to a Brand Builder.
+
+**[I2] Enterprise is a real account type, resolved into three fields.** `users.user_type = 'enterprise'` is the DB truth; `app/lib/accountType.ts` derives from it: `accountType` (DB truth, the only value ever written back), `userType` (marketplace persona — enterprise resolves to `'buyer'`), and `isEnterprise` (capability flag). — Keeps all eighteen `Record<UserType, …>` config maps valid with their existing ten keys, and needs no changes at the 114 `useTypeGuard` call sites.
+
+**[I3] Enterprise access is ADDITIVE, not exclusive.** An enterprise account has full public-marketplace access (discovery, sourcing, ordering from mills/manufacturers) via the derived `'buyer'` persona, PLUS the `/enterprise/*` workspace. Default landing is `/enterprise/dashboard`; the marketplace stays fully reachable both ways. — A large brand still buys from the same vendors as everyone else; enterprise adds capability rather than replacing it.
+
+**[I4] Never write the derived `userType` back to the database.** For an enterprise account `userType` is deliberately `'buyer'`; persisting it to `users.user_type` would silently downgrade a real enterprise account. Hydration is one-way (DB → context); only `accountType` may be written. — Documented at the resolver in `app/lib/accountType.ts`.
+
+**[I5] Enterprise capability is checked via `user_type`, never `position`.** The `Position` union (`solo_founder`, `md_ceo`, …) and `EnterprisePosition` overlap on `md_ceo` and `head_operations`, so `position` cannot distinguish a solo Brand Builder from an enterprise CEO. `users.position` answers "which role inside an enterprise", never "is this an enterprise". — `useEnterpriseAccess` previously authorized on `position === 'md_ceo' || position === 'head_operations'` OR the mere presence of a client-writable localStorage key; both let non-enterprise users through the enterprise gate.
+
+**[I6] NOTED, NOT YET DECIDED — phone reassignment.** Identity resolves through the verified phone number, so a telco-reassigned number could inherit an existing account. Pre-existing, not introduced by the auth work. A durable `users.auth_user_id` column is the likely fix. — Deferred; log a decision when addressed.
+
+**[I7] NOTED, NOT YET DECIDED — RLS is currently decorative.** `users.id` is a generated UUID and never equals `auth.uid()`, so the `users_own_data` policy can never match. Real access control for now is the server-side `getVerifiedUser()` ownership checks in the API routes, NOT RLS. Fix the policies as a separate follow-up once every account has a durable auth link. — Do not rely on RLS for protection until then.
 
 ---
 

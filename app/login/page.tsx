@@ -8,6 +8,8 @@ import {
   peekPendingChatRedirect,
 } from "../lib/postAuthRedirect";
 import { supabase } from "../lib/supabase";
+import { useUser } from "../context/UserContext";
+import { getLandingRoute } from "../lib/routing";
 
 const WHATSAPP_NUMBER_DISPLAY = "+91 97739 33279";
 const WHATSAPP_LINK = "https://wa.me/919773933279";
@@ -19,19 +21,6 @@ const DEV_OTP_BYPASS = "123456";
 // Real, currently-routable dashboard for each UserContext UserType — see
 // app/context/UserContext.tsx. Anything not in this map (or not yet known)
 // falls back to the generic adaptive /dashboard.
-const DASHBOARD_ROUTE_BY_TYPE: Record<string, string> = {
-  buyer: "/brand/dashboard",
-  manufacturer: "/manufacturer/dashboard",
-  fabric_mill: "/mill/dashboard",
-  trim_supplier: "/supplier/dashboard",
-  artisan: "/artisan/dashboard",
-  job_worker: "/jobworker/dashboard",
-  designer: "/talent/designer/dashboard",
-  master: "/talent/master/dashboard",
-  merchandiser: "/talent/merchandiser/dashboard",
-  qc_inspector: "/talent/qc/dashboard",
-};
-
 // Only allow the dev OTP bypass on localhost — never in production.
 const isDev =
   typeof window !== "undefined" &&
@@ -39,6 +28,7 @@ const isDev =
 
 export default function LogIn() {
   const router = useRouter();
+  const { applyIdentity } = useUser();
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
@@ -69,9 +59,7 @@ export default function LogIn() {
       const userType = localStorage.getItem("fabverify_user_type");
 
       if (auth && userType) {
-        router.replace(
-          consumePendingChatRedirect() ?? DASHBOARD_ROUTE_BY_TYPE[userType] ?? "/dashboard"
-        );
+        router.replace(consumePendingChatRedirect() ?? getLandingRoute(userType));
         return;
       }
 
@@ -250,36 +238,25 @@ export default function LogIn() {
       });
       const { user: dbUser } = await res.json();
 
+      // applyIdentity() makes the signed-in account live in React context
+      // immediately AND rewrites the localStorage mirrors, clearing any
+      // previous account's leftovers. Writing localStorage alone is not
+      // enough: UserProvider mounts once in the root layout, so its
+      // hydration never re-runs on a client-side navigation and the stale
+      // identity would decide routing and guards until a hard refresh.
       if (dbUser && dbUser.user_type) {
-        localStorage.setItem(
-          "fabverify_profile",
-          JSON.stringify({
-            name: dbUser.name,
-            email: dbUser.email,
-            city: dbUser.city,
-            state: dbUser.state,
-          })
-        );
-        localStorage.setItem("fabverify_user_type", dbUser.user_type);
-
+        applyIdentity(dbUser);
         router.push(
-          consumePendingChatRedirect() ??
-            DASHBOARD_ROUTE_BY_TYPE[dbUser.user_type] ??
-            "/dashboard"
+          consumePendingChatRedirect() ?? getLandingRoute(dbUser.user_type)
         );
         setIsVerifying(false);
         return;
       }
 
       if (dbUser && !dbUser.user_type) {
-        localStorage.setItem(
-          "fabverify_profile",
-          JSON.stringify({
-            name: dbUser.name,
-            email: dbUser.email,
-            city: dbUser.city,
-          })
-        );
+        // Known account, onboarding unfinished — load what we know and let
+        // /onboarding/type set the account type.
+        applyIdentity(dbUser);
         router.push(consumePendingChatRedirect() ?? "/onboarding/type");
         setIsVerifying(false);
         return;
@@ -288,6 +265,9 @@ export default function LogIn() {
       // Lookup failed (e.g. network error) — fall through to new-user path below.
     }
 
+    // Brand-new (or unresolvable) account — reset to a blank identity so no
+    // previous occupant of this browser bleeds into onboarding.
+    applyIdentity(null);
     router.push("/onboarding/profile");
     setIsVerifying(false);
   };

@@ -11,6 +11,7 @@ import {
 } from "../components";
 import { useUser } from "../../context/UserContext";
 import { consumePendingChatRedirect } from "../../lib/postAuthRedirect";
+import { authFetch, readSaveError, NETWORK_ERROR_MESSAGE } from "../../lib/apiClient";
 
 const TOTAL_STEPS = 3;
 
@@ -41,6 +42,7 @@ export default function ArtisanOnboarding() {
   const router = useRouter();
   const { setUser } = useUser();
   const [step, setStep] = useState(1);
+  const [saveError, setSaveError] = useState("");
 
   const [crafts, setCrafts] = useState<string[]>([]);
   const [showOther, setShowOther] = useState(false);
@@ -96,30 +98,39 @@ export default function ArtisanOnboarding() {
     if (!isStepValid) return;
     if (step === TOTAL_STEPS) {
       const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
-      if (auth.phone) {
-        try {
-          const res = await fetch("/api/profile-data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              phone: auth.phone,
-              profileData: {
-                crafts,
-                otherCraft: otherCraft || undefined,
-                monthlyQuantity,
-                teamType,
-                certifications,
-                sampleFile,
-              },
-            }),
-          });
-          if (!res.ok) {
-            const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-            console.error("Profile data save error:", error);
-          }
-        } catch (error) {
-          console.error("Profile data save error:", error);
+      if (!auth.phone) {
+        setSaveError("Your session has expired. Please log in again.");
+        return;
+      }
+
+      setSaveError("");
+
+      // A failed save must stop here — advancing anyway left the profile in
+      // the browser only, with no row in the database.
+      try {
+        const res = await authFetch("/api/profile-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: auth.phone,
+            profileData: {
+              crafts,
+              otherCraft: otherCraft || undefined,
+              monthlyQuantity,
+              teamType,
+              certifications,
+              sampleFile,
+            },
+          }),
+        });
+
+        if (!res.ok) {
+          setSaveError(await readSaveError(res));
+          return;
         }
+      } catch {
+        setSaveError(NETWORK_ERROR_MESSAGE);
+        return;
       }
 
       setUser({
@@ -330,6 +341,12 @@ export default function ArtisanOnboarding() {
               onFile={(file) => setSampleFile(file?.name)}
             />
           </div>
+        )}
+
+        {saveError && (
+          <p className="mt-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-[13px] text-red-300">
+            {saveError}
+          </p>
         )}
 
         <StepNav

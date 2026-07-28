@@ -8,6 +8,7 @@ import TopBar from "../TopBar";
 import { useUser } from "../../context/UserContext";
 import screenConfig from "../../config/screens";
 import type { SampleBriefRow } from "../../lib/mapSampleBrief";
+import { authFetch } from "../../lib/apiClient";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -632,7 +633,7 @@ export default function SampleBriefs() {
       return;
     }
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/sample-briefs?phone=${encodeURIComponent(auth.phone)}&role=buyer`
       );
       const { briefs } = (await res.json()) as { briefs: SampleBriefRow[] };
@@ -655,7 +656,10 @@ export default function SampleBriefs() {
     let cancelled = false;
     async function loadOpenBriefs() {
       try {
-        const res = await fetch("/api/sample-briefs");
+        // Public listing — the route does not require auth. Sent through
+        // authFetch anyway for consistency and so this needs no change if
+        // that ever tightens.
+        const res = await authFetch("/api/sample-briefs");
         const { briefs } = (await res.json()) as { briefs: SampleBriefRow[] };
         if (!cancelled) setOpenBriefs(briefs ?? []);
       } catch (error) {
@@ -680,17 +684,19 @@ export default function SampleBriefs() {
 
     setRespondingBriefId(brief.id);
     try {
-      await fetch("/api/messages", {
+      // No senderPhone: sender_id comes from the verified session.
+      await authFetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderPhone: auth.phone,
           receiverPhone: brief.buyer.phone,
           content: `Hi, I am interested in your sample brief "${brief.title}". I can produce this for you. Let me share my quote and timeline.`,
           messageType: "text",
         }),
       });
-      await fetch(`/api/sample-briefs/${brief.id}`, {
+      // "responses_received" is the ONLY status a non-owner may set — see
+      // the asymmetric ownership rule in the route.
+      await authFetch(`/api/sample-briefs/${brief.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "responses_received" }),
@@ -903,11 +909,11 @@ export default function SampleBriefs() {
     setPostError("");
 
     try {
-      const res = await fetch("/api/sample-briefs", {
+      // No buyerPhone: buyer_id comes from the verified session.
+      const res = await authFetch("/api/sample-briefs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerPhone: auth.phone,
           title: formData.briefTitle,
           category: selectedSampleTypes
             .map((id) => SAMPLE_TYPES.find((t) => t.id === id)?.title)

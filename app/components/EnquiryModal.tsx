@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { authFetch, readSaveError } from "../lib/apiClient";
 
 // user_id is optional because some callers (supplier/buyer discovery cards)
 // still point at mock data with no real backing user to send an enquiry to.
@@ -31,6 +32,8 @@ export default function EnquiryModal({
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSent, setIsSent] = useState(false);
+  // True when the enquiry saved but its opening chat message did not.
+  const [chatWarning, setChatWarning] = useState(false);
 
   useEffect(() => {
     if (manufacturer) {
@@ -43,6 +46,7 @@ export default function EnquiryModal({
       setTimeline(null);
       setErrorMessage("");
       setIsSent(false);
+      setChatWarning(false);
     }
     return () => {
       document.body.style.overflow = "unset";
@@ -70,11 +74,11 @@ export default function EnquiryModal({
     setErrorMessage("");
 
     try {
-      const res = await fetch("/api/enquiries", {
+      // No senderPhone: sender_id comes from the verified session.
+      const res = await authFetch("/api/enquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderPhone: auth.phone,
           receiverId: manufacturer.user_id,
           subject: enquiryType
             ? `${enquiryType} enquiry for ${manufacturer.name}`
@@ -87,11 +91,20 @@ export default function EnquiryModal({
       });
 
       if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
-        setErrorMessage(error || "Failed to send enquiry. Please try again.");
+        setErrorMessage(await readSaveError(res));
         setIsSending(false);
         return;
       }
+
+      // The enquiry saved, but its opening chat message may not have. Say so
+      // rather than letting the user believe a thread is waiting for them —
+      // this failure used to exist only as a server-side console.error.
+      const { conversationSeeded } = (await res
+        .json()
+        .catch(() => ({ conversationSeeded: true }))) as {
+        conversationSeeded?: boolean;
+      };
+      setChatWarning(conversationSeeded === false);
 
       setIsSent(true);
       setTimeout(() => {
@@ -129,7 +142,9 @@ export default function EnquiryModal({
               Enquiry sent!
             </p>
             <p className="mt-2 text-[13px] text-text-secondary">
-              {manufacturer.name} will respond in your messages.
+              {chatWarning
+                ? `Your enquiry reached ${manufacturer.name}, but the chat thread couldn't be created. They can still reply — start a chat from their profile if it doesn't appear.`
+                : `${manufacturer.name} will respond in your messages.`}
             </p>
           </div>
         ) : (

@@ -1,4 +1,5 @@
 import type { UserType } from '../context/UserContext'
+import { resolveAccount } from './accountType'
 
 const BASE_PATH: Record<UserType, string> = {
   buyer: '/brand',
@@ -41,6 +42,18 @@ const DISCOVERY_SLUG: Record<UserType, string> = {
 
 export function getBasePath(userType: UserType): string {
   return BASE_PATH[userType]
+}
+
+/**
+ * Where an account lands after login, derived from the raw users.user_type
+ * value. Single definition — login and signup each used to keep their own
+ * copy of this map, which is how the enterprise route went missing from
+ * both. Enterprise gets its own workspace as home while keeping full
+ * marketplace access through the derived 'buyer' persona.
+ */
+export function getLandingRoute(rawUserType: unknown): string {
+  const { userType, isEnterprise } = resolveAccount(rawUserType)
+  return isEnterprise ? '/enterprise/dashboard' : `${getBasePath(userType)}/dashboard`
 }
 
 export function getOrdersSlug(userType: UserType): string {

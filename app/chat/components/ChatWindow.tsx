@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { mapMessageRowToChatMessage } from "@/app/lib/mapMessage";
 import type { MessageRow } from "@/app/lib/mapMessage";
+import { authFetch } from "@/app/lib/apiClient";
 import type { ChatMessage, Conversation, OrderCard } from "../types";
 import { PILL_CLASSES } from "../types";
 
@@ -102,7 +103,11 @@ export default function ChatWindow({
     setViewerPhone(auth.phone);
 
     let cancelled = false;
-    fetch("/api/dev-auth/lookup", {
+    // authFetch even though the lookup route does not verify yet — it is
+    // scheduled for its own isolated task (TASKS.md, user-enumeration).
+    // Sending identity now is behaviour-neutral and means this call site
+    // needs no change when the route is locked down.
+    authFetch("/api/dev-auth/lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phone: auth.phone }),
@@ -132,7 +137,7 @@ export default function ChatWindow({
         });
         if (conversation.orderId) params.set("orderId", conversation.orderId);
 
-        const res = await fetch(`/api/messages?${params}`);
+        const res = await authFetch(`/api/messages?${params}`);
         const { messages: rows } = (await res.json()) as { messages: MessageRow[] };
         if (!cancelled && rows) {
           setMessages(rows.map((row) => mapMessageRowToChatMessage(row, viewerId!)));
@@ -143,10 +148,12 @@ export default function ChatWindow({
     }
 
     loadMessages();
-    fetch("/api/messages/read", {
+    // No `phone`: the receiver is taken from the verified session, so this can
+    // only ever mark the caller's own inbox as read.
+    authFetch("/api/messages/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: viewerPhone, senderPhone: conversation.partnerPhone }),
+      body: JSON.stringify({ senderPhone: conversation.partnerPhone }),
     }).catch(() => {});
 
     const interval = setInterval(loadMessages, MESSAGES_POLL_MS);
@@ -171,11 +178,11 @@ export default function ChatWindow({
     ]);
 
     try {
-      const res = await fetch("/api/messages", {
+      // No senderPhone: sender_id comes from the verified session.
+      const res = await authFetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderPhone: viewerPhone,
           receiverPhone: conversation.partnerPhone,
           orderId: conversation.orderId || null,
           content: trimmed,
@@ -237,11 +244,10 @@ export default function ChatWindow({
       // once that's wired up, matching content-type in media_url instead of
       // a real object URL.
       const dataUrl = await readFileAsDataUrl(previewPhoto.file);
-      const res = await fetch("/api/messages", {
+      const res = await authFetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderPhone: viewerPhone,
           receiverPhone: conversation.partnerPhone,
           orderId: conversation.orderId || null,
           content: caption || "Photo",

@@ -10,6 +10,7 @@ import type { UserType } from "../../context/UserContext";
 import screenConfig from "../../config/screens";
 import { mapOrderRowToPendingOrder } from "../../lib/mapOrder";
 import type { OrderRow, PendingOrder } from "../../lib/mapOrder";
+import { authFetch } from "../../lib/apiClient";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -667,7 +668,7 @@ export default function Orders() {
       return;
     }
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/orders?phone=${encodeURIComponent(auth.phone)}&role=${user.userType}`
       );
       const { orders } = (await res.json()) as { orders: OrderRow[] };
@@ -689,7 +690,7 @@ export default function Orders() {
     .map(mapOrderRowToPendingOrder);
 
   const handleAccept = async (id: string) => {
-    await fetch(`/api/orders/${id}`, {
+    await authFetch(`/api/orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "confirmed" }),
@@ -699,7 +700,7 @@ export default function Orders() {
   };
 
   const handleDecline = async (id: string) => {
-    await fetch(`/api/orders/${id}`, {
+    await authFetch(`/api/orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "declined" }),

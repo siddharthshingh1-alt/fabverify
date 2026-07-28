@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useTypeGuard } from "@/app/hooks/useTypeGuard";
@@ -76,27 +75,7 @@ const BOTTOM_NAV = [
 export default function BrandDashboard() {
   const authorized = useTypeGuard("buyer");
   const pathname = usePathname();
-  const { user, setUser, greeting } = useUser();
-
-  // Brand Builder is never enterprise. A user who started (and abandoned) the
-  // Enterprise onboarding flow can land here with a leftover `position` /
-  // `enterprisePosition` on their profile, which made the shared
-  // DashboardPage and LeftPanel render MD/CEO content on this route instead
-  // of the Brand Builder workspace. Clear it so this page always renders the
-  // Brand Builder experience, and the shared LeftPanel falls back to the
-  // default Brand nav.
-  useEffect(() => {
-    if (!authorized) return;
-    try {
-      localStorage.removeItem("fabverify_position");
-      localStorage.removeItem("fabverify_enterprise_position");
-      localStorage.removeItem("fabverify_enterprise");
-    } catch {}
-    if (user.position || user.enterprisePosition) {
-      setUser({ position: undefined, enterprisePosition: undefined });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authorized]);
+  const { user, greeting } = useUser();
 
   if (!authorized) return null;
 
