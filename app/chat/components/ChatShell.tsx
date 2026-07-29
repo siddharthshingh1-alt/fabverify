@@ -14,8 +14,9 @@ const TABS: { id: ChatTab; icon: string; label: string }[] = [
 
 function TopBar() {
   const router = useRouter();
-  const { user, userLabel, mounted } = useUser();
+  const { user, userLabel, mounted, signOut } = useUser();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const dashboardHref = user.userType === "buyer" && user.position
@@ -33,9 +34,16 @@ function TopBar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen]);
 
-  const handleSignOut = () => {
-    localStorage.clear();
-    router.push("/");
+  // Delegates to the ONE shared sign-out (UserContext) so FabChat and the
+  // desktop shell cannot drift apart. This previously did
+  // `localStorage.clear(); router.push("/")` and never ended the Supabase
+  // session — see the signOut() comment in UserContext for why that left a
+  // "signed-out" user still authorised by the API.
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    await signOut();
+    router.push("/login");
   };
 
   return (
@@ -74,9 +82,10 @@ function TopBar() {
             <button
               type="button"
               onClick={handleSignOut}
-              className="block w-full px-3.5 py-2 text-left text-[13px] text-red-400"
+              disabled={signingOut}
+              className="block w-full px-3.5 py-2 text-left text-[13px] text-red-400 disabled:opacity-60"
             >
-              Sign Out
+              {signingOut ? "Signing out..." : "Sign Out"}
             </button>
           </div>
         )}

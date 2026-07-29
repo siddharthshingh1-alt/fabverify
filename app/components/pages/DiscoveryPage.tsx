@@ -12,6 +12,7 @@ import { mapManufacturerRow } from "../../lib/mapManufacturer";
 import type { ManufacturerRow } from "../../lib/mapManufacturer";
 import { useUser } from "../../context/UserContext";
 import type { UserType } from "../../context/UserContext";
+import { useIsSignedIn } from "../../hooks/useIsSignedIn";
 import screenConfig from "../../config/screens";
 
 const BOTTOM_NAV = [
@@ -44,7 +45,20 @@ const TIER_OPTIONS: { tier: Tier; emoji: string }[] = [
   { tier: "bronze", emoji: "🥉" },
 ];
 
-const DEFAULT_TIERS: Tier[] = ["gold", "silver"];
+// Discovery shows ALL tiers by default, bronze included.
+//
+// This used to default to ["gold", "silver"], which silently broke discovery
+// for the whole marketplace: every manufacturer signs up Bronze (DECISIONS
+// M8 — bronze auto-approves) and Silver/Gold require an admin approval panel
+// that does not exist yet, so NO real manufacturer could ever clear the
+// default filter. Both live profiles ("Test Garments Co", "hi") are bronze
+// and rendered an empty list on first paint — the page looked broken rather
+// than filtered, with nothing on screen explaining why.
+//
+// Applies to logged-in and logged-out visitors alike. Users can still untick
+// tiers to narrow the list; the difference is that the default now reveals
+// the marketplace instead of hiding it.
+const DEFAULT_TIERS: Tier[] = ["gold", "silver", "bronze"];
 const ALL_TIERS: Tier[] = ["gold", "silver", "bronze"];
 
 const SELECT_CHEVRON =
@@ -420,6 +434,10 @@ export default function Manufacturers() {
 
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [manufacturersLoading, setManufacturersLoading] = useState(true);
+
+  // Signed-out visitors reach discovery through the public allowlist in
+  // AuthGuard; the mobile header shows a sign-in CTA instead of a bell.
+  const { signedIn } = useIsSignedIn();
 
   useEffect(() => {
     let cancelled = false;
@@ -1686,6 +1704,16 @@ export default function Manufacturers() {
             <span className="text-white">Fab</span>
             <span className="text-primary">Verify</span>
           </div>
+          {/* A signed-out visitor has no notifications and cannot open them —
+              swap the bell for the way in. Mirrors the desktop PublicHeader. */}
+          {!signedIn ? (
+            <Link
+              href="/login"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-navy"
+            >
+              Sign In
+            </Link>
+          ) : (
           <button
             type="button"
             aria-label="Notifications"
@@ -1693,6 +1721,7 @@ export default function Manufacturers() {
           >
             🔔
           </button>
+          )}
         </div>
 
         <div className="flex-1 px-4 py-5">

@@ -8,6 +8,7 @@ import TopBar from "../TopBar";
 import SampleRequestModal from "../SampleRequestModal";
 import EnquiryModal from "../EnquiryModal";
 import { useUser } from "../../context/UserContext";
+import { useIsSignedIn } from "../../hooks/useIsSignedIn";
 import type { Manufacturer, Tier } from "../../data/manufacturers";
 import { mapManufacturerRow } from "../../lib/mapManufacturer";
 import type { ManufacturerRow } from "../../lib/mapManufacturer";
@@ -122,6 +123,9 @@ export default function ManufacturerProfile() {
   const params = useParams();
   const router = useRouter();
   const { isBuyer } = useUser();
+  // Signed-out visitors reach this page through the public allowlist in
+  // AuthGuard; they get conversion CTAs instead of actions that dead-end.
+  const { signedIn } = useIsSignedIn();
   const id = params.id as string;
   const [manufacturer, setManufacturer] = useState<Manufacturer | null>(null);
   const [manufacturerUserId, setManufacturerUserId] = useState<string | null>(null);
@@ -283,20 +287,35 @@ export default function ManufacturerProfile() {
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => setShowSampleModal(true)}
-          className="rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
-        >
-          Request Sample
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowEnquiryModal(true)}
-          className="rounded-lg border border-primary px-6 py-3 text-sm font-semibold text-primary"
-        >
-          Send Enquiry
-        </button>
+        {/* Signed-out visitors get ONE clear conversion CTA instead of two
+            buttons that dead-end: EnquiryModal already refuses without a
+            phone and pushes to /login, so this replaces a broken action with
+            an invitation. Signed-in behaviour is untouched. */}
+        {!signedIn ? (
+          <Link
+            href="/login"
+            className="rounded-lg bg-primary px-6 py-3 text-center text-sm font-bold text-navy"
+          >
+            Sign in to enquire
+          </Link>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowSampleModal(true)}
+              className="rounded-lg bg-primary px-6 py-3 text-sm font-bold text-navy"
+            >
+              Request Sample
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEnquiryModal(true)}
+              className="rounded-lg border border-primary px-6 py-3 text-sm font-semibold text-primary"
+            >
+              Send Enquiry
+            </button>
+          </>
+        )}
         {isBuyer && (
           <button
             type="button"
@@ -544,15 +563,24 @@ export default function ManufacturerProfile() {
             Place Bulk Order →
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setShowEnquiryModal(true)}
-          className={`w-full rounded-lg py-2.5 text-xs font-bold ${
-            isBuyer ? "border border-primary text-primary font-semibold" : "bg-primary text-navy"
-          }`}
-        >
-          Send Enquiry
-        </button>
+        {!signedIn ? (
+          <Link
+            href="/login"
+            className="block w-full rounded-lg bg-primary py-2.5 text-center text-xs font-bold text-navy"
+          >
+            Sign in to enquire
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowEnquiryModal(true)}
+            className={`w-full rounded-lg py-2.5 text-xs font-bold ${
+              isBuyer ? "border border-primary text-primary font-semibold" : "bg-primary text-navy"
+            }`}
+          >
+            Send Enquiry
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowSampleModal(true)}

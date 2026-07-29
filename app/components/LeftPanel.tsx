@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import theme from '../theme'
 import content from '../content'
@@ -61,7 +61,20 @@ const POSITION_NAV: Partial<Record<Position, NavItem[]>> = {
 
 export default function LeftPanel() {
   const pathname = usePathname()
-  const { user, userLabel, greeting, isSupplySide, isTalent, mounted } = useUser()
+  const router = useRouter()
+  const { user, userLabel, greeting, isSupplySide, isTalent, mounted, signOut } = useUser()
+  const [signingOut, setSigningOut] = useState(false)
+
+  // The desktop platform had NO sign-out at all — the only one on the whole
+  // platform lived in FabChat, so switching accounts meant clearing site data
+  // by hand. Same shared helper as FabChat: one session, ending it ends both
+  // products (CORE.md §2).
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    await signOut()
+    router.push('/login')
+  }
   const leftNav = screenConfig.leftNav[user.userType]
   const basePath = getBasePath(user.userType)
   const ordersSlug = getOrdersSlug(user.userType)
@@ -408,6 +421,28 @@ export default function LeftPanel() {
             {fabscoreVerifyLabel}
           </Link>
         </div>
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          style={{
+            width: '100%',
+            marginTop: '12px',
+            padding: '8px',
+            background: 'transparent',
+            border: `1px solid ${theme.colors.border}`,
+            borderRadius: theme.radius.sm,
+            color: theme.colors.error,
+            fontSize: '12px',
+            fontWeight: 600,
+            fontFamily: theme.fonts.heading,
+            cursor: signingOut ? 'default' : 'pointer',
+            opacity: signingOut ? 0.6 : 1,
+          }}
+        >
+          {signingOut ? 'Signing out...' : 'Sign Out'}
+        </button>
       </div>
     </div>
   )

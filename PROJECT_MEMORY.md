@@ -52,6 +52,9 @@ Schema file: `supabase/schema.sql`. Note: `CREATE POLICY` has no `IF NOT EXISTS`
 
 | Feature | Status | Notes |
 |---|---|---|
+| Platform auth guard (`app/components/AuthGuard.tsx`) | ✅ | Added 2026-07-29. One shared guard applied via a `layout.tsx` per protected tree — 143 pages across 18 trees + `/onboarding` at phone level. Hybrid: fast localStorage read, then a real `getSession()` check (skipped on localhost, since the `123456` bypass creates no session — A10). Re-runs on `pathname` change + `pageshow`, which is what fixes the signed-out Back button. ⚠️ **UX guard, not the security boundary** — real authorisation is the server-side API auth. |
+| Sign-out (shared, both products) | ✅ | `signOut()` on `UserContext`: `supabase.auth.signOut()` → `applyIdentity(null)` → clear mirrors + `fabverify_auth`. Used by FabChat, `LeftPanel`, `EnterpriseLeftPanel`. Redirects to `/login`. |
+| Desktop sign-out | ✅ | Added 2026-07-29 to `LeftPanel` and `EnterpriseLeftPanel`. Previously the platform had NO logout outside FabChat. |
 | Signup (real Supabase OTP) | ✅ | prod real OTP; localhost `123456` bypass |
 | Login (real Supabase OTP) | ✅ | same; auto-redirects if already logged in |
 | Dev bypass gated to localhost | ✅ | `window.location.hostname` check, not NODE_ENV |
@@ -104,7 +107,8 @@ Verified by test: 403 on another party's order · 401 unauthenticated PATCH (tar
 
 ✅ Verified: `conversations` 200 own · **403** another account · **401** anonymous.
 ✅ Verified 2026-07-28: `messages` POST **401** anonymous; impersonation (authenticated as one account while the body claimed another's `senderPhone`) wrote `sender_id` = the **authenticated caller**, and the response embedded that caller's name/phone — the claimed identity appears nowhere. `messages/read` **401** anonymous; a cross-account attempt returned 200 but left the victim's three unread messages at `read_at: null` (receiver is derived from the session, so it can only touch the caller's own inbox). No `db.ts` changes were needed here.
-⚠️ **STILL NOT verified: the browser end-to-end** (enquiry → conversation appears for BOTH sides → both can message). Confirmed in code and by curl, never watched on screen.
+✅ **BROWSER END-TO-END VERIFIED 2026-07-28.** Real browser run, buyer `9999999991` → manufacturer `9998887771`: `POST /api/enquiries` **200** created enquiry `348040c5`; its seed message landed **212 ms** later (21:17:26.896 → 21:17:27.108), which is exactly what `conversationSeeded: true` reports. The thread appeared on BOTH sides — `GET /api/conversations` 200 for each party's own phone — and messages flowed both ways. Per-message attribution correct on all three rows: Anita → TGC, TGC → Anita, Anita → TGC, each `sender_id` matching whoever was logged in. Proven by request log + database diff against a pre-test baseline, not assumed.
+✅ **Bonus: the 503 outage path fired for real.** An unplanned transient Supabase outage hit mid-test; `conversations` and `messages` returned **503** (not 401, not raw exception text) for ~7 s and recovered on their own. Issue E proven under a genuine outage, not a simulated one.
 
 **Group 2c — BUILT AND VERIFIED by curl (enquiries & sample-briefs, verified 2026-07-28):**
 
@@ -236,10 +240,11 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 - ⚠️ `CREATE POLICY` re-run errors (no IF NOT EXISTS) — known when re-running schema.
 - ⚠️ **6 of 19 API routes still trust the phone in the request body/query** (down from 14 — Groups 1, 2a, 2b, 2c are converted and runtime-verified). Of the 6, two stay public by decision (`manufacturers`, `manufacturers/[id]`); the live exposures are `dev-auth/lookup` (enumeration + PII, next task) and `verification` (returns personal verification status for any `?phone`).
 - ⚠️ **Unguarded DB calls across several routes** — `conversations`, `dev-auth/lookup`, `manufacturers`, `manufacturers/[id]` have no `try/catch` at all; additionally `orders` GET, `messages` GET, `sample-briefs` GET are unguarded even though those files' POST handlers have one, and `messages/read` calls the DB before its try block. Database failures there are unhandled rejections rather than handled statuses. Direct **CORE T6** violation, pre-existing. Audit per-handler, not per-file. Scheduled into Group 2.
-- 🚫 **STILL DO NOT DEPLOY.** One of the two blockers is now cleared, one is not:
-  1. ✅ **Temp debug routes removed (Stage 4, 2026-07-28)** — `app/api/whoami/` and `app/temp-whoami-test/` are deleted and confirmed absent from the build's route manifest.
-  2. 🚫 **The chat-logout session bug (issue B) is NOT fixed** — this alone still blocks deploy. Related known gap: the only logout on the platform is in FabChat (`app/chat/components/ChatShell.tsx`), which does a blanket `localStorage.clear()`; there is still no desktop sign-out.
-  Also outstanding before deploy: `dev-auth/lookup` is still unconverted (unauthenticated user-enumeration + PII on any phone).
+- ✅ **DEPLOY BLOCKERS CLEARED (2026-07-29).** All three, verified in a real browser:
+  1. ✅ **Temp debug routes removed** — `app/api/whoami/` and `app/temp-whoami-test/` deleted, confirmed absent from the build's route manifest.
+  2. ✅ **Issue B fixed** — sign-out now calls `supabase.auth.signOut()`, clears the React identity and removes the mirrors + `fabverify_auth`. After sign-out, `localStorage` is empty and reads AND writes to the API return 401. Desktop sign-out added (`LeftPanel` + `EnterpriseLeftPanel`) using the same shared helper.
+  3. ✅ **Platform auth guard added** — found while testing Issue B: NO platform route required a session, so a stranger could type `/brand/dashboard` and browse the shell. 143 pages now guarded.
+  Still open but NOT deploy-blocking: `dev-auth/lookup` PII disclosure (read-only, no account access, deprioritised by decision 2026-07-29), the pre-login browsing regression, and the untested onboarding signup path — all in TASKS.md.
 - ⚠️ **`main` auto-deploys to Vercel on push.** Committing to git is not deploying, but **pushing to `main` IS** — it would ship issue B. Until issue B is fixed, the batch must land on a non-`main` branch.
 - ⚠️ RLS is decorative (DECISIONS I7) — real access control is the server-side `getVerifiedUser()` checks, now on 13 handlers across Groups 1, 2a, 2b and 2c.
 - ⚠️ **`db.ts` swallows DB outages on read paths** — ~14 `if (error) return []/null` sites. `GET /api/sample-briefs` (public) answered `200 {"briefs":[]}` during a total outage instead of 503. Misleading empty state; no leak. Logged in TASKS.md, low priority.

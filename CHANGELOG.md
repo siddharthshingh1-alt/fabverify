@@ -6,6 +6,45 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-29 · Issue B + Platform Auth Guard] — Sign-out truly ends the session; platform routes now require one
+> Closes the last two deploy blockers. Both fixes verified in a real browser against a pre-test baseline, not inferred from code.
+
+### Fixed
+- **Issue B — sign-out did not end the session.** FabChat's sign-out ran `localStorage.clear(); router.push("/")` and **never called `supabase.auth.signOut()`**. Because `router.push` is a CLIENT-side navigation the in-memory Supabase client was never rebuilt: it kept the access + refresh token, `autoRefreshToken` kept renewing them, and `authFetch` carried on attaching a valid Bearer token — a "signed-out" user stayed authorised by the API until a hard refresh. There is now ONE shared `signOut()` on `UserContext`, ordered deliberately: `supabase.auth.signOut()` FIRST while storage is intact (supabase-js needs its own token entry to find and revoke the refresh token server-side) → `applyIdentity(null)` (kills the identity in React memory, which `localStorage.clear()` never did) → mirror keys removed LAST (`applyIdentity` rewrites `fabverify_user`, so clearing first would be undone). Clears the 7 `IDENTITY_MIRROR_KEYS` **plus `fabverify_auth`** — the latter is deliberately excluded from that array (login writes it before the user lookup) but sign-out must remove it, or `apiClient` keeps authorising a signed-out user via the `x-dev-phone` header in dev.
+- **NO platform route required a session.** `useTypeGuard` compares `user.userType` against the expected type, but a signed-out `UserContext` falls back to `defaultUser` — whose `userType` is `'buyer'` — so **every buyer route authorised a signed-out visitor**. Anyone could type `/brand/dashboard` and browse the shell; a signed-out user pressing Back landed straight back on it and could keep navigating. New `app/components/AuthGuard.tsx`, modelled on the existing `ChatAuthGuard`, applied via one `layout.tsx` per protected tree so every current and future page inherits it.
+
+### Added
+- **Desktop sign-out.** The platform previously had no logout at all outside FabChat. Added to `LeftPanel` and `EnterpriseLeftPanel` (enterprise runs a separate shell and would otherwise have been the only account type with no way out), both using the shared helper.
+- **`AuthGuard` hybrid check:** a fast synchronous localStorage read for an instant decision (no spinner flash), then a real `supabase.auth.getSession()` confirmation in the background. The background stage is **skipped on `localhost`/`127.0.0.1`** — the `123456` dev bypass (DECISIONS A10) never creates a Supabase session, so enforcing it locally would bounce every developer on every page load. A network failure during that stage deliberately does NOT sign the user out; the API is the real boundary and answers 401 on its own.
+- **Two guard modes**, mirroring the server-side split: `"profile"` for platform routes, `"phone"` for `/onboarding/*` — a first-time user has proven their phone but has no profile yet, since onboarding is what creates it. Same reasoning as `getVerifiedCallerPhone` vs `getVerifiedUser`.
+- Back/forward handling: the check keys on `pathname` so it re-runs on client-side navigation (this is what fixes the Back symptom), plus a `pageshow`/`persisted` listener for genuine bfcache restores.
+
+### Verified (real browser, 2026-07-29)
+- **Sign-out:** `localStorage` **completely empty** afterwards; READ `/api/orders` **401**, READ `/api/conversations` **401**, WRITE `POST /api/messages` **401**, and the database unchanged — the write probe persisted nothing.
+- **Stranger test** (clean storage): `/brand/dashboard`, `/manufacturer/orders`, `/enterprise/dashboard`, `/talent/designer/dashboard` → all bounce to `/login`.
+- **Back button:** signed out, then Back three times through real history (`/login` → `/chat/brand` → `/brand/orders`) — every attempt landed on `/login`, `showsOrdersUI: false`. The dashboard never returns, no hard refresh needed.
+- **Logged in:** `/brand/dashboard`, `/brand/orders`, `/brand/samples`, `/brand/manufacturers`, `/brand/profile`, `/dashboard`, `/chat/brand` all load normally. No false bounces, no redirect loop, no double-guard with `ChatAuthGuard`.
+- **Dev bypass** (`123456` on localhost) unaffected.
+- Coverage audit: **143 pages guarded** + 12 on `ChatAuthGuard`; only `login`, `signup`, `manufacturers` and `/` are public.
+
+### Added — public marketplace browsing (same session, after the guard landed)
+- **Narrow public allowlist in `AuthGuard`.** The guard initially blocked pre-login browsing, because `/manufacturers` and `/manufacturers/[id]` are redirect shims into `/brand/manufacturers` — which the guard now covered. `PUBLIC_EXACT` + `PUBLIC_PREFIXES` reopen exactly four paths and nothing else. **Only the BUYER discovery path is public**: every other user type's discovery slug is `buyers`/`clients` (routing.ts `DISCOVERY_SLUG`), which browse private buyer data. Verified with a 19-path matcher test before building — `/manufacturer/dashboard`, `/manufacturer/buyers`, `/mill/buyers`, `/talent/designer/clients` and the loose-prefix traps `/brand/manufacturers-admin` and `/brand/manufacturersX` all stay guarded. Trailing slashes on the prefixes are what stop the last two matching.
+- **Clean public view — no logged-in chrome for strangers.** `ThreePanelLayout` renders a public shell (slim `PublicHeader` + centre only, no side panels) when there is no session. Previously a signed-out visitor on discovery saw the inside of a workspace: "Good morning, 👋" with an empty name, a FabScore card, navigation to pages they'd be bounced from, and a **Sign Out button for a session they never had**. Chrome is decided in the one component that already owns chrome, rather than asking each page to branch — a page that forgot would leak the workspace frame, the same fail-open shape as the original unguarded routes.
+- `app/components/PublicHeader.tsx` (FabVerify wordmark + Sign In / Sign Up) and `app/hooks/useIsSignedIn.ts` (reads `fabverify_profile`, the same signal both guards use, via a lazy initialiser so the public shell paints correctly on first render and never flashes the left panel).
+- **Conversion affordances:** manufacturer profiles show **"Sign in to enquire"** → `/login` for signed-out visitors, desktop and mobile, replacing CTAs that dead-ended (`EnquiryModal` already refused without a phone). Discovery's mobile header shows **Sign In** instead of a 🔔 that a stranger cannot use.
+
+### Fixed — discovery hid the entire marketplace
+- **`DEFAULT_TIERS` now includes bronze** (`["gold","silver","bronze"]`), applied **globally — logged-in and logged-out alike**. Discovery defaulted to Silver+Gold, but every manufacturer signs up Bronze (DECISIONS M8) and Silver/Gold need an admin approval panel that does not exist, so **no real manufacturer could ever clear the default filter**. Both live profiles are bronze, so discovery rendered an empty list on first paint — the page looked broken rather than filtered, with nothing on screen explaining why. Both consumers inherit the change: the `selectedTiers` initial state and `handleClearAll`, which would otherwise have re-hidden everything on "Clear all". Users can still untick tiers to narrow.
+
+### Notes
+- ⚠️ **Signed-out visitors have search, category and city filters but NOT the tier/MOQ controls** — those live in `manufacturersRightPanel`, which the public shell drops. With all tiers shown by default this is a missing refinement rather than a broken page; giving the public view its own filter bar is folded into the Public Marketplace task.
+- ⚠️ **`AuthGuard` is a UX/perception guard, not the security boundary.** Real authorisation is the server-side API auth from Groups 1/2 — which is exactly why the shell a signed-out visitor could previously reach was always *empty*. This change fixes what the app LOOKS like, which on a trust/money platform matters on its own.
+- ⚠️ **`middleware.ts` is not viable today.** The project has no `@supabase/ssr` and `supabase.ts` uses `persistSession: true` with default **localStorage** storage; the dev credential is localStorage too. Server middleware sees only cookies/headers, so it would be blind. Real server-side route protection requires migrating the session to cookies — a project of its own, logged not built.
+- ⚠️ **REGRESSION, shipped knowingly:** `/manufacturers` and `/manufacturers/[id]` are redirect shims into `/brand/manufacturers`, which is now guarded — so pre-login marketplace browsing is blocked, contradicting the "browsing pre-login is core to the marketplace" intent. API routes remain public; this is UI-layer only. Decision pending in `TASKS.md`.
+- ⚠️ **UNTESTED:** first-time signup through `/onboarding/*` under `mode="phone"`. Verified by reading, never run with an unregistered phone. If wrong, new signups bounce to login forever.
+
+---
+
 ## [2026-07-28 · Batch 2 · Stage 4] — Group 2 route auth complete and runtime-verified; temp debug routes removed
 > Closes the Group 2 conversion (orders, messages/conversations, enquiries, sample-briefs — 13 handlers). Every converted handler derives caller identity from the verified session, enforces ownership, and answers through `dbErrorResponse`. **Verified by curl against a running dev server, with before/after database reads proving that a rejected request wrote nothing. The enquiry→conversation BROWSER end-to-end test has NOT been run yet** — see Not Verified.
 
@@ -18,8 +57,15 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 - **Asymmetric PATCH on `sample-briefs/[id]`** (previously *no auth at all*): anonymous → **401**; non-owner setting `closed` → **403**; non-owner setting `cancelled` → **403**; non-owner setting `responses_received` → **200**; owner setting any status → **200**. Each reject was re-run in isolation with a database read before and after — the brief's status was unchanged every time, so "rejected" means "wrote nothing", not merely "returned an error code".
 - **DB-outage 503.** Against an unresolvable Supabase host: `POST /api/enquiries`, `POST /api/messages`, `PATCH /api/sample-briefs/[id]` and `GET /api/sample-briefs?role=buyer` all returned **503** with no raw exception text.
 
+### Verified — browser end-to-end (added 2026-07-28, after the commit above)
+> The commit `9c09db8` message says "browser E2E not yet run". That was accurate when written. The test has since been run; this section records the result rather than rewriting pushed history.
+
+- **Group 2b enquiry → conversation, proven in a real browser.** Buyer `9999999991` (Anita) → manufacturer `9998887771` (Test Garments Co), against a pre-test log + database baseline. `POST /api/enquiries` **200** created enquiry `348040c5`; the seeded opening message landed **212 ms** later (21:17:26.896 → 21:17:27.108) carrying the enquiry subject — which is precisely what `conversationSeeded: true` reports. The thread appeared for BOTH parties (`GET /api/conversations` 200 for each party's own phone) and messages flowed both directions.
+- **Per-message attribution correct on every row:** Anita → TGC ("…hey i am looking…"), TGC → Anita ("hi i would happy to do it"), Anita → TGC ("ok"). Each `sender_id` matches whoever was actually logged in — no impersonation, no misattribution.
+- **The 503 outage path fired under a real outage.** An unplanned transient Supabase outage occurred mid-test: `conversations` and `messages` returned **503** for ~7 s — not 401, not raw exception text — then recovered unaided. Stronger evidence than the simulated unresolvable-host test.
+- One **401** appeared on `GET /api/messages` at the moment site data was cleared to switch accounts: `authFetch` found no phone in localStorage and sent an anonymous request, which the route correctly rejected. Expected behaviour, not a defect.
+
 ### Not Verified
-- **The browser end-to-end (enquiry → conversation appears for both parties → both can message) has NOT been run.** Confirmed in code and by curl, never watched on screen. Repeated dev-server request-log and database diffs showed no `POST /api/enquiries`, no `POST /api/messages`, and zero new rows. Still outstanding.
 - Production token path untested: all runtime checks ran under `next dev`, where `getVerifiedUser` accepts the `x-dev-phone` header. This proves the authorisation logic, not the production Supabase-session branch, which is gated by `isProduction`.
 
 ### Notes

@@ -9,13 +9,16 @@
 
 ## ⚠️ READ THIS FIRST WHEN RESUMING
 
-**Stage 4 is done except the commit.** The temp debug routes are deleted and the docs match reality. Everything is still in the working tree — do not `git checkout`, `git stash` or `git reset` anything without reading `git status` first.
+**All three deploy blockers are cleared** (2026-07-29), each verified in a real browser:
+1. ✅ Temp debug routes removed — absent from the build's route manifest.
+2. ✅ **Issue B fixed** — sign-out genuinely ends the session; after it, `localStorage` is empty and API reads AND writes return 401. Desktop sign-out added.
+3. ✅ **Platform auth guard added** — found while testing Issue B: no platform route required a session, so a stranger could type `/brand/dashboard` and browse the shell. 143 pages now guarded.
 
-**🚫 DO NOT DEPLOY.** One blocker cleared, one still open:
-1. ✅ Temp debug routes removed — `app/api/whoami/` and `app/temp-whoami-test/` deleted, confirmed absent from the build's route manifest.
-2. 🚫 The chat-logout session bug (**issue B**) is NOT fixed. This alone blocks deploy.
+**`main` auto-deploys to Vercel on push.** Work lives on branch **`auth-hardening-batch`**. Committing is safe; **pushing `main` IS a deploy** — merge deliberately, not by habit.
 
-**`main` auto-deploys to Vercel on push.** Committing is safe; **pushing to `main` is a deploy** and would ship issue B. Land this on a non-`main` branch until issue B is fixed.
+**Before merging, decide two open items** (both in TASKS.md, neither blocking a commit):
+- **Pre-login browsing regression** — `/manufacturers*` are redirect shims into the now-guarded `/brand/*`, so prospective buyers can't browse before signing up. Contradicts the locked "browsing pre-login is core to the marketplace" intent. API routes unaffected.
+- **Onboarding signup path untested** — `/onboarding/*` uses `mode="phone"`; verified by reading, never run with an unregistered phone. If wrong, every new signup bounces to login.
 
 ## DONE THIS BATCH
 
@@ -33,12 +36,13 @@
 
 **Stage 4 cleanup.** ✅ `app/api/whoami/` and `app/temp-whoami-test/` deleted; no code references remain; docs updated.
 
-## REMAINING TO FINISH THE BATCH
+## REMAINING
 
-1. **Commit** the batch (Stage 4 is otherwise complete). Not yet done — awaiting review of `git status`.
-2. **The 2b browser end-to-end — STILL NOT RUN.** Enquiry → conversation appears for BOTH sides → both can message. Confirmed in code and by curl, never watched on screen. Repeated log/DB diffs showed no `POST /api/enquiries` and no new rows. Test accounts ready: buyer `9999999991` (Anita sharma) → manufacturer `9998887771` (Test Garments Co), OTP `123456`, zero message history between them. **To find the manufacturer in discovery you must tick the 🥉 bronze tier filter** — see the discovery bug in TASKS.md. The Send Enquiry button is on the manufacturer DETAIL page, not the discovery card.
-3. **`dev-auth/lookup` lockdown** — deferred on purpose. It returns a full `users` row for ANY phone with no auth (enumeration + PII). It sits in the login/signup path, so a mistake locks people out. Its own careful task. All three callers already request only their own phone, so the fix should be behaviour-neutral — verify that before changing anything.
-4. **Issue B — the chat-logout session bug.** The remaining deploy blocker.
+1. ✅ **2b browser end-to-end — RUN AND PASSED (2026-07-28).** Enquiry `348040c5` posted, seed message 212 ms later, thread visible to both parties, three messages with correct per-message `sender_id`. Proven by log + DB diff against a pre-test baseline.
+2. **Decide the pre-login browsing regression** (see above) before merging to `main`.
+3. **Test first-time signup** through the guarded onboarding path with an unregistered phone.
+4. **`dev-auth/lookup`** — deprioritised by decision 2026-07-29. Read-only, grants no account access, OTP gates real login; it is a PII disclosure (full row incl. email), not an access hole. Fix with rate-limiting + minimal response when convenient. **Use `getVerifiedCallerPhone`, not `getVerifiedUser`** — the route must still answer for first-time signups with no `users` row.
+5. **Account Security & Recovery** (Phase A group) — session visibility, remote logout, re-auth for sensitive actions, recovery, password 2FA. Blocked on a durable `users.auth_user_id` link (DECISIONS I6).
 
 ## KNOWN NON-BLOCKERS (recorded, deliberately not fixed)
 - Order status transitions are party-checked but have no state machine — a buyer can advance a milestone, a manufacturer can cancel.

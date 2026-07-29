@@ -1,6 +1,11 @@
 'use client'
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { resolveAccount, type AccountType } from '../lib/accountType'
+// Client-side AUTH session only (sign-out), never database access — the
+// CORE T1 / DECISIONS A1 rule routes DB calls through db.ts. Same precedent
+// as login/page.tsx and signup/page.tsx, which import this client directly
+// for verifyOtp()/signOut().
+import { supabase } from '../lib/supabase'
 
 export type UserType =
   | 'buyer'
@@ -85,6 +90,13 @@ interface UserContextType {
    * shared browser.
    */
   applyIdentity: (dbUser: DbUserRow | null) => void
+  /**
+   * Ends the session for BOTH products (CORE.md §2, "two products, one
+   * login"). Revokes the Supabase session server-side, clears the React
+   * identity, and removes the localStorage mirrors + `fabverify_auth`.
+   * Await it, then navigate — the caller chooses the destination.
+   */
+  signOut: () => Promise<void>
   isSupplySide: boolean
   isBuyer: boolean
   isTalent: boolean
@@ -195,6 +207,7 @@ const UserContext = createContext<UserContextType>({
   user: defaultUser,
   setUser: () => {},
   applyIdentity: () => {},
+  signOut: async () => {},
   isSupplySide: false,
   isBuyer: true,
   isTalent: false,
@@ -307,6 +320,56 @@ export function UserProvider({ children }: {
     } catch {}
   }
 
+  /**
+   * THE single sign-out for the whole platform — FabChat and desktop alike
+   * (CORE.md §2, "two products, one login": one session, so ending it ends
+   * both). Callers navigate afterwards; where to go is a UI decision.
+   *
+   * FabChat's old sign-out did `localStorage.clear(); router.push('/')` and
+   * never called supabase.auth.signOut(). Because router.push is a CLIENT-side
+   * navigation the in-memory Supabase client was never rebuilt, so it kept the
+   * access + refresh token, autoRefreshToken kept renewing them, and
+   * authFetch() carried on attaching a valid Bearer token — a "signed-out"
+   * user stayed authorised by the API until a hard refresh.
+   *
+   * ORDER IS LOad-BEARING:
+   *   1. signOut() FIRST, while storage is intact — supabase-js needs its own
+   *      sb-<ref>-auth-token entry to find the refresh token and revoke it
+   *      server-side. Clearing storage first orphans a live refresh token,
+   *      which no amount of local clearing can revoke.
+   *   2. applyIdentity(null) — kills the identity in REACT memory, not just on
+   *      disk. UserProvider mounts once in the root layout and never
+   *      re-hydrates on a client navigation, so skipping this leaves the
+   *      previous user live in context.
+   *   3. Remove the mirrors LAST, because applyIdentity() rewrites
+   *      `fabverify_user` (and friends) as part of loading the blank identity.
+   *      Clearing before it would simply be undone.
+   */
+  const signOut = async () => {
+    // Best-effort: a network failure must not strand the user in a
+    // half-signed-out state. Local teardown below still runs.
+    try {
+      await supabase.auth.signOut()
+    } catch {}
+
+    applyIdentity(null)
+
+    if (typeof window === 'undefined') return
+    try {
+      for (const key of IDENTITY_MIRROR_KEYS) localStorage.removeItem(key)
+
+      // NOT part of IDENTITY_MIRROR_KEYS, and deliberately so — see the
+      // comment on that array: login writes `fabverify_auth` BEFORE the user
+      // lookup runs, so applyIdentity() must never clear it or dev-mode login
+      // breaks. Sign-out is the opposite case and MUST remove it: it holds
+      // {userId, phone, verified} and apiClient.ts reads it to build the
+      // x-dev-phone header. Leaving it behind reproduces the exact bug this
+      // fixes — the API would keep authorising a signed-out user in dev, via
+      // the dev header instead of the Bearer token.
+      localStorage.removeItem('fabverify_auth')
+    } catch {}
+  }
+
   const isSupplySide = SUPPLY_SIDE_TYPES.includes(user.userType)
   const isBuyer = user.userType === 'buyer'
   const isTalent = TALENT_TYPES.includes(user.userType)
@@ -316,6 +379,7 @@ export function UserProvider({ children }: {
       user,
       setUser,
       applyIdentity,
+      signOut,
       isSupplySide,
       isBuyer,
       isTalent,

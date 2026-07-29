@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { EnterprisePosition } from "../context/UserContext";
+import { useUser, type EnterprisePosition } from "../context/UserContext";
 
 type NavItem = { icon: string; label: string; href: string };
 
@@ -69,6 +69,9 @@ const TOOLS_ITEMS = [
 
 export default function EnterpriseLeftPanel() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { signOut } = useUser();
+  const [signingOut, setSigningOut] = useState(false);
   const [companyName, setCompanyName] = useState("Your Company");
   const [position, setPosition] = useState<EnterprisePosition | null>(null);
   const [greeting, setGreeting] = useState("Good morning");
@@ -179,6 +182,23 @@ export default function EnterpriseLeftPanel() {
             Upgrade plan →
           </button>
         </div>
+
+        {/* Enterprise runs its own shell, so it needs the sign-out too —
+            otherwise enterprise accounts remain the one user type with no
+            way to log out. Same shared helper as LeftPanel and FabChat. */}
+        <button
+          type="button"
+          onClick={async () => {
+            if (signingOut) return;
+            setSigningOut(true);
+            await signOut();
+            router.push("/login");
+          }}
+          disabled={signingOut}
+          className="mt-3 w-full rounded-lg border border-border-dark py-2 text-xs font-semibold text-red-400 disabled:opacity-60"
+        >
+          {signingOut ? "Signing out..." : "Sign Out"}
+        </button>
       </div>
     </div>
 
