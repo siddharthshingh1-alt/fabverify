@@ -6,6 +6,114 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
+## 🚀 LAUNCH-READY MILESTONE — ORDER LOCKED 2026-07-29 (migration-aware)
+> Build in this order. It is sequenced by MIGRATION DEPENDENCY, not by product appeal: items 1–3 are the foundation the AWS RDS cutover stands on, and password login, RLS and remote logout all depend on item 1. Full strategy and per-item build rules: **`docs/ARCHITECTURE/MIGRATION.md`**. Locked decisions: **A12** (parallel-run migration), **I8** (RLS retired), **I9** (auth_identities), **X5** (seam before first call site).
+>
+> **Standing rule for every item below: build the abstraction seam BEFORE the first implementation, never after.** Auth is the cautionary tale — five files are coupled to Supabase because no seam existed when OTP was first wired in.
+
+### 1. Durable auth link + auth seam 🔴 FOUNDATION — everything depends on this
+> **MULTI-SESSION BUILD.** Broken into 10 chunks, each buildable + testable + committable in ONE short session, each leaving the app fully working if you stop after it. **Do them in order.** Chunks 1–4 are additive and carry near-zero risk; chunks 5–9 touch the login path, where a mistake locks users out — that is why they are sliced this thin.
+>
+> **Target: Supabase referenced in ONE file.** Today it is five (`login`, `signup`, `UserContext`, `AuthGuard`, `db.ts`).
+
+#### 📍 STATUS — UPDATE THIS LINE EVERY SESSION
+**NEXT CHUNK: 1.1** · Last completed: none · Started 2026-07-29
+
+---
+
+- [ ] **CHUNK 1.1 — Housekeeping: T1 violation + inaccurate migration note.** *Small, ~2 files, zero auth risk.*
+  - Move `app/api/test-db/route.ts` off its direct `supabase.from("users")` call onto a `db.ts` health check (the only 1 of 18 API routes bypassing `db.ts`).
+  - Correct `db.ts`'s header claim that "All queries use standard PostgreSQL. No Supabase-specific features used" — actually 16 PostgREST joins, 8 `.maybeSingle()`, 3 `.upsert(onConflict)`.
+  - **Depends on:** nothing. **Blocks:** nothing — pure cleanup, deliberately first so an early session banks a safe win.
+  - **Verify:** `GET /api/test-db` still returns success; `grep` shows `db.ts`/`supabase.ts`/`supabaseAdmin.ts` as the only DB importers; `npm run build` clean.
+
+- [ ] **CHUNK 1.2 — Create the `auth_identities` table (schema only).** *Small, 1 migration file.*
+  - `user_id → users.id`, `provider`, `provider_uid`, `created_at`, `UNIQUE (provider, provider_uid)`. Standard PostgreSQL, plain FK, no Supabase types (DECISIONS I9).
+  - Nothing reads or writes it yet — the table simply exists.
+  - **Depends on:** nothing. **Blocks:** 1.3, 1.8, 1.9.
+  - **Verify:** table + constraints exist in Supabase; app behaves identically; `npm run build` clean. Zero runtime risk — no code path touches it.
+
+- [ ] **CHUNK 1.3 — Backfill `auth_identities` for existing users.** *Small, one throwaway script, no app code.*
+  - Enumerate Supabase auth users via the admin API, match to `users` rows on phone, insert one `('supabase', <auth uid>)` identity each.
+  - ⚠️ **Do this EARLY.** It relies on the same fragile phone-matching this whole effort replaces, and it gets harder every month the user count grows.
+  - ⚠️ Accounts created only via the dev `123456` bypass have **no** Supabase auth user and cannot be backfilled — they stay phone-resolved until they next authenticate for real. Expected, not a failure.
+  - **Depends on:** 1.2. **Blocks:** 1.9.
+  - **Verify:** row count vs. Supabase auth user count; spot-check 2–3 known accounts map to the right `users.id`; the UNIQUE constraint rejects a re-run (idempotent). App untouched.
+
+- [ ] **CHUNK 1.4 — Create `app/lib/authProvider.ts` (unused).** *Medium, 1 new file.*
+  - The seam: `sendOtp`, `verifyOtp`, `getIdentityFromToken`, `signOut` — plus the dev `123456` bypass (DECISIONS A10, hostname-gated, NOT `NODE_ENV`). Supabase implementation inside; nothing imports it yet.
+  - **Depends on:** nothing. **Blocks:** 1.5, 1.6, 1.7, 1.10.
+  - **Verify:** `npm run build` + `tsc` clean; app unchanged because no call site exists. Committing an unused seam is deliberate — it makes every later chunk a pure swap instead of a swap-plus-design.
+
+- [ ] **CHUNK 1.5 — Move `getPhoneFromAccessToken` out of `db.ts` into the seam.** *Small, 2–3 files.*
+  - It is auth, not data; that mixing is why the seam leaks today. `app/lib/auth.ts` imports it from `authProvider` instead.
+  - **Depends on:** 1.4. **Blocks:** 1.10.
+  - **Verify:** dev login works (this path is prod-only, so dev is unaffected); ideally confirm the prod branch with `npm run build && npm start` and a real OTP; `db.ts` no longer references `supabaseAdmin.auth`.
+
+- [ ] **CHUNK 1.6 — Route LOGIN's OTP through the seam.** *Small, 1 file. ⚠️ First login-path change.*
+  - Replace `signInWithOtp` / `verifyOtp` in `login/page.tsx` with seam calls; the dev bypass now lives in the seam (built in 1.4).
+  - **Depends on:** 1.4. **Blocks:** nothing.
+  - **Verify:** dev login `9999999991` / `123456` → correct dashboard; wrong code still rejected; existing-user-without-user_type still routes to `/onboarding/type`; ideally one real prod OTP.
+
+- [ ] **CHUNK 1.7 — Route SIGNUP's OTP through the seam.** *Small, 1 file. ⚠️ Separate from login on purpose.*
+  - Same swap in `signup/page.tsx`. Kept apart because signup has its own regression surface — and this is the chance to finally test the untested `AuthGuard mode="phone"` onboarding path.
+  - **Depends on:** 1.4. **Blocks:** nothing.
+  - **Verify:** signup with an **unregistered** phone → reaches `/onboarding/profile` and completes onboarding without being bounced; signup with an existing phone still routes to the right place.
+
+- [ ] **CHUNK 1.8 — Write `auth_identities` on authentication.** *Small, 1–2 files.*
+  - On successful login/signup, upsert the `('supabase', <auth uid>)` identity so new users get one automatically and the table stops being backfill-only.
+  - **Depends on:** 1.2, 1.6, 1.7. **Blocks:** 1.9.
+  - **Verify:** log in as an existing user → identity row present (not duplicated); sign up a new user → row created; re-login creates no second row.
+
+- [ ] **CHUNK 1.9 — Resolve identity VIA `auth_identities`, with phone fallback.** *Medium, 2–3 files. ⚠️ HIGHEST RISK CHUNK.*
+  - `getVerifiedUser()` resolves the `users` row by auth identity where one exists, falling back to phone where it does not. **This is the actual decoupling of identity from phone number** and what mitigates DECISIONS I6.
+  - **Depends on:** 1.3, 1.8. **Blocks:** password login (item 2) and the whole A12 dual-verify phase.
+  - **Verify:** the most thorough of the ten — log in as at least 3 different accounts (buyer, manufacturer, enterprise) and confirm each resolves to the correct identity; confirm a user with **no** identity row still resolves by phone; re-run the Group 2 curl matrix (401/403/attribution) to prove authorisation is unchanged. Do not commit on a partial pass.
+
+- [ ] **CHUNK 1.10 — Route `AuthGuard` + `UserContext` through the seam.** *Small, 2 files.*
+  - `getSession()` and `signOut()` behind `authProvider`. After this, **Supabase is imported in one file** and item 1 is done.
+  - **Depends on:** 1.4, 1.5. **Blocks:** nothing.
+  - **Verify:** re-run the full Issue B + auth-guard matrix — sign out from FabChat AND desktop (storage empty, API 401, no hard refresh), signed-out back button bounces, stranger URLs bounce, logged-in navigation normal, dev bypass works, public marketplace still reachable.
+
+**Rules for every chunk:** stop the dev server before `npm run build`; build must pass clean; verify BEFORE committing; commit to a branch, never push `main` (it auto-deploys); update the 📍 STATUS line above as the last act of the session.
+
+### 2. Password login (M10) 🔴 — the migration safety net
+- [ ] Password hashes in **our own `users` table** (argon2id), verification behind the seam; login offers OTP **or** password.
+- [ ] ⚠️ **NEVER store passwords in Supabase Auth.** The single most expensive mistake available here — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong.
+
+### 3. RLS decision 🟡 — see DECISIONS I8
+- [ ] **Formally retire RLS as a security mechanism** (decided). Server-side `getVerifiedUser()` + ownership checks are the boundary — proven end-to-end across Groups 1/2a/2b/2c.
+- [ ] Do NOT write new `auth.uid()` policies; `auth.uid()` has no RDS equivalent, so that work would be deleted by the migration. If compliance later demands defence-in-depth, rewrite against `current_setting('app.user_id')` set per-transaction — standard PostgreSQL, portable.
+- [ ] Optional cleanup: drop the 10 inert policies from `supabase/schema.sql`, or leave them and delete at migration.
+
+### 4. Photos → Supabase Storage 🟢 (independent — can run in parallel with 1–3)
+- [ ] **`app/lib/storage.ts` seam FIRST:** `upload(file, path) → {url, key}`, `getUrl(key)`, `delete(key)`, `getSignedUrl(key, ttl)`.
+- [ ] ⚠️ **Store the object KEY in the database, never a full Supabase URL.** Resolve to URLs at read time. A stored `https://<ref>.supabase.co/...` turns S3 day into a data migration instead of a one-file change.
+- [ ] No transform/CDN params in stored values; signed URLs only through the layer.
+- [ ] Migrate `messages.media_url` off base64 (retires DECISIONS X3).
+
+### 5. Admin verification panel 🟡
+- [ ] Admin rights as a column/role in **our** `users` table, checked server-side with the existing `getVerifiedUser()` pattern.
+- [ ] ⚠️ **Never** Supabase dashboard roles, custom JWT claims, or RLS admin policies — the most provider-locked features on offer, with no RDS equivalent.
+- [ ] Unblocks Silver/Gold, which currently sit pending forever and gate money under M7.
+
+### 6. Order completion + delivery address 🟢
+- [ ] Plain `ALTER TABLE ADD COLUMN`, no Supabase-specific types.
+- [ ] Fix the order-number collision with a **Postgres sequence**, not a Supabase feature.
+
+### 7. Escrow (simulated) 🟡 LAST — largest surface, most dependencies
+- [ ] **`app/lib/payments.ts` seam from day one**; own `escrow_*` tables; release logic in **application code**.
+- [ ] ⚠️ **No Edge Functions, no `pg_cron`, no database triggers** for release logic — none of it migrates. Money must never depend on the DB vendor (CORE M1).
+- [ ] Depends on items 6 and 5.
+
+### 8. Error-handling polish 🟢 continuous
+- [ ] Finish `dbErrorResponse` adoption across the remaining routes.
+- [ ] Fix the ~14 `if (error) return []/null` swallow sites in `db.ts` (see the DB LAYER entry in Phase A).
+
+### Then: deploy + production smoke-test.
+
+---
+
 ## PHASE A — Make what exists trustworthy
 - [ ] Real SMS: upgrade Twilio to paid OR build 2Factor.in custom API route (India, cheaper). Decide + implement.
 - [ ] Supabase Storage: replace base64 photo storage in `messages.media_url` and everywhere photos are stored. Migrate the pattern in `db.ts` + upload flow.
