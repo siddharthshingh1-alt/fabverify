@@ -14,16 +14,16 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 ### 1. Durable auth link + auth seam 🔴 FOUNDATION — everything depends on this
 > **MULTI-SESSION BUILD.** Broken into 10 chunks, each buildable + testable + committable in ONE short session, each leaving the app fully working if you stop after it. **Do them in order.** Chunks 1–4 are additive and carry near-zero risk; chunks 5–9 touch the login path, where a mistake locks users out — that is why they are sliced this thin.
 >
-> **Target: Supabase referenced in ONE file.** Today it is five (`login`, `signup`, `UserContext`, `AuthGuard`, `db.ts`).
+> **Target: Supabase referenced in ONE file.** Today it is **six** (`login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts`) — plus the two client factories `supabase.ts` / `supabaseAdmin.ts`, which the seam absorbs. (Re-audited 2026-07-30: `app/lib/apiClient.ts:16` imports the client and calls `supabase.auth.getSession()` at line 75 to attach the bearer token. It was missing from the original count and from MIGRATION.md §1.1, which under-scoped chunk 1.10 — see that chunk.)
 
 #### 📍 STATUS — UPDATE THIS LINE EVERY SESSION
-**NEXT CHUNK: 1.1** · Last completed: none · Started 2026-07-29
+**NEXT CHUNK: 1.2** · Last completed: **1.1** (2026-07-30) · Started 2026-07-29
 
 ---
 
-- [ ] **CHUNK 1.1 — Housekeeping: T1 violation + inaccurate migration note.** *Small, ~2 files, zero auth risk.*
+- [x] **CHUNK 1.1 — DONE 2026-07-30. Housekeeping: T1 violation + inaccurate migration note.** *2 code files + 2 doc files, zero auth risk.* `test-db` now calls `db.ts checkDatabaseConnection()` (service-role, throws so the route can answer 503-vs-500 via `dbErrorResponse`) — **18 of 18 API routes go through `db.ts`** and zero `.from(` calls exist outside it. `db.ts`'s false "No Supabase-specific features used" header replaced with the audited counts. Verified: build clean · `GET /api/test-db` **200** · unresolvable host → **503** with no raw exception text and no unhandled rejection in the server log · `.env.local` restored byte-identical and re-confirmed 200 after restore. **Two doc numbers corrected in the same commit:** upsert count 3→**2**, and `apiClient.ts` added to the Supabase-importer inventory (5 files→**6**), which re-scoped chunk 1.10 from 2 files to 3.
   - Move `app/api/test-db/route.ts` off its direct `supabase.from("users")` call onto a `db.ts` health check (the only 1 of 18 API routes bypassing `db.ts`).
-  - Correct `db.ts`'s header claim that "All queries use standard PostgreSQL. No Supabase-specific features used" — actually 16 PostgREST joins, 8 `.maybeSingle()`, 3 `.upsert(onConflict)`.
+  - Correct `db.ts`'s header claim that "All queries use standard PostgreSQL. No Supabase-specific features used" — actually 16 PostgREST joins, 8 `.maybeSingle()`, 2 `.upsert(onConflict)`. (Count re-verified 2026-07-30: the upsert figure was recorded as 3, actual is **2** — `db.ts:77` users/phone and `db.ts:158` manufacturer_profiles/user_id. Corrected here and in MIGRATION.md §1.2.)
   - **Depends on:** nothing. **Blocks:** nothing — pure cleanup, deliberately first so an early session banks a safe win.
   - **Verify:** `GET /api/test-db` still returns success; `grep` shows `db.ts`/`supabase.ts`/`supabaseAdmin.ts` as the only DB importers; `npm run build` clean.
 
@@ -70,8 +70,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
   - **Depends on:** 1.3, 1.8. **Blocks:** password login (item 2) and the whole A12 dual-verify phase.
   - **Verify:** the most thorough of the ten — log in as at least 3 different accounts (buyer, manufacturer, enterprise) and confirm each resolves to the correct identity; confirm a user with **no** identity row still resolves by phone; re-run the Group 2 curl matrix (401/403/attribution) to prove authorisation is unchanged. Do not commit on a partial pass.
 
-- [ ] **CHUNK 1.10 — Route `AuthGuard` + `UserContext` through the seam.** *Small, 2 files.*
+- [ ] **CHUNK 1.10 — Route `AuthGuard` + `UserContext` + `apiClient` through the seam.** *Small, 3 files.*
   - `getSession()` and `signOut()` behind `authProvider`. After this, **Supabase is imported in one file** and item 1 is done.
+  - ⚠️ **`apiClient.ts` is the third file — added 2026-07-30 after a re-audit.** `authFetch` calls `supabase.auth.getSession()` (`apiClient.ts:75`) to attach the bearer token; it was missed by the original inventory. It must get a seam call too, or item 1 finishes with Supabase still in two files and every authenticated client request still bound to the provider. Note this one is a **`"use client"`-reachable** file, unlike the server-side pieces — the seam function it uses must be browser-safe (no service-role import).
   - **Depends on:** 1.4, 1.5. **Blocks:** nothing.
   - **Verify:** re-run the full Issue B + auth-guard matrix — sign out from FabChat AND desktop (storage empty, API 401, no hard refresh), signed-out back button bounces, stranger URLs bounce, logged-in navigation normal, dev bypass works, public marketplace still reachable.
 

@@ -44,7 +44,8 @@ Schema file: `supabase/schema.sql`. Note: `CREATE POLICY` has no `IF NOT EXISTS`
 | File | Status | Notes |
 |---|---|---|
 | `app/lib/supabase.ts` | ✅ | client; trailing-slash-stripped URL; persistSession |
-| `app/lib/db.ts` | ✅ | THE single DB layer. All DB access goes here. Migration = change only this file. |
+| `app/lib/db.ts` | ✅ | THE single DB layer. **18 of 18 API routes go through it as of chunk 1.1 (2026-07-30)** — the last direct caller (`test-db`) was moved onto `checkDatabaseConnection()`, and zero `.from(` calls exist outside this file. ⚠️ Migration is NOT a one-line client swap: the header now records the real PostgREST surface (16 embedded joins, 8 `.maybeSingle()`, 2 `.upsert(onConflict)`). The data model ports as-is; the query syntax does not. |
+| ⚠️ **No auth seam exists** | 🔴 | `db.ts` is the seam for *data*; auth has none. Supabase auth is imported in **6** files (`login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts`) — `apiClient.ts:75` was missed by the first audit and found in chunk 1.1. This is the largest migration risk we carry; it is what Launch-Ready item 1 exists to fix. |
 
 ---
 
@@ -127,9 +128,10 @@ Verified by test: 403 on another party's order · 401 unauthenticated PATCH (tar
 **STILL UNCONVERTED — 6 routes:**
 - `dev-auth/lookup` — **deferred deliberately, NEXT TASK** (sits in the login path; returns a full `users` row for ANY phone with no auth — enumeration + PII. See TASKS.md).
 - `manufacturers`, `manufacturers/[id]` — **stay PUBLIC by decision** (browsing pre-login is core to the marketplace; require auth to ACT, never to look). They still need `try/catch` for CORE T6.
-- `verification`, `waitlist`, `test-db` — not yet converted. `verification` takes `?phone` and returns personal verification status, so it is the highest-value one remaining.
+- `verification`, `waitlist` — not yet converted. `verification` takes `?phone` and returns personal verification status, so it is the highest-value one remaining.
+- ~~`test-db`~~ — ✅ **resolved 2026-07-30 (chunk 1.1)**, though never an auth exposure: it accepts no input and returns no user data, so there was nothing to authorise. It now goes through `db.ts checkDatabaseConnection()` (closing the CORE T1 violation) and uses `dbErrorResponse()`, so its CORE T6 gap is closed too. **5 routes remain unconverted**, two of which stay public by decision.
 
-**Error handling:** every converted handler now uses `dbErrorResponse()` (503 unreachable / 500 real fault, never raw exception text). The remaining CORE T6 gap is confined to the 6 unconverted routes above.
+**Error handling:** every converted handler now uses `dbErrorResponse()` (503 unreachable / 500 real fault, never raw exception text). The remaining CORE T6 gap is confined to the **5** unconverted routes above (`test-db` adopted `dbErrorResponse` in chunk 1.1, 2026-07-30).
 
 ---
 
@@ -238,7 +240,7 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 - ⚠️ No order-completion flow; no delivery-address column.
 - ⚠️ Some components have hardcoded colors — full theme swap needs a sweep.
 - ⚠️ `CREATE POLICY` re-run errors (no IF NOT EXISTS) — known when re-running schema.
-- ⚠️ **6 of 19 API routes still trust the phone in the request body/query** (down from 14 — Groups 1, 2a, 2b, 2c are converted and runtime-verified). Of the 6, two stay public by decision (`manufacturers`, `manufacturers/[id]`); the live exposures are `dev-auth/lookup` (enumeration + PII, next task) and `verification` (returns personal verification status for any `?phone`).
+- ⚠️ **5 of 19 API routes still trust the phone in the request body/query** (down from 14 — Groups 1, 2a, 2b, 2c are converted and runtime-verified). Of the 5, two stay public by decision (`manufacturers`, `manufacturers/[id]`); the live exposures are `dev-auth/lookup` (enumeration + PII) and `verification` (returns personal verification status for any `?phone`). Was 6; `test-db` left the list in chunk 1.1 — accurately, it was never a phone-trust exposure at all (no input, no user data), so this count previously overstated the auth surface by one.
 - ⚠️ **Unguarded DB calls across several routes** — `conversations`, `dev-auth/lookup`, `manufacturers`, `manufacturers/[id]` have no `try/catch` at all; additionally `orders` GET, `messages` GET, `sample-briefs` GET are unguarded even though those files' POST handlers have one, and `messages/read` calls the DB before its try block. Database failures there are unhandled rejections rather than handled statuses. Direct **CORE T6** violation, pre-existing. Audit per-handler, not per-file. Scheduled into Group 2.
 - ✅ **DEPLOY BLOCKERS CLEARED (2026-07-29).** All three, verified in a real browser:
   1. ✅ **Temp debug routes removed** — `app/api/whoami/` and `app/temp-whoami-test/` deleted, confirmed absent from the build's route manifest.

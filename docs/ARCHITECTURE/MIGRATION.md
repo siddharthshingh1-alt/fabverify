@@ -16,41 +16,45 @@
 
 ### 1.1 Does all DB access go through `db.ts`?
 
-Almost. Seven files import Supabase:
+Almost. **Nine** files import Supabase (re-audited 2026-07-30 — the original pass listed eight and missed `apiClient.ts`):
 
 | File | Uses | Verdict |
 |---|---|---|
 | `app/lib/db.ts` | `supabaseAdmin.from` | ✅ the abstraction layer |
 | `app/lib/supabase.ts` | `createClient` | ✅ browser client factory |
 | `app/lib/supabaseAdmin.ts` | `createClient` | ✅ service-role factory |
-| `app/api/test-db/route.ts` | **`supabase.from("users")`** | 🚫 **CORE T1 / A1 VIOLATION** — direct query outside `db.ts` |
+| ~~`app/api/test-db/route.ts`~~ | ~~**`supabase.from("users")`**~~ | ✅ **FIXED in chunk 1.1 (2026-07-30)** — now calls `db.ts checkDatabaseConnection()`. Was the sole CORE T1 / A1 violation. |
 | `app/login/page.tsx` | `auth.signInWithOtp`, `verifyOtp`, `signOut` | ⚠️ auth only, no DB |
 | `app/signup/page.tsx` | same | ⚠️ auth only, no DB |
 | `app/context/UserContext.tsx` | `auth.signOut` | ⚠️ auth only, no DB |
 | `app/components/AuthGuard.tsx` | `auth.getSession` | ⚠️ auth only, no DB |
+| `app/lib/apiClient.ts` | `auth.getSession` (line 75, inside `authFetch`) | ⚠️ auth only, no DB — **MISSED BY THE FIRST AUDIT** |
 
-**17 of 18 API routes import `db.ts`.** The discipline held through the entire auth-hardening batch. The single violation is a one-line health check and is trivial to fix.
+**18 of 18 API routes now import `db.ts`** (17 of 18 before chunk 1.1). The discipline held through the entire auth-hardening batch, and the single violation — a one-line health check — is closed.
 
-**The four `auth` importers are the real finding.** They touch no database, so they do not threaten the *data* migration — but they mean **there is no auth abstraction layer**. `db.ts` is the seam for data; auth has no equivalent. That is invisible to a DB-only audit and is the largest migration risk we carry.
+**The five `auth` importers are the real finding.** They touch no database, so they do not threaten the *data* migration — but they mean **there is no auth abstraction layer**. `db.ts` is the seam for data; auth has no equivalent. That is invisible to a DB-only audit and is the largest migration risk we carry.
+
+⚠️ **`apiClient.ts` was missed by the 2026-07-29 audit and its omission under-scoped chunk 1.10**, which was written as a 2-file change (`AuthGuard` + `UserContext`) and is really a 3-file change. Left uncorrected, item 1 would have "finished" with Supabase still imported in two files and every authenticated client request still bound to the provider. It also differs in kind from the other four: it is reachable from `"use client"` code, so whatever seam function replaces it must be browser-safe.
 
 ### 1.2 Supabase-specific dependency inventory
 
 | System | Where | Difficulty | Isolation |
 |---|---|---|---|
-| **Supabase Auth** (OTP, session, token→identity, sign-out) | 5 files (see below) | 🔴 **HARD** | **POOR — scattered** |
+| **Supabase Auth** (OTP, session, token→identity, sign-out) | 6 files (see below) | 🔴 **HARD** | **POOR — scattered** |
 | **PostgREST query syntax** | `db.ts` | 🟡 MEDIUM | ✅ EXCELLENT — one file |
 | **RLS / `auth.uid()`** | `supabase/schema.sql` | 🟢 LOW (already inert) | schema only |
 | **Supabase Storage** | not used yet | 🟢 NONE YET | n/a |
 | **Client library / env** | 3 files, 3 env vars | 🟢 LOW | contained |
 
-**Auth, broken out — five pieces, five places:**
+**Auth, broken out — six pieces, six places:**
 
 | Piece | Location |
 |---|---|
 | OTP send / verify | `login/page.tsx`, `signup/page.tsx` (`signInWithOtp`, `verifyOtp`) |
 | Session storage | `supabase.ts` — `persistSession: true` → **localStorage, no cookies** |
 | Token → identity (the trust root) | `db.ts` `getPhoneFromAccessToken` → `supabaseAdmin.auth.getUser()` |
-| Session read | `AuthGuard.tsx` — `getSession()` |
+| Session read (guard) | `AuthGuard.tsx` — `getSession()` |
+| Session read (outbound requests) | `apiClient.ts:75` — `getSession()` inside `authFetch`, to attach the bearer token — **added 2026-07-30** |
 | Sign-out | `UserContext.tsx` — ✅ already centralised |
 
 **PostgREST syntax in `db.ts` — 813 lines, 35 exported functions:**
@@ -59,9 +63,11 @@ Almost. Seven files import Supabase:
 |---|---|---|
 | Embedded-resource joins (`buyer:users!buyer_id(...)`) | **16** | real SQL `JOIN`s |
 | `.maybeSingle()` | 8 | `rows[0] ?? null` |
-| `.upsert(..., { onConflict })` | 3 / 2 | `INSERT … ON CONFLICT DO UPDATE` |
+| `.upsert(..., { onConflict })` | **2** | `INSERT … ON CONFLICT DO UPDATE` |
 
-⚠️ **`db.ts`'s own header currently claims "All queries use standard PostgreSQL. No Supabase-specific features used." That is inaccurate** — see the table above. Correcting it is part of Launch-Ready item 1; a future migration planned against that comment would badly underestimate the work.
+Re-counted 2026-07-30: the upsert row previously read "3 / 2" and the true figure is **2** — `db.ts:77` (`users`, onConflict `phone`) and `db.ts:158` (`manufacturer_profiles`, onConflict `user_id`). The other two counts verified exact.
+
+✅ **`db.ts`'s header claim that "All queries use standard PostgreSQL. No Supabase-specific features used" was corrected in chunk 1.1 (2026-07-30)** and now carries the counts above. It was inaccurate, and a future migration planned against that comment would have badly underestimated the work. The distinction the new header draws: the **data model** is standard PostgreSQL and ports as-is; the **query syntax** is a Supabase client feature and does not.
 
 **RLS:** 10 policies reference `auth.uid()`, which has no RDS equivalent. They are already decorative — `users.id` never equals `auth.uid()`, so they can never match (was I7, now decided in **I8**). Because the security batch put real authorisation server-side, we are *not* dependent on them; on RDS they are simply deleted.
 
@@ -127,12 +133,12 @@ Locked order. Each item's abstraction layer is built **before** its first implem
 ### 4.1 Durable auth link + auth seam 🔴 FOUNDATION
 > **Built across MANY sessions, not one.** Split into 10 self-contained chunks — see `TASKS.md` for the ordered list and the 📍 STATUS line recording which chunk is next. Chunks 1.1–1.4 are additive and near-zero risk; 1.5–1.9 touch the login path; 1.9 (resolve identity via `auth_identities`) is the highest-risk chunk and the one that actually decouples identity from phone number.
 
-`auth_identities` table (`user_id`, `provider`, `provider_uid`, `created_at`, `UNIQUE(provider, provider_uid)`), backfill, `app/lib/authProvider.ts`, move `getPhoneFromAccessToken` **out of `db.ts`** (it is auth, not data — that mixing is why the seam leaks), fix the `test-db` T1 violation, correct `db.ts`'s migration note.
+`auth_identities` table (`user_id`, `provider`, `provider_uid`, `created_at`, `UNIQUE(provider, provider_uid)`), backfill, `app/lib/authProvider.ts`, move `getPhoneFromAccessToken` **out of `db.ts`** (it is auth, not data — that mixing is why the seam leaks), ~~fix the `test-db` T1 violation, correct `db.ts`'s migration note~~ ✅ **both done in chunk 1.1, 2026-07-30**.
 
 **Why a table, not a single `users.auth_user_id` column** (as I6 proposed): a column holds ONE identity and cannot express "this user exists in both Supabase and the new provider at once" — which is precisely what a parallel run *is*. A column forces a hard flip; the table makes the overlap a normal, representable state, and gives social/email login later for free.
 
 `getVerifiedUser()` / `getVerifiedCallerPhone()` stay as they are — they are already the right shape and sit on top of the seam.
-**Target: Supabase referenced in ONE file.** Today it is five.
+**Target: Supabase referenced in ONE file.** Today it is **six** — `login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts` (corrected 2026-07-30; `apiClient` was missed, see §1.1).
 
 ### 4.2 Password login (M10) 🔴
 Hashes in **our** `users` table (argon2id), verification behind the seam. Login offers OTP **or** password.

@@ -6,6 +6,32 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.1] — Last direct-Supabase API route moved onto `db.ts`; false migration note corrected
+> First of the 10 chunks of Launch-Ready item 1 (durable auth link + auth seam). Deliberately the safest one, so an early session banks a verified win. Touches no auth path. 2 code files + 2 doc files.
+
+### Fixed
+- **CORE T1 / DECISIONS A1 violation closed.** `app/api/test-db/route.ts` queried `supabase.from("users")` directly — the only 1 of 18 API routes bypassing the abstraction layer. It now calls `db.ts checkDatabaseConnection()`. **18 of 18 API routes go through `db.ts`**, and `grep` confirms **zero** `.from(` calls anywhere outside it.
+- **`db.ts`'s header claimed "All queries use standard PostgreSQL. No Supabase-specific features used." That was false**, and a migration planned against it would have badly underestimated the work. Replaced with the audited inventory — 16 embedded-resource joins, 8 `.maybeSingle()`, 2 `.upsert(..., { onConflict })` across 813 lines / 35 exported functions — plus the distinction that actually matters: the **data model** is standard PostgreSQL and ports to RDS as-is; the **query syntax** is a PostgREST client feature and does not.
+- **Two doc numbers that were provably wrong**, corrected rather than left to be re-derived next session:
+  - `.upsert(onConflict)` count **3 → 2** (`TASKS.md`, `MIGRATION.md` §1.2). The real sites are `db.ts:77` (`users`, onConflict `phone`) and `db.ts:158` (`manufacturer_profiles`, onConflict `user_id`). The other two counts verified exact.
+  - **`app/lib/apiClient.ts` was missing from the Supabase-importer inventory** (`MIGRATION.md` §1.1 listed 8 files; the real count was 9). It imports the client at line 16 and calls `supabase.auth.getSession()` at line 75 inside `authFetch` to attach the bearer token. The "Supabase is in 5 files" figure is therefore **6**.
+
+### Added
+- **`db.ts checkDatabaseConnection(): Promise<void>`** in a new `── HEALTH ──` section. Two deliberate design calls, both documented at the function:
+  - **Throws instead of returning a boolean.** A boolean collapses "database unreachable" and "query failed" into one `false`, and the caller needs that distinction to answer 503 vs 500. Same reasoning as `getUserByPhoneOrThrow` (Issue E).
+  - **Runs on the service-role path**, because that is the path every real route uses through this file. The old call used the anon client from inside the route, which exercised RLS — formally retired as a security mechanism in DECISIONS **I8** — rather than what the application actually depends on. This is a behaviour change, not a pure move.
+
+### Changed
+- `test-db` now returns **503** for an unreachable database and **500** for a genuine query fault, via the shared `dbErrorResponse()`, instead of a flat 500. A 9-line local reimplementation of `getErrorMessage()` was deleted. The error body shape changed from `{success:false, error}` to `{error}`; safe because `grep` confirms **no code anywhere calls this route** — it is a manual browser/curl diagnostic.
+- **Chunk 1.10 re-scoped from 2 files to 3** as a direct consequence of the `apiClient.ts` finding. Left uncorrected, item 1 would have "finished" with Supabase still imported in two files and every authenticated client request still bound to the provider. Noted at the chunk: `apiClient.ts` is reachable from `"use client"` code, unlike the other four auth importers, so its replacement seam function must be browser-safe (no service-role import).
+
+### Verified (2026-07-30)
+- `npm run build` — **clean**, zero TypeScript errors, zero lint warnings. `/api/test-db` present in the route manifest.
+- `GET /api/test-db` → **200** `{"success":true,"message":"Database connected!"}`, confirmed in the server log. Reproduced via both `localhost` and `127.0.0.1`.
+- **Outage path** — `NEXT_PUBLIC_SUPABASE_URL` pointed at an unresolvable host (`…-BROKEN.supabase.co`, a valid URL so `createClient` does not throw at module load) → **503** `{"error":"Service temporarily unavailable. Please try again."}`. No raw exception text in the response and **no unhandled rejection or stack trace in the server log** — the CORE T6 point. Server was **hard-restarted** for this rather than trusting Next's `Reload env` hot-reload, because `supabaseAdmin` builds its client at module load and a hot reload could have left the old client alive and produced a false pass.
+- `.env.local` restored **byte-identical** (`diff -q` clean against a pre-test backup) and the health check **re-run after restoring** → 200, proving the environment is genuinely healthy rather than merely correct on disk. Confirmed still gitignored, so it cannot enter a commit.
+- `isDatabaseUnavailable()` matches on message text by necessity (Supabase exposes no "could not reach server" code). It caught this case cleanly; that remains a heuristic, and an unrecognised shape degrades to 500 — the pre-existing behaviour, not a regression.
+
 ## [2026-07-29 · Issue B + Platform Auth Guard] — Sign-out truly ends the session; platform routes now require one
 > Closes the last two deploy blockers. Both fixes verified in a real browser against a pre-test baseline, not inferred from code.
 

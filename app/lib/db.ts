@@ -6,10 +6,20 @@
  * migrate to AWS RDS:
  *
  * 1. Replace the supabaseAdmin client with a pg or drizzle client
- * 2. Update query syntax if needed
+ * 2. Rewrite the PostgREST query syntax below. This is real work, not a
+ *    find-and-replace. Audited 2026-07-30 across 813 lines / 35 exported
+ *    functions:
+ *      · 16 embedded-resource joins (`buyer:users!buyer_id(...)`) → SQL JOINs
+ *      ·  8 `.maybeSingle()`                                      → `rows[0] ?? null`
+ *      ·  2 `.upsert(..., { onConflict })`                        → INSERT … ON CONFLICT DO UPDATE
  * 3. All other files stay unchanged
  *
- * All queries use standard PostgreSQL. No Supabase-specific features used.
+ * The DATA MODEL is standard PostgreSQL — no Supabase-specific column types,
+ * extensions, triggers or functions, so the schema itself ports as-is. The
+ * QUERY SYNTAX is NOT: PostgREST's builder is a Supabase client feature.
+ * This header previously claimed "No Supabase-specific features used", which
+ * was inaccurate and would have made any migration planned against it badly
+ * underestimate the work. See docs/ARCHITECTURE/MIGRATION.md §1.2.
  *
  * SERVER-ONLY: this file uses the service-role client, which bypasses Row
  * Level Security entirely. Only import it from Route Handlers under
@@ -810,4 +820,25 @@ export async function addToWaitlist(email: string, phone?: string) {
 
   if (error) throw error;
   return data;
+}
+
+// ── HEALTH ──────────────────────────────────────────────
+
+/**
+ * Connectivity probe for GET /api/test-db.
+ *
+ * THROWS instead of returning a boolean, deliberately: a boolean collapses
+ * "database unreachable" and "query failed" into one false, and the caller
+ * needs that distinction to answer 503 vs 500 via dbErrorResponse(). Same
+ * reasoning as getUserByPhoneOrThrow (Issue E).
+ *
+ * Runs on the service-role path because that is the path every real route
+ * uses through this file. It previously ran on the anon client from inside
+ * the route itself, which tested RLS — retired as a security mechanism in
+ * DECISIONS I8 — rather than testing what the application depends on.
+ */
+export async function checkDatabaseConnection(): Promise<void> {
+  const { error } = await supabaseAdmin.from("users").select("id").limit(1);
+
+  if (error) throw error;
 }

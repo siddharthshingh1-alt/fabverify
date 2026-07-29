@@ -1,24 +1,19 @@
-import { supabase } from "@/app/lib/supabase";
 import { NextResponse } from "next/server";
+
+import { checkDatabaseConnection } from "@/app/lib/db";
+import { dbErrorResponse } from "@/app/lib/apiError";
 
 export async function GET() {
   try {
-    const { error } = await supabase.from("users").select("count").limit(1);
-
-    if (error) throw error;
+    await checkDatabaseConnection();
 
     return NextResponse.json({
       success: true,
       message: "Database connected!",
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "object" && error !== null && "message" in error
-          ? String((error as { message: unknown }).message)
-          : "Unknown error";
-
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    // 503 unreachable / 500 genuine query fault, never raw exception text.
+    // Replaces a local copy of getErrorMessage() that always answered 500.
+    return dbErrorResponse(error);
   }
 }
