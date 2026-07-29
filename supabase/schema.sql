@@ -235,3 +235,46 @@ CREATE TABLE IF NOT EXISTS waitlist (
 );
 
 ALTER TABLE waitlist ENABLE ROW LEVEL SECURITY;
+
+-- Auth identities — the durable link between a `users` row and the provider
+-- identity that authenticated it (DECISIONS I9, resolves I6). Added by
+-- migration 002_auth_identities.sql, 2026-07-30, and duplicated here so a
+-- fresh environment — or the AWS RDS build in A12 Phase 3, which is likely
+-- to be created from this file — does not silently miss the foundation table
+-- that all of Launch-Ready item 1 stands on.
+--
+-- Today the only link between a session and an account is the phone number,
+-- which is why a telco reassignment can inherit an account (I6) and why
+-- there is no key to map identities across providers at cutover. A TABLE
+-- rather than a `users.auth_user_id` column because a column holds ONE
+-- identity and cannot express "this user exists in both the old and the new
+-- provider at once" — exactly what the A12 parallel run is.
+--
+-- Full rationale, per-column reasoning and the VERIFY queries live in
+-- supabase/migrations/002_auth_identities.sql. Keep the two in sync.
+CREATE TABLE IF NOT EXISTS auth_identities (
+  id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- ON DELETE CASCADE deviates from every other FK here, deliberately: an
+  -- orphaned identity still occupies the UNIQUE constraint (blocking
+  -- re-registration) and could resolve a live session to a deleted account.
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- No CHECK constraint: adding a provider mid-migration must not need DDL.
+  provider     TEXT NOT NULL,
+  -- TEXT not UUID — a Cognito sub / social id / email id is not a UUID.
+  provider_uid TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT auth_identities_provider_uid_key UNIQUE (provider, provider_uid)
+);
+
+-- Postgres does not auto-index FK columns; this serves the reverse lookup
+-- ("which identities does this user have?") behind remote logout, and keeps
+-- the ON DELETE CASCADE check efficient.
+CREATE INDEX IF NOT EXISTS idx_auth_identities_user_id
+  ON auth_identities (user_id);
+
+-- RLS on with NO policy = deny all, same pattern as `waitlist` above. NOT a
+-- contradiction of I8 (which retires auth.uid() policies as an authorisation
+-- mechanism — none is written here): the anon key is public, so a table left
+-- with RLS off is browser-readable, and this one maps provider UIDs to
+-- internal user IDs. Service-role access (which bypasses RLS) does the work.
+ALTER TABLE auth_identities ENABLE ROW LEVEL SECURITY;

@@ -34,6 +34,7 @@
 | `fabscore_history` | ✅ | table exists; no algorithm writes to it yet |
 | `verification_applications` | ✅ | |
 | `waitlist` | ✅ | |
+| `auth_identities` | ✅ | **Created 2026-07-30 (chunk 1.2). Schema only — NOTHING reads or writes it yet.** The durable link between a `users` row and the provider identity that authenticated it (DECISIONS **I9**, resolves **I6**). `id`, `user_id → users(id)` **ON DELETE CASCADE**, `provider`, `provider_uid`, `created_at`, `UNIQUE (provider, provider_uid)` + `idx_auth_identities_user_id` (Postgres does not auto-index FK columns). RLS on with **zero policies** = deny-all — verified by an anon `INSERT` returning `42501`; the anon key must never read this table. In both `supabase/migrations/002_auth_identities.sql` and `supabase/schema.sql`. Filled by 1.3 (backfill), written by 1.8, read by 1.9. |
 
 Schema file: `supabase/schema.sql`. Note: `CREATE POLICY` has no `IF NOT EXISTS` — re-running errors on policies. After DDL, may need `NOTIFY pgrst, 'reload schema';`.
 

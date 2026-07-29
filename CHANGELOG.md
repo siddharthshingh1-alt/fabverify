@@ -6,6 +6,35 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.2] — `auth_identities` table created (schema only, nothing reads it yet)
+> Second of the 10 chunks of Launch-Ready item 1. The table that decouples identity from phone number (DECISIONS **I9**, resolves **I6**) now exists. **Zero application files touched** — no `.ts`/`.tsx` change, no `db.ts` function. Applied in the Supabase SQL Editor.
+
+### Added
+- **`supabase/migrations/002_auth_identities.sql`** — `id` (surrogate PK), `user_id → users(id)`, `provider`, `provider_uid`, `created_at`, `UNIQUE (provider, provider_uid)`, plus `idx_auth_identities_user_id`. Standard PostgreSQL only (CORE T2 / A2). **Fully idempotent** — `IF NOT EXISTS` throughout and `ENABLE ROW LEVEL SECURITY` is a no-op when already on, so unlike the `CREATE POLICY` statements in `schema.sql` this file is safe to re-run.
+- **The same block appended to `supabase/schema.sql`.** That file is the canonical full schema and the likely source for the AWS RDS build in A12 Phase 3; if the table lived only in `migrations/`, a fresh environment or the RDS build would silently lack the foundation table all of item 1 stands on. The two copies are byte-identical in their statements (verified) — keep them in sync.
+
+### Design decisions recorded at the schema
+- **`ON DELETE CASCADE` — a deliberate deviation** from every other FK here (all bare `REFERENCES users(id)`). An identity outliving its user is actively harmful, not untidy: the orphan still occupies the `UNIQUE` constraint so that provider identity could never be re-registered, and once chunk 1.9 reads this table a stale row could resolve a live session to a deleted account. `RESTRICT` would instead block user deletion outright. Free to get right now — no user-deletion flow exists.
+- **No `CHECK` constraint on `provider`.** I9's list is open-ended, and the A12 parallel run must be able to add a provider *without* a DDL change at the moment of cutover. Also matches convention — `users.user_type` and every `status` column are plain `TEXT`.
+- **`provider_uid` is `TEXT`, not `UUID`.** A Supabase auth uid is a UUID, but a Cognito `sub`, social-provider id or email-derived id is not; `UUID` would force a type change at the worst possible moment.
+- **Two indexes, both needed.** The `UNIQUE (provider, provider_uid)` is auto-indexed and serves the hot path ("a token from provider X carries uid Y — which user?"), with `provider` leading so it also serves `WHERE provider = …` (the 1.3 backfill audit, the Phase 4 retirement count). `idx_auth_identities_user_id` exists because **Postgres does not auto-index foreign-key columns** — only the referenced side — and the reverse lookup is the query behind remote logout and per-device session visibility.
+- **Considered and deliberately NOT added: `UNIQUE (user_id, provider)`.** It would make chunk 1.8's no-duplicates requirement structural, but I9 did not lock it and 1.8's upsert should conflict-target `(provider, provider_uid)` anyway — the correct key for "this same provider identity authenticated again". Adding an unlocked constraint that later proves wrong is harder to undo than adding it in 1.8.
+- **Open question deferred to chunk 1.6 / M10:** for `provider = 'password'` the credential will live in our own `users` table, so there is no external id — either `users.id` doubles as the uid, or password is a `users` column and never a row here. The schema supports either; recorded now rather than discovered later.
+
+### Security
+- ⚠️ **RLS enabled with ZERO policies = deny all.** This is *not* a contradiction of **I8**, which retires `auth.uid()` policies as an *authorisation mechanism* — none is written here. But `NEXT_PUBLIC_SUPABASE_ANON_KEY` is public by design, so a new table left with RLS **off** is directly readable from any browser, and this table maps provider UIDs to internal user IDs — anon read access would be an enumeration goldmine, strictly worse than the `dev-auth/lookup` disclosure already logged. Same pattern already used for `waitlist`: RLS on, no policy, service-role client (which bypasses RLS) does the work. Costs nothing at migration — on RDS you simply do not grant the table to a public role.
+- `NOTIFY pgrst, 'reload schema';` included so PostgREST picks up the table. PostgREST-specific with no RDS equivalent, but an **operational** command rather than business logic in the database, so it does not breach X5 / CORE T2.
+
+### Verified (2026-07-30)
+- **In the SQL Editor:** 5 columns with correct types/nullability/defaults · 3 constraints, with the FK definition confirmed to contain `ON DELETE CASCADE` · 3 indexes · `relrowsecurity = true` · **0** policies · 0 rows.
+- **From Node against PostgREST** — the one thing the SQL Editor cannot test, since it talks to Postgres directly while the app talks through PostgREST's cached schema: table visible and empty, all 5 columns selectable by name, and the existing `users` table still reachable (control).
+- **Conclusive RLS proof: an anon `INSERT` is rejected with `42501` "new row violates row-level security policy".** An anon `SELECT` returning 0 rows was *inconclusive* — an unprotected empty table returns 0 rows too — so the read check alone was not evidence. The rejected insert is, and it persists nothing; a follow-up count confirmed 0 rows.
+- `npm run build` clean, 155 static pages. `grep` confirms **zero** `auth_identities` references anywhere in `app/` — the chunk is genuinely schema-only.
+- `GET /api/test-db` → 200. **Real browser dev login** (`9999999991` / `123456`, A10 localhost bypass) → `/brand/dashboard` as Anita sharma / Brand Builder, correct account, with `POST /api/dev-auth/lookup` 200 in the server log. Auth path confirmed untouched.
+- **The table was still empty after that login**, which is the runtime proof that no code path writes to it yet.
+
+---
+
 ## [2026-07-30 · Chunk 1.1] — Last direct-Supabase API route moved onto `db.ts`; false migration note corrected
 > First of the 10 chunks of Launch-Ready item 1 (durable auth link + auth seam). Deliberately the safest one, so an early session banks a verified win. Touches no auth path. 2 code files + 2 doc files.
 

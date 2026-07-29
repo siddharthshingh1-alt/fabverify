@@ -17,7 +17,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > **Target: Supabase referenced in ONE file.** Today it is **six** (`login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts`) — plus the two client factories `supabase.ts` / `supabaseAdmin.ts`, which the seam absorbs. (Re-audited 2026-07-30: `app/lib/apiClient.ts:16` imports the client and calls `supabase.auth.getSession()` at line 75 to attach the bearer token. It was missing from the original count and from MIGRATION.md §1.1, which under-scoped chunk 1.10 — see that chunk.)
 
 #### 📍 STATUS — UPDATE THIS LINE EVERY SESSION
-**NEXT CHUNK: 1.2** · Last completed: **1.1** (2026-07-30) · Started 2026-07-29
+**NEXT CHUNK: 1.3** · Last completed: **1.2** (2026-07-30) · Started 2026-07-29
 
 ---
 
@@ -27,11 +27,16 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
   - **Depends on:** nothing. **Blocks:** nothing — pure cleanup, deliberately first so an early session banks a safe win.
   - **Verify:** `GET /api/test-db` still returns success; `grep` shows `db.ts`/`supabase.ts`/`supabaseAdmin.ts` as the only DB importers; `npm run build` clean.
 
-- [ ] **CHUNK 1.2 — Create the `auth_identities` table (schema only).** *Small, 1 migration file.*
-  - `user_id → users.id`, `provider`, `provider_uid`, `created_at`, `UNIQUE (provider, provider_uid)`. Standard PostgreSQL, plain FK, no Supabase types (DECISIONS I9).
-  - Nothing reads or writes it yet — the table simply exists.
-  - **Depends on:** nothing. **Blocks:** 1.3, 1.8, 1.9.
-  - **Verify:** table + constraints exist in Supabase; app behaves identically; `npm run build` clean. Zero runtime risk — no code path touches it.
+- [x] **CHUNK 1.2 — DONE 2026-07-30. Created the `auth_identities` table (schema only).** *2 files: `supabase/migrations/002_auth_identities.sql` + the same block appended to `supabase/schema.sql`.*
+  - Applied in the Supabase SQL Editor. Shape as locked in I9, plus four additions: surrogate `id` PK (matches all 9 existing tables), `NOT NULL` on `user_id`/`provider`/`provider_uid`, **`ON DELETE CASCADE`** on the FK, and **no `CHECK` on `provider`**.
+  - **`ON DELETE CASCADE` is a deliberate deviation** — every other FK here is a bare `REFERENCES users(id)`. An orphaned identity still occupies the UNIQUE constraint (blocking re-registration) and, once 1.9 reads this table, could resolve a live session to a deleted account. Free to get right now: no user-deletion flow exists.
+  - **No `CHECK` on `provider`** so the A12 parallel run can add a provider without a DDL change at cutover. `provider_uid` is `TEXT` not `UUID` — a Cognito `sub` / social / email id is not a UUID.
+  - **Two indexes:** the I9-locked `UNIQUE (provider, provider_uid)` (auto-indexed; `provider` leads, so it also serves `WHERE provider = …` for the 1.3 audit and Phase 4 retirement count) and `idx_auth_identities_user_id` — **Postgres does not auto-index FK columns**, and the reverse lookup is the query behind remote logout.
+  - **Also added to `supabase/schema.sql`**, not just `migrations/`: that file is the canonical schema and the likely source for the A12 Phase 3 RDS build, which must not miss the foundation table. Fully idempotent (`IF NOT EXISTS` throughout), unlike the `CREATE POLICY` statements there.
+  - ⚠️ **RLS enabled with ZERO policies = deny-all.** Not a contradiction of I8 (which retires `auth.uid()` policies as an authorisation *mechanism* — none written): the anon key is public, so a table left with RLS off is browser-readable, and this one maps provider UIDs to internal user IDs. Same pattern as `waitlist`.
+  - **Considered and NOT added:** `UNIQUE (user_id, provider)`. It would make 1.8's no-duplicates guarantee structural, but I9 didn't lock it and 1.8's upsert should conflict-target `(provider, provider_uid)` anyway. Add it in 1.8 if wanted — don't inherit an unlocked constraint.
+  - **Open question deferred to 1.6 / M10:** for `provider = 'password'` the credential lives in our own `users` table, so there is no external id. Either `users.id` doubles as the uid, or password is a `users` column and never a row here. The schema supports either.
+  - **Verified:** 5 columns · 3 constraints (FK definition confirmed to include `ON DELETE CASCADE`) · 3 indexes · `relrowsecurity = true` · **0** policies · 0 rows. Then, from Node against PostgREST (which the SQL Editor cannot test): table visible and empty, all 5 columns selectable, **anon `INSERT` rejected with `42501` row-level-security violation** — the conclusive RLS proof, since an anon `SELECT` returning 0 rows is ambiguous on an empty table. `npm run build` clean (155 pages) · grep **zero** `auth_identities` references in `app/` · `GET /api/test-db` 200 · real browser dev login `9999999991`/`123456` → `/brand/dashboard` as Anita sharma · **table still 0 rows after that login**, proving nothing writes to it yet.
 
 - [ ] **CHUNK 1.3 — Backfill `auth_identities` for existing users.** *Small, one throwaway script, no app code.*
   - Enumerate Supabase auth users via the admin API, match to `users` rows on phone, insert one `('supabase', <auth uid>)` identity each.
