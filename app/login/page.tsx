@@ -7,7 +7,15 @@ import {
   consumePendingChatRedirect,
   peekPendingChatRedirect,
 } from "../lib/postAuthRedirect";
-import { supabase } from "../lib/supabase";
+// Auth goes through the SEAM, not Supabase directly (DECISIONS X5). Aliased
+// because this file already has local handlers called sendOtp / verifyOtp —
+// an unaliased import would be a duplicate declaration.
+import {
+  isDevBypassHost,
+  sendOtp as providerSendOtp,
+  signOut as providerSignOut,
+  verifyOtp as providerVerifyOtp,
+} from "../lib/authProvider";
 import { useUser } from "../context/UserContext";
 import { getLandingRoute } from "../lib/routing";
 
@@ -16,15 +24,28 @@ const WHATSAPP_LINK = "https://wa.me/919773933279";
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 45;
-const DEV_OTP_BYPASS = "123456";
+// DEV_OTP_BYPASS moved into the seam (app/lib/authProvider.ts) in chunk 1.4 —
+// the seam compares the code and owns the A10 hostname gate, so login and
+// signup can no longer drift on what the bypass accepts.
+
+// BACKUP fallback detection — see the note at its call site in sendOtp().
+// Retained by explicit decision (2026-07-30) as belt-and-suspenders behind the
+// seam's structured `provider_unavailable` signal.
+const looksLikeProviderProblem = (message: string | undefined): boolean => {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("not configured") || m.includes("provider") || m.includes("sms")
+  );
+};
 
 // Real, currently-routable dashboard for each UserContext UserType — see
 // app/context/UserContext.tsx. Anything not in this map (or not yet known)
 // falls back to the generic adaptive /dashboard.
-// Only allow the dev OTP bypass on localhost — never in production.
-const isDev =
-  typeof window !== "undefined" &&
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+// Only allow the dev OTP bypass on localhost — never in production. The check
+// itself now lives in the seam (DECISIONS A10, hostname-gated not NODE_ENV);
+// kept as a module-scope const so the JSX hint below behaves exactly as before.
+const isDev = isDevBypassHost();
 
 export default function LogIn() {
   const router = useRouter();
@@ -63,7 +84,7 @@ export default function LogIn() {
         return;
       }
 
-      await supabase.auth.signOut();
+      await providerSignOut();
       setChatRedirectPending(!!peekPendingChatRedirect());
     }
 
@@ -85,64 +106,51 @@ export default function LogIn() {
     setPhone(value.replace(/\D/g, "").slice(0, 10));
   };
 
-  // Dev mode (localhost only) — no SMS provider is wired up in Supabase yet,
-  // so real signInWithOtp() throws "unsupported phone provider". Skip
-  // Supabase entirely and just move to the OTP step, where 123456 is
-  // accepted. In production there is no bypass, so we attempt a real send —
-  // it will fail until an SMS provider is configured, and that failure
-  // shows a WhatsApp/waitlist fallback instead of a dead-end OTP screen.
+  // Sends the code via the auth seam. Phone validation, E.164 formatting, the
+  // A10 localhost bypass (which short-circuits BEFORE any provider call, so no
+  // SMS is attempted and 123456 is accepted at the next step) and the
+  // provider-error classification all live in the seam now — so login and
+  // signup cannot drift apart on any of them.
   const sendOtp = async () => {
     setIsSendingOtp(true);
     setErrorMessage("");
     setSmsUnavailable(false);
 
-    // Strip spaces, dashes, and any non-digit characters, then take the
-    // last 10 digits — Twilio rejects anything that isn't clean E.164.
-    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-    const formattedPhone = "+91" + cleanPhone;
+    const result = await providerSendOtp(phone);
 
-    if (cleanPhone.length !== 10) {
-      setErrorMessage("Please enter a valid 10-digit mobile number");
-      setIsSendingOtp(false);
-      return;
-    }
+    if (!result.ok) {
+      // FALLBACK DECISION — deliberately belt-and-suspenders (2026-07-30).
+      //
+      // PRIMARY: the seam's structured `provider_unavailable`.
+      // BACKUP:  re-check the message text here as well.
+      //
+      // ⚠️ HONEST NOTE: the backup is currently UNREACHABLE. The seam derives
+      // `provider_unavailable` using the identical three-substring test on the
+      // identical string, so any message that would match here has already
+      // been classified upstream. It is kept on purpose as insurance against
+      // the seam's heuristic being narrowed later, and can be deleted once the
+      // structured signal has been proven in production over time. Do not read
+      // its presence as evidence that the structured signal is insufficient.
+      //
+      // Why this branch matters: with Twilio on a trial that only delivers to
+      // verified caller IDs, this is the path most real users would hit. It
+      // must show WhatsApp/waitlist rather than a dead-end OTP screen.
+      const structured = result.reason === "provider_unavailable";
+      const byText =
+        result.reason === "error" && looksLikeProviderProblem(result.message);
 
-    if (!["6", "7", "8", "9"].includes(cleanPhone[0])) {
-      setErrorMessage("Please enter a valid Indian mobile number");
-      setIsSendingOtp(false);
-      return;
-    }
-
-    if (!isDev) {
-      try {
-        const { error } = await supabase.auth.signInWithOtp({
-          phone: formattedPhone,
-          options: { channel: "sms" },
-        });
-        if (error) {
-          console.error("OTP error:", error.message, error);
-
-          // Only fall back to WhatsApp/waitlist when the SMS provider
-          // itself isn't set up — a transient/network error should let
-          // the user retry instead of getting routed to a dead end.
-          const message = error.message.toLowerCase();
-          if (
-            message.includes("not configured") ||
-            message.includes("provider") ||
-            message.includes("sms")
-          ) {
-            setSmsUnavailable(true);
-          } else {
-            setErrorMessage(error.message);
-          }
-          setIsSendingOtp(false);
-          return;
-        }
-      } catch {
+      if (structured || byText) {
+        setSmsUnavailable(true);
+      } else if (result.reason === "unknown") {
         setErrorMessage("Something went wrong. Please try again.");
-        setIsSendingOtp(false);
-        return;
+      } else {
+        // invalid_phone | error — the seam supplies the exact message that was
+        // shown before this chunk.
+        setErrorMessage(result.message);
       }
+
+      setIsSendingOtp(false);
+      return;
     }
 
     setOtp(Array(OTP_LENGTH).fill(""));
@@ -181,43 +189,35 @@ export default function LogIn() {
     void sendOtp().then(() => otpRefs.current[0]?.focus());
   };
 
-  // Dev mode (localhost only) — accept a fixed test code and derive a
-  // stable per-phone-number id, since there's no real Supabase session to
-  // pull an id from. In production, verify the real code Twilio sent via
-  // Supabase phone auth and use the real auth user id. Either way, look the
-  // phone number up in the database (not just localStorage) so a returning
-  // user on a fresh browser/device still lands on their real dashboard
-  // instead of /onboarding/profile.
+  // Verifies the code through the seam, which handles both branches: the A10
+  // localhost bypass (fixed 123456, no provider call, synthetic per-phone id)
+  // and the real production path (verify the code Twilio sent, use the real
+  // auth user id). Either way, the phone is then looked up in the DATABASE —
+  // not just localStorage — so a returning user on a fresh browser/device
+  // still lands on their real dashboard rather than /onboarding/profile.
   const verifyOtp = async (code: string) => {
     setIsVerifying(true);
     setErrorMessage("");
 
-    let userId: string;
+    // The seam returns the exact messages shown before this chunk:
+    // "Development mode: enter 123456 to continue" (dev, wrong code) and
+    // "Invalid OTP. Please try again." (production, bad code). It also wraps
+    // the provider call in try/catch, which the old inline call did NOT — a
+    // network throw used to surface as an unhandled rejection and now shows a
+    // real error instead.
+    const result = await providerVerifyOtp(phone, code);
 
-    if (isDev) {
-      if (code !== DEV_OTP_BYPASS) {
-        setErrorMessage("Development mode: enter 123456 to continue");
-        setIsVerifying(false);
-        return;
-      }
-      userId = "dev-user-" + phone.replace(/\D/g, "");
-    } else {
-      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-      const formattedPhone = "+91" + cleanPhone;
-
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: formattedPhone,
-        token: code,
-        type: "sms",
-      });
-
-      if (error || !data.user) {
-        setErrorMessage("Invalid OTP. Please try again.");
-        setIsVerifying(false);
-        return;
-      }
-      userId = data.user.id;
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      setIsVerifying(false);
+      return;
     }
+
+    // NOT an identity key — see the seam's warning on this field. It is the
+    // real auth uid in production and a synthetic "dev-user-…" string under the
+    // bypass, mirrored into fabverify_auth purely for continuity. Audited in
+    // chunk 1.4: all 22 readers of fabverify_auth read only `.phone`.
+    const userId = result.storageUserId;
 
     localStorage.setItem(
       "fabverify_auth",
@@ -226,7 +226,9 @@ export default function LogIn() {
         phone,
         verified: true,
         verifiedAt: new Date().toISOString(),
-        devMode: isDev,
+        // From the seam's own gate, so this can never disagree with the branch
+        // that actually ran.
+        devMode: result.isDevBypass,
       })
     );
 

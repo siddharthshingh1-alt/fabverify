@@ -6,6 +6,41 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.6] — The login page is on the auth seam, verified with a real production OTP
+> Sixth of the 10 chunks of Launch-Ready item 1, and the first to touch the real login UI. **1 file** (`app/login/page.tsx`, +92/−90). **Zero `supabase` references remain in the login page.**
+
+### Changed
+- `signInWithOtp` → `providerSendOtp`, `verifyOtp` → `providerVerifyOtp`, `signOut` → `providerSignOut`. Phone validation, E.164 formatting, the A10 localhost bypass and provider-error classification now all live in the seam — so **login and signup can no longer drift** on any of them (until 1.7 moves signup, they are deliberately on different code paths).
+- ⚠️ **Aliased imports were mandatory:** the page already defines local handlers named `sendOtp` and `verifyOtp`, so an unaliased seam import is a duplicate declaration. Aliasing also meant **zero JSX changes** — the JSX still calls the local handlers.
+- `DEV_OTP_BYPASS` and the inline hostname check removed from the page; `isDev` now comes from the seam's `isDevBypassHost()` at module scope, preserving the existing SSR-false-then-true behaviour exactly.
+- `devMode` in `fabverify_auth` now comes from **`result.isDevBypass`** — the seam's own gate — so it can never disagree with the branch that actually ran. `storageUserId` preserves the legacy `dev-user-<alldigits>` format byte-for-byte.
+
+### The fallback — belt-and-suspenders, by explicit decision
+- **Primary:** the seam's structured `provider_unavailable`. **Backup:** the original message-text check, retained alongside it.
+- ⚠️ **Documented honestly at the call site: the backup is currently UNREACHABLE by construction.** The seam derives `provider_unavailable` using the identical three-substring test on the identical string, so any message the backup would catch has already been classified upstream. It is kept as insurance against the seam's heuristic being narrowed later, and can be deleted once the structured signal is proven in production over time. **Its presence is not evidence the structured signal is insufficient** — that note is in the code so a future reader cannot misread it.
+- Verified there is **no false positive**: `invalid_phone` correctly shows the validation message and does **not** trigger the WhatsApp fallback.
+
+### Fixed (small, intentional)
+- The old inline `supabase.auth.verifyOtp` call was **not wrapped in try/catch** — a network throw surfaced as an unhandled rejection. The seam wraps it, so the user now sees a real error message instead.
+
+### Verified — production PASSED
+- Real OTP on `9773933279` via `npm run build && npm start` + the machine's LAN IP: `method=otp`, `sub c3772075…`, landed on **`/enterprise/dashboard`**. Same identity proven in chunks 1.3 and 1.5.
+- ⚠️ **Proof the SEAM handled it, not leftover code.** `next start` logs no requests, so the server log cannot show this — instead, **bundle forensics**: located login's own client chunk (contains `"Welcome back"`, not `"Create your account"`) and confirmed the seam markers `provider_unavailable` / `isDevBypass` / `storageUserId` are all **PRESENT**, while the old inline path's unique marker `console.error("OTP error:", …)` is **ABSENT**. That string still appears in **signup's** chunk — which is exactly chunk 1.7's remaining work, and independently confirms the two pages are now on different code paths.
+- ⚠️ **The browser-safe seam is now genuinely compiled into a client chunk** (login is `"use client"`), while `supabaseAdmin` / `SUPABASE_SERVICE_ROLE_KEY` / `service_role` remain **absent from all client bundles**. The 1.4 browser/server split is proven under real client-side use, not merely by import-graph inspection.
+
+### Verified — localhost
+- `npm run build` clean, TypeScript pass, **exit 0**, 155 pages.
+- Invalid phone `5123456789` → `"Please enter a valid Indian mobile number"`, WhatsApp fallback correctly **not** shown.
+- Wrong dev code → `"Development mode: enter 123456 to continue"`, stays on the OTP step.
+- **All three account types land correctly:** buyer `9999999991` → `/brand/dashboard` (`userId: "dev-user-9999999991"`, `devMode: true`), manufacturer `9999999992` → `/manufacturer/dashboard`, enterprise `9773933279` → `/enterprise/dashboard` with the enterprise mirror intact.
+- Stale-session mount redirect still works (a leftover session on `/login` redirects to the landing route).
+- Auth matrix **200/401/403** + conversations **200/401** · `/api/test-db` 200 · `auth_identities` still **1** row · `users` snapshot hash unchanged.
+
+### Not tested — recorded as its own task
+- ⚠️ **The `provider_unavailable` fallback itself has never been exercised.** With Twilio on a trial that only delivers to verified caller IDs, **this is the path most real users would hit.** Testing it requires a number Twilio will reject, and any well-formed Indian mobile could belong to a real person — so it was deliberately not attempted. Whether a Twilio trial "unverified number" error matches the text heuristic is **unknown**; it may fall through to a plain error, leaving a real user at a dead end with no fallback offered. Pre-existing — 1.6 preserves the behaviour exactly. Proper fix: stop guessing from message text (use the provider's error code, or treat any production send failure as fallback-worthy, since a user who cannot receive a code is stuck either way).
+
+---
+
 ## [2026-07-30 · Chunk 1.5] — Auth leaves the data layer, and the production token path is tested for the first time
 > Fifth of the 10 chunks of Launch-Ready item 1. **2 files**, server-side only — no UI, no client code. The delicate login-path work is 1.6/1.7.
 
