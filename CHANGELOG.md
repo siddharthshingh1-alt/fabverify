@@ -6,6 +6,37 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.3] — `auth_identities` backfilled: 1 identity created, 9 dev-bypass accounts correctly skipped
+> Third of the 10 chunks of Launch-Ready item 1, and the first to touch real user data. Throwaway script, **scratchpad-only — never committed** (it consumes the service-role key). **Zero application files changed**; the only durable effect is one row in a table no code reads yet.
+
+### The finding that mattered
+- ⚠️ **The two sides store different phone formats.** `users.phone` is bare 10-digit (`"9773933279"`); Supabase `auth.users.phone` is `91`+10 digits with **no leading `+`** (`"919773933279"`). **A naive exact-string match would have linked nothing, inserted nothing, and exited successfully** — a silent no-op reporting success, leaving chunk 1.9 to be built on identities that were never created. Matching normalises both sides to the last 10 digits, byte-identical to `normalisePhone` (`app/lib/auth.ts:34`), already the key the app uses for every ownership comparison. Caveat recorded: `slice(-10)` is lossy and collides across country codes — safe today (all `+91`), wrong under international expansion.
+
+### Result
+- **1 identity created out of 10 accounts** — the founder's enterprise account (`users.id 1ac55487…` ↔ auth uid `c3772075…`), the only one with both a real OTP authentication and a profile row.
+- **9 accounts are dev-bypass (A10) with no Supabase auth user** → skipped as `no_auth_user`, left phone-resolved. Expected, not a failure; chunk 1.8 gives each an identity on its first real authentication.
+- ⚠️ **Consequence for chunk 1.9: the phone fallback is the PRIMARY path in this environment, not the exception.** 9 of 10 accounts resolve by phone. 1.9's risk is the fallback being correct, not the identity lookup — a materially different risk profile than the chunk description assumed.
+
+### Safety design (all enforced, not just documented)
+- **Dry-run is the DEFAULT**; `--apply` is required to write. An accidental invocation is inert. Verified by audit: exactly one `.insert(` in the file, sitting *after* the apply guard, and zero `.update(` / `.delete(` / `upsert` calls anywhere.
+- **Insert-only.** `users` and Supabase auth are read-only — `listUsers` only, no `updateUserById`, no `deleteUser`.
+- **Never guess.** Duplicate phone in `users` skips **both** rows (picking either invents a link); duplicate auth uid for one phone skips; malformed phone skips. All logged individually with reasons. All four buckets were 0 this run.
+- **Conflict screams.** An existing `(provider, provider_uid)` pointing at a *different* `user_id` is an integrity problem: reported, untouched, refuses to proceed, non-zero exit. Deliberately did **not** use `upsert(ignoreDuplicates)`, which would have hidden exactly this case.
+- **Accounting check** — every `users` row must land in exactly one bucket, or the script aborts rather than proceeding on a partial view.
+- **Reversible:** `DELETE FROM auth_identities WHERE provider = 'supabase'` — ⚠️ clean **only until 1.8 ships**, after which real logins also create those rows. The script prints this caveat itself rather than leaving it as a footgun.
+
+### Verified (2026-07-30)
+- **15 independent checks**, deliberately re-derived from the database rather than trusting the backfill script's own output: count = 1 · correct `user_id`/`provider_uid`/`provider` · `created_at` and surrogate `id` populated · the linked phones genuinely agree when re-normalised (`"9773933279"` vs `"919773933279"`) · no orphaned identities · no user with 2+ supabase identities · 9 dev-bypass accounts detected and **none** linked · both orphaned auth users untouched.
+- **`users` snapshot hash byte-identical before and after (`4d791d42182a42fb`)**, row count 10 → 10 — proving nothing outside `auth_identities` was modified.
+- **Idempotency proven by re-running `--apply`:** planned **0** inserts, classified the existing row `already_linked`, table still 1 row. A half-failed run is safe to re-run.
+- `npm run build` clean (155 pages) · `GET /api/test-db` 200 · **auth matrix intact**: `orders` **200** own / **401** anonymous / **403** cross-account · `dev-auth/lookup` resolves the correct account.
+- ⚠️ **One planned check not run: the browser dev login.** The Chrome extension lost host permission for `localhost` mid-session. Substituted API-level verification of the same path, which additionally asserts the 401/403 outcomes — but the UI landing was not re-confirmed.
+
+### Observation recorded, not acted on
+- **2 Supabase auth users exist with no `users` row** (`70****44`, `96****11`, both 2026-07-25, both with a real `last_sign_in_at`). They completed a real OTP verification and never got a profile — the phantom-account shape Issue A addressed. Untouched by the backfill: there is nothing to link them to, and creating `users` rows would invent accounts. Logged in TASKS.md as needing its own decision, not a silent cleanup.
+
+---
+
 ## [2026-07-30 · Chunk 1.2] — `auth_identities` table created (schema only, nothing reads it yet)
 > Second of the 10 chunks of Launch-Ready item 1. The table that decouples identity from phone number (DECISIONS **I9**, resolves **I6**) now exists. **Zero application files touched** — no `.ts`/`.tsx` change, no `db.ts` function. Applied in the Supabase SQL Editor.
 
