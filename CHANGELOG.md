@@ -6,6 +6,35 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.5] — Auth leaves the data layer, and the production token path is tested for the first time
+> Fifth of the 10 chunks of Launch-Ready item 1. **2 files**, server-side only — no UI, no client code. The delicate login-path work is 1.6/1.7.
+
+### Changed
+- **`app/lib/auth.ts:103`** now calls `getIdentityFromToken` from `./authProvider.server` instead of `getPhoneFromAccessToken` from `./db`. It reads **`.phone` only** — `providerUid` is deliberately left unused until chunk 1.9, so 1.5 does not absorb 1.9's risk or its much heavier test burden.
+- **`app/lib/db.ts`** — `getPhoneFromAccessToken` deleted. **The file now contains zero `supabaseAdmin.auth` references: `db.ts` is data only.** That mixing of auth logic into the database abstraction is a large part of why the Supabase seam leaked (DECISIONS X5). A "MOVED OUT" comment marks the spot so the removal reads as deliberate.
+
+### ⚠️ How the production-only path was actually tested (reusable technique)
+The changed line sits behind `isProduction` (`NODE_ENV === "production"`), so **`next dev` can never reach it** — the dev-header branch bypasses it entirely. The technique that worked, worth keeping for any future production-gated change:
+
+- The **server** gate is `NODE_ENV`; every **client** gate (`login/page.tsx:25`, `apiClient.ts:18`, `AuthGuard.tsx:85`) is `window.location.hostname`. **Different signals.**
+- So: `npm run build && npm start`, then browse via the machine's **LAN IP rather than `localhost`**. The server is in production mode *and* the client is out of dev-bypass mode → a **real OTP** is sent → a real Bearer token is attached → the changed code executes.
+- Setup validity was confirmed *before* testing: `x-dev-phone` returned **401** (the same call is **200** under `next dev`), proving the production branch was genuinely active.
+- Rejected alternatives: temporarily forcing `isProduction = true` (edits the file under test, risks surviving into a commit) and minting a token via a throwaway password user (writes a password into Supabase Auth against M10, and a token for a phone with no `users` row returns 401 either way — indistinguishable from failure, so it proves nothing).
+
+### Verified — production path PASSED
+- Real SMS to `9773933279`, real code, landed on **`/enterprise/dashboard` with data**. The dashboard cannot render unless authenticated calls succeeded, and every one of them ran through the changed line.
+- **Independently corroborated server-side:** the provider's record for auth user `c3772075…` shows `last_sign_in_at` moved from `2026-07-25T20:45:16Z` (as recorded in chunk 1.3) to **`2026-07-30T05:09:23Z`** — proof a fresh real authentication occurred, not merely a user report of one.
+- **Full chain asserted:** JWT `sub` `c3772075…` → `getIdentityFromToken` → `{providerUid: c3772075…, phone: 9773933279}` → `auth_identities` → **`users.id 1ac55487…`** (enterprise) — **and the phone path resolves to the same account.** That agreement is precisely what makes chunk 1.9's swap safe. Asserted without the live access token being pasted or written anywhere.
+- ⚠️ **This was the first execution of the production token branch in the project's history.** PROJECT_MEMORY previously carried the caveat that every runtime check in the whole security batch ran under `next dev` and therefore proved "the authorisation logic, **not** the production Supabase-session branch". That long-standing gap is now closed.
+- ⚠️ **The client-bundle check became a LIVE regression test** — `authProvider.server.ts` gained its first real importer here. `getIdentityFromToken` is **present** in server bundles and **absent** from all 181 client chunks, as are `supabaseAdmin`, `SUPABASE_SERVICE_ROLE_KEY` and `service_role`. The browser/server split from 1.4 holds under a real import, not just in theory.
+- **Localhost regression, re-run after the production test:** `npm run build` clean (155 pages) · dev auth matrix unchanged (`orders` **200**/**401**/**403**, `conversations` **200**/**401**) · `/api/test-db` **200** · no remaining callers of `getPhoneFromAccessToken` · `auth_identities` still **1** row · `users` snapshot hash unchanged.
+- ⚠️ **Not separately confirmed: a WRITE through `getVerifiedUser` on the production path** (FabChat message send). Reads are proven by the dashboard rendering; writes use the identical code path, so no distinct risk is expected — recorded as unconfirmed rather than assumed.
+
+### Security note recorded while testing
+- **Supabase sign-out does NOT reliably invalidate an already-issued access token.** Access tokens are stateless signed JWTs; `signOut()` revokes the *refresh* token and deletes the session, stopping new tokens being minted, but an existing access token stays cryptographically valid until its `exp` (~1h by default). Newer GoTrue versions embed a `session_id` and *may* reject a revoked session at `/user`, but that is version-dependent and was not measured here. **If a token is ever exposed, treat it as live until expiry — sign-out is not a kill switch.** Directly relevant to the "Active session visibility + remote logout" item in the Account Security & Recovery group.
+
+---
+
 ## [2026-07-30 · Chunk 1.4] — The auth seam exists: two new files, nothing imports them yet
 > Fourth of the 10 chunks of Launch-Ready item 1, and the file everything later routes through. **Zero existing files modified** — same zero-risk shape as 1.2's unused table. Required by DECISIONS **X5** (seam before first call site); auth is the cautionary tale that produced that rule.
 

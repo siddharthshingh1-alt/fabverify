@@ -113,21 +113,18 @@ export async function updateUserPosition(phone: string, position: string) {
   if (error) throw error;
 }
 
-// Validates a Supabase auth access token (the real, tamper-proof session
-// issued by signInWithOtp/verifyOtp) and returns the phone number Supabase
-// itself attests to — not a phone the caller merely claims in the request.
-// Returns null when the token is missing, invalid or expired.
+// MOVED OUT — chunk 1.5, 2026-07-30.
 //
-// Only the TOKEN is checked here. Resolving that phone to a users row is a
-// separate step (getUserByPhoneOrThrow) so a database failure can't be
-// mistaken for a bad token. users.id is a separate generated UUID, not
-// auth.uid(), so phone is the durable link between the two.
-export async function getPhoneFromAccessToken(accessToken: string) {
-  const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
-  if (error || !data.user?.phone) return null;
-
-  return data.user.phone.replace(/\D/g, "").slice(-10);
-}
+// `getPhoneFromAccessToken` lived here and validated a Supabase auth access
+// token via supabaseAdmin.auth.getUser(). It was AUTH logic sitting inside the
+// DATA abstraction, and that mixing is a large part of why the Supabase seam
+// leaked (DECISIONS X5). It now lives in the auth seam as
+// `getIdentityFromToken` in app/lib/authProvider.server.ts, which additionally
+// returns the provider uid the old function discarded — the durable auth link
+// chunk 1.9 needs (DECISIONS I9).
+//
+// This file no longer references supabaseAdmin.auth at all: db.ts is data
+// only. Do not add auth calls back here.
 
 // Generic per-user-type onboarding data (crafts, skills, portfolio, rates,
 // etc.) that doesn't have a dedicated table. Stored as JSON on the users

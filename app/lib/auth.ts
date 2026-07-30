@@ -19,7 +19,13 @@
  */
 
 import { NextResponse } from "next/server";
-import { getPhoneFromAccessToken, getUserByPhoneOrThrow } from "./db";
+import { getUserByPhoneOrThrow } from "./db";
+// Token verification comes from the AUTH seam, not the data layer. It used to
+// live in db.ts as getPhoneFromAccessToken — auth logic inside the database
+// abstraction, which is exactly why the Supabase seam leaked (DECISIONS X5).
+// authProvider.server is the server-only half of the seam; importing it here
+// is safe because this file is already server-only (it imports NextResponse).
+import { getIdentityFromToken } from "./authProvider.server";
 
 // Next.js sets this to "production" for `next build` output (Vercel preview
 // and production alike) and "development" for `next dev`. Server-controlled
@@ -84,12 +90,18 @@ export async function getVerifiedCallerPhone(request: Request): Promise<PhoneAut
     const token = authHeader.slice("Bearer ".length).trim();
     if (!token) return UNAUTHENTICATED;
 
-    // A rejected token is genuinely "not authenticated". Supabase does not
+    // A rejected token is genuinely "not authenticated". The provider does not
     // reliably distinguish a network failure here from an invalid token, so
     // this stays conservative; the database lookup below is where the
     // outage-vs-auth distinction actually matters.
-    const phone = await getPhoneFromAccessToken(token);
-    return phone ? { ok: true, phone } : UNAUTHENTICATED;
+    //
+    // The seam returns { providerUid, phone }. Only `phone` is used here, on
+    // purpose: `providerUid` is the durable auth link (DECISIONS I9) and its
+    // consumer is CHUNK 1.9, which resolves identity via `auth_identities`
+    // with a phone fallback. Wiring it in here would pull 1.9's risk — and
+    // its much heavier test burden — into what is otherwise a pure move.
+    const identity = await getIdentityFromToken(token);
+    return identity ? { ok: true, phone: identity.phone } : UNAUTHENTICATED;
   }
 
   const devPhone = request.headers.get("x-dev-phone");
