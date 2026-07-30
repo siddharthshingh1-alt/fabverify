@@ -6,6 +6,39 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-30 · Chunk 1.4] — The auth seam exists: two new files, nothing imports them yet
+> Fourth of the 10 chunks of Launch-Ready item 1, and the file everything later routes through. **Zero existing files modified** — same zero-risk shape as 1.2's unused table. Required by DECISIONS **X5** (seam before first call site); auth is the cautionary tale that produced that rule.
+
+### Added
+- **`app/lib/authProvider.ts` — browser-safe half.** `sendOtp`, `verifyOtp`, `getSession`, `signOut`, plus all shared types and the A10 dev bypass. Imports only `./supabase` (anon client).
+- **`app/lib/authProvider.server.ts` — server-only half.** `getIdentityFromToken`. Imports `./supabaseAdmin`.
+
+### Why two files (deviation from the plan, and it re-scopes chunk 1.5)
+- Token verification is the one auth operation that genuinely needs the **service role**; everything else runs on the browser anon client. **`apiClient.ts` is reachable from `"use client"`** and will import the seam in 1.10 — a single combined file would drag `supabaseAdmin` into the browser module graph. `SUPABASE_SERVICE_ROLE_KEY` is not a `NEXT_PUBLIC_` var so the real key would **not** be inlined, but `supabaseAdmin.ts` would silently fall back to its placeholder and construct a broken admin client client-side, breaking the SERVER-ONLY contract documented at `db.ts` and `supabaseAdmin.ts` for no benefit. The split mirrors the existing `supabase.ts` / `supabaseAdmin.ts` division, for the same reason.
+- Consequence: chunk 1.5's TASKS.md wording is corrected — `app/lib/auth.ts` imports from **`authProvider.server`**, not `authProvider`. `auth.ts` is already server-only (it imports `NextResponse`), so that is the correct side.
+
+### Design decisions
+- **`getSession()` added to the operation list** — it was absent from this chunk's original four and 1.10 cannot complete without it. Two live call sites (`AuthGuard.tsx:143`, `apiClient.ts:75`) need it; it returns `{accessToken, providerUid}` so both are served from one function.
+- ⚠️ **`getIdentityFromToken` returns `{providerUid, phone}`, not just the phone.** `db.ts getPhoneFromAccessToken` returns only the phone and **discards `data.user.id`** — which is exactly the `auth_identities.provider_uid` chunk 1.9 must look up. **1.9 could not have been built on the old signature**; this is the reason the function is reshaped rather than moved verbatim.
+- ⚠️ **`verifyOtp` marks the dev bypass structurally**, via `providerUid: null` + `isDevBypass: true` rather than a magic `"dev-user-"` string prefix each caller must remember to check. A `123456` login creates no Supabase auth user, so there is no provider identity — and **chunk 1.8 must write an identity row only when `providerUid` is non-null**, or it would fabricate `('supabase', 'dev-user-9999999991')` rows and pollute the table 1.3's backfill was careful to keep honest.
+- **`sendOtp` returns a discriminated result** (`invalid_phone` / `provider_unavailable` / `error` / `unknown`) rather than a boolean or a throw. The login page currently sniffs `error.message` for `"not configured"/"provider"/"sms"` to decide between the WhatsApp/waitlist fallback and a retryable error; flattening that would silently dead-end real users on unverified Twilio numbers. The provider-specific heuristic moved **into** the seam, which is where vendor knowledge belongs — same shape as `isDatabaseUnavailable()` in `apiError.ts`, and equally a heuristic by necessity since Supabase exposes no code for it.
+- **Password ops deliberately NOT declared** (M10 / item 2). The `provider_uid` meaning for `provider='password'` is still undecided (parked in 1.2): the credential lives in our own `users` table, so there is no external id. A guessed signature is worse than none, because 1.6–1.10 could build against it and item 2 would then have to break it; adding a method later is a one-line change with no migration cost. **What is already accounted for:** the success type is named **`AuthenticationResult`** — after authentication, not OTP — so a future `verifyPassword` returns the same shape and nothing downstream (1.8's identity write, 1.9's resolution) is reshaped when it lands. Recorded as a `FUTURE (M10)` note in the file itself.
+- The A10 dev bypass is **hostname-gated, never `NODE_ENV`**, and now has ONE definition instead of being reimplemented in `login/page.tsx:25` and `AuthGuard.tsx:88`.
+
+### Audited while building
+- **`fabverify_auth` is read at 22 call sites and every one reads only `.phone`.** The `userId` field is **write-only** — nothing consumes it. The seam still returns it (as `storageUserId`, explicitly documented as *not* an identity key) purely so chunks 1.6/1.7 remain behaviour-identical swaps rather than quiet behaviour changes.
+- ⚠️ **Note for chunk 1.10:** `AuthGuard.tsx:143-144` splits its call across lines (`supabase.auth` then `.getSession()`), so a single-line grep for `supabase\.auth\.` **misses it**. Do not use a one-line grep to confirm that file is converted.
+
+### Verified (2026-07-30)
+- `npm run build` clean, 155 static pages, zero TypeScript errors — the seam compiles despite having no callers.
+- **Zero importers**: grep finds `authProvider` mentioned only inside the two new files.
+- ⚠️ **No service-role in client bundles** — the check that proves the split rather than assuming it. All **181** client chunks in `.next/static/` are free of `supabaseAdmin`, `SUPABASE_SERVICE_ROLE_KEY`, `service_role` and `placeholder-service-role-key`. Backed by a comment-stripped import-graph trace: `authProvider.ts → ./supabase → @supabase/supabase-js`, with no `supabaseAdmin` and no `next/server` anywhere in that graph. The shared type crosses the boundary via `import type`, which is erased at compile time and pulls in no runtime module.
+- All 6 original Supabase auth call sites confirmed **unchanged** — nothing was moved this chunk.
+- Auth matrix intact: `orders` **200** own / **401** anonymous / **403** cross-account; `conversations` **200** own / **401** anonymous. `/api/test-db` **200**. `auth_identities` still **1** row (the seam writes nothing — that is 1.8). `users` snapshot hash unchanged.
+- ⚠️ **Browser dev login NOT run.** The Chrome extension still lacks host permission for `localhost` (same blocker as chunk 1.3). Not claimed as passed; the API-level auth matrix above is the substantive evidence.
+
+---
+
 ## [2026-07-30 · Chunk 1.3] — `auth_identities` backfilled: 1 identity created, 9 dev-bypass accounts correctly skipped
 > Third of the 10 chunks of Launch-Ready item 1, and the first to touch real user data. Throwaway script, **scratchpad-only — never committed** (it consumes the service-role key). **Zero application files changed**; the only durable effect is one row in a table no code reads yet.
 
