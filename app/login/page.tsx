@@ -16,6 +16,11 @@ import {
   signOut as providerSignOut,
   verifyOtp as providerVerifyOtp,
 } from "../lib/authProvider";
+// BACKUP fallback detection — see the note at its call site in sendOtp().
+// Extracted to a shared file in chunk 1.7 so signup uses the SAME definition
+// rather than a copy; it deliberately lives outside the seam, since it is
+// insurance against the seam's own heuristic changing.
+import { looksLikeProviderProblem } from "../lib/providerFallback";
 import { useUser } from "../context/UserContext";
 import { getLandingRoute } from "../lib/routing";
 
@@ -27,17 +32,6 @@ const RESEND_SECONDS = 45;
 // DEV_OTP_BYPASS moved into the seam (app/lib/authProvider.ts) in chunk 1.4 —
 // the seam compares the code and owns the A10 hostname gate, so login and
 // signup can no longer drift on what the bypass accepts.
-
-// BACKUP fallback detection — see the note at its call site in sendOtp().
-// Retained by explicit decision (2026-07-30) as belt-and-suspenders behind the
-// seam's structured `provider_unavailable` signal.
-const looksLikeProviderProblem = (message: string | undefined): boolean => {
-  if (!message) return false;
-  const m = message.toLowerCase();
-  return (
-    m.includes("not configured") || m.includes("provider") || m.includes("sms")
-  );
-};
 
 // Real, currently-routable dashboard for each UserContext UserType — see
 // app/context/UserContext.tsx. Anything not in this map (or not yet known)

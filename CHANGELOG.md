@@ -6,6 +6,39 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-07-31 · Chunk 1.7] — The signup page is on the auth seam, proven by a REAL production signup on a fresh number
+> Seventh of the 10 chunks of Launch-Ready item 1, and the last delicate login-flow chunk — a mistake here blocks NEW users. **3 files** (`app/signup/page.tsx`, `app/login/page.tsx`, new `app/lib/providerFallback.ts`), +108/−119. **Zero `supabase` references remain in the signup page** (was 4). Both auth pages are now fully on the seam.
+
+### Changed
+- `signup/page.tsx`: `signInWithOtp` → `providerSendOtp`, `verifyOtp` → `providerVerifyOtp`, `signOut` → `providerSignOut`, inline hostname check → `isDevBypassHost()`. Same aliasing requirement as 1.6 (the page defines local `sendOtp`/`verifyOtp`), so again **zero JSX changes**.
+- The dev and production branches of `verifyOtp` collapse into ONE seam call plus one `fabverify_auth` write, with `devMode` from `result.isDevBypass` and `storageUserId` preserving the legacy `dev-user-<alldigits>` format byte-for-byte.
+- Small improvement inherited from the seam: the old inline `supabase.auth.verifyOtp` was not wrapped in try/catch, so a network throw was an unhandled rejection. It now shows a real error.
+
+### Added
+- **`app/lib/providerFallback.ts`** — one shared `looksLikeProviderProblem`, imported by both auth pages. In 1.6 this was a module-local const in `login/page.tsx`; signup needed the same backup, so it was **extracted rather than copied**, precisely to prevent the login/signup drift the seam exists to eliminate.
+- ⚠️ **Deliberately NOT placed inside `authProvider.ts`.** It is insurance against the SEAM's own heuristic being narrowed, and a backup that lives in the same file as the thing it backs up is not a backup. It remains **unreachable by construction** (the seam classifies with the identical three-substring test on the identical string) — stated in the file so nobody misreads its presence as evidence the structured signal is insufficient.
+
+### Preserved deliberately (NOT harmonised with login)
+- Signup's routing tail is intentionally different. **ORDER MATTERS:** `postVerifyRoute()` is resolved into `next` BEFORE `applyIdentity()`, because `applyIdentity` rewrites the `fabverify_profile` key that `postVerifyRoute` reads. All three destinations stay wrapped in `postVerifyRoute() ?? …`, and signup keeps its own `checkAuth` shape (no `chatRedirectPending`).
+- The `fabverify_auth` write stays BEFORE the lookup and navigation — load-bearing, because `/onboarding/*` is guarded at PHONE level. A navigation before that write bounces every new signup straight to `/login`. Now documented at the line itself.
+
+### Verified
+- **PRODUCTION: a genuine first-time signup on a fresh number.** `9654324268`, confirmed beforehand as absent from BOTH `users` and Supabase `auth.users` and not one of the two known orphaned auth users. Real SMS → real code → `/onboarding/profile` → profile + type → `/artisan/dashboard`. New auth user `de9c220c-f1ed-4541-bbea-3bc67644403b` with `phone_confirmed_at 2026-07-30T22:30:20Z`; `users` row `c9545590-6d92-4085-b319-64740e20eb30` created 10 s later. **The A10 dev bypass is positively ruled out** — it creates no auth user and no `phone_confirmed_at`.
+- **Bundle forensics** (`next start` logs no requests, so this is the proof the seam ran and not leftover code): signup's own client chunk carries `provider_unavailable` / `isDevBypass` / `storageUserId`, and the old inline marker `console.error("OTP error:", …)` is now **absent from all 181 client chunks** — it was still present in signup's chunk after 1.6, which is exactly what 1.6 recorded as the remaining tell. Service-role leakage still zero.
+- **Localhost:** build clean (155 pages) · dev-bypass login `9999999991` → `/brand/dashboard` · dev-bypass signup on an EXISTING account `9654324268` → `/artisan/dashboard`, not onboarding · dev-bypass signup on a FRESH number `9876543210` → `/onboarding/profile`, rendered, not bounced · wrong code → stays on the OTP step with `localStorage` completely empty · invalid phone `5123456789` → correct error with the WhatsApp fallback correctly NOT shown · auth matrix 200/401/403 · `auth_identities` still **1 row**.
+
+### Fixed (documentation of a long-standing unknown)
+- ✅ **Closes "UNTESTED — new-user signup through the guarded onboarding path"** (open since 2026-07-29, risk stated as "if the mode is wrong, every new signup is bounced to login forever"). `AuthGuard mode="phone"` is correct, now proven twice — dev bypass and real production OTP.
+
+### Traps recorded (both cost real time)
+- ⚠️ **`next dev` blocks cross-origin dev resources.** Browsing a dev server from a phone over the LAN fails to hydrate (`Blocked cross-origin request to Next.js dev resource /_next/webpack-hmr`), so a React-controlled input never updates state and the "Send OTP" button stays permanently disabled — which looks exactly like a broken form. **Do NOT fix with `allowedDevOrigins`:** that unblocks the button while leaving `NODE_ENV=development`, where `x-dev-phone` is accepted, invalidating the whole production test. Use `npm run build && npm start`.
+- ⚠️ **The LAN IP Next.js prints can be the wrong adapter** — it announced `192.168.137.1` (Mobile Hotspot) while Wi-Fi was `172.23.18.191`. Both answer 200 from the host, so only the phone can tell them apart. Enumerate with `Get-NetIPAddress` and confirm from the device.
+
+### Kept test account (do NOT delete)
+- `9654324268` · `users.id` **`c9545590-6d92-4085-b319-64740e20eb30`** · auth uid **`de9c220c-f1ed-4541-bbea-3bc67644403b`** · artisan. The only account with a real Supabase identity and **no `auth_identities` row**, making it chunk 1.8's exact verification target. ⚠️ 1.8 must use `users.id` for `user_id` and the auth uid for `provider_uid` — independent UUIDs, easily conflated since the token's `sub` is the auth uid. Totals: `users` 11 · `auth.users` 4 · `auth_identities` 1 · orphaned auth users still 2.
+
+---
+
 ## [2026-07-30 · Chunk 1.6] — The login page is on the auth seam, verified with a real production OTP
 > Sixth of the 10 chunks of Launch-Ready item 1, and the first to touch the real login UI. **1 file** (`app/login/page.tsx`, +92/−90). **Zero `supabase` references remain in the login page.**
 
