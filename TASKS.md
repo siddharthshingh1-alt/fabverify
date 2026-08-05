@@ -146,8 +146,92 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 **Rules for every chunk:** stop the dev server before `npm run build`; build must pass clean; verify BEFORE committing; commit to a branch, never push `main` (it auto-deploys); update the 📍 STATUS line above as the last act of the session.
 
 ### 2. Password login (M10) 🔴 — the migration safety net
-- [ ] Password hashes in **our own `users` table** (argon2id), verification behind the seam; login offers OTP **or** password.
-- [ ] ⚠️ **NEVER store passwords in Supabase Auth.** The single most expensive mistake available here — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong.
+> **MULTI-SESSION BUILD, chunked 2026-08-05 (planning only — no code was written).** Same discipline as item 1: each chunk is buildable, testable and committable in ONE short session, and leaves the app fully working if you stop after it. **Do them in order.**
+>
+> - [ ] ⚠️ **NEVER store passwords in Supabase Auth.** The single most expensive mistake available here — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong. This also rules out `supabase.auth.signInWithPassword()`, which is exactly the convenient thing that looks like it solves M10.
+> - [ ] ⚠️ **The OTP path is never weakened.** Password is an ADDITIONAL option. Every chunk below must leave OTP login working unchanged; if a chunk cannot, it is mis-scoped.
+> - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
+
+#### 📍 M10 STATUS — UPDATE EVERY SESSION
+**NEXT CHUNK: 2.0** · Nothing built · Plan recorded 2026-08-05
+
+---
+
+**⚠️ THE SCOPING DISCOVERY THAT CHANGES THIS ITEM — READ BEFORE PLANNING 2.0.**
+Password login is **not** "check a hash and let them in". Authentication has to produce a **SESSION**, and today every session is a Supabase-signed JWT. Supabase will not issue a JWT for a credential it does not hold — and holding it there is precisely what M10 forbids. Therefore **M10 requires us to issue and verify our OWN session tokens**, and to teach `getIdentityFromToken` to try our issuer first and fall back to Supabase.
+
+That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Consequences to accept up front:
+- M10 is substantially bigger than "add a password column". Roughly half these chunks are the token subsystem, not the credential.
+- It is still worth doing first: a credential *and* a session we own is exactly what makes the RDS cutover survivable, which is why M10 was sequenced as item 2.
+- **Two chunks carry real security risk, not one** — the hashing design (2.2) and our own token verification (2.5). A bug in 2.5 is an auth bypass. Both get a fresh session.
+
+---
+
+- [ ] **CHUNK 2.0 — DECISIONS ONLY. Zero code, zero schema.** *Docs: `DECISIONS.md` + this file.* 🟢 no build risk, **highest leverage of the ten** — every later chunk inherits these.
+  - **(a) Storage shape: separate `user_credentials` TABLE, not a `users` column. STRONGLY RECOMMENDED — see the security finding below.**
+  - **(b) Resolve the `provider_uid` question parked in 1.2 and 1.4.** If credentials live in their own table there is no external provider and no external id, so **password should NOT create an `auth_identities` row at all**. Confirm that, and confirm 1.9's resolution ladder is therefore untouched by M10.
+  - **(c) Token strategy** (see the scoping discovery above): our own signed session token, issuer claim, TTL, refresh behaviour, and where the signing secret lives (env var, server-only, never `NEXT_PUBLIC_`).
+  - **(d) Hashing library + runtime.** argon2id is locked by M10; the *implementation* is not. ⚠️ **Vercel serverless compatibility is the deciding factor** — a native `node-gyp` build may not survive deployment. Prefer a prebuilt-binary or WASM implementation, and confirm the route runs on the **Node runtime, not Edge** (argon2 cannot run on Edge). Decide and record the argon2id parameters (memory, iterations, parallelism) with the reasoning, not just the numbers.
+  - **Verify:** decisions written with rationale; no file under `app/` changed.
+
+- [ ] ⚠️ **SECURITY FINDING (found 2026-08-05 while planning M10, NOT yet acted on) — a `users.password_hash` COLUMN WOULD BE PUBLICLY READABLE TODAY.** `/api/dev-auth/lookup` has **no authentication at all**, accepts any phone, and returns `getUserByPhone(phone)` — which is `.select("*")` — as the entire row (`route.ts:13-15`). **Adding a password hash to `users` would hand an anonymous caller the argon2id hash for any phone number on the platform**, which is free offline-cracking material for the whole user base. This is not hypothetical: the route is live and the disclosure is already documented in the `dev-auth/lookup` PRIVACY task above. **`users` has 5 unqualified `select("*")` / `select()` sites in `db.ts`** (lines 39, 56, 67, 88, 267), and `getVerifiedUser` hands the full row to 13 route call sites, several of which embed user objects in responses — so the column would have multiple escape routes, not one.
+  **THE FIX IS STRUCTURAL, AND IT IS WHY 2.0(a) RECOMMENDS A SEPARATE TABLE:** a `user_credentials` table can never be reached by `select("*")` on `users`, so the leak is impossible by construction rather than prevented by remembering to add a column projection at 5+ call sites forever. It also mirrors the `auth_identities` precedent (identity and credentials sit beside the profile, not inside it) and leaves room for future credential types. **If a column is chosen anyway, locking down `dev-auth/lookup` and adding explicit projections becomes a hard prerequisite of 2.1, not a follow-up.**
+
+- [ ] **CHUNK 2.1 — Create the `user_credentials` table (schema only).** *2 files: `supabase/migrations/003_user_credentials.sql` + the same block in `supabase/schema.sql`.* 🟢 LOW RISK — additive, nothing reads or writes it.
+  - Shape follows the `auth_identities` precedent: surrogate `id` PK, `user_id → users(id) ON DELETE CASCADE`, `credential_type` (`'password'`), the hash, `created_at`, `updated_at`, `UNIQUE (user_id, credential_type)`. Idempotent (`IF NOT EXISTS` throughout).
+  - ⚠️ **RLS enabled with ZERO policies = deny-all**, same as `auth_identities` and for the same reason: the anon key is public. Prove it the way 1.2 did — an anon `INSERT` must return `42501`. An anon `SELECT` returning 0 rows on an empty table proves nothing.
+  - ⚠️ **Store the hash string only.** No plaintext anywhere, no "password hint", no reversible encryption. The argon2id encoded string already carries its own salt and parameters — do not invent a separate salt column.
+  - **Depends on:** 2.0. **Blocks:** 2.4.
+  - **Verify:** columns/constraints/indexes match the migration; `relrowsecurity = true`; **0** policies; 0 rows; anon `INSERT` → `42501`; build clean; grep shows zero references under `app/`.
+
+- [ ] **CHUNK 2.2 — 🔴🔴 THE HASHING MODULE. HIGHEST-RISK CHUNK OF M10 — BUILD ON A FRESH SESSION, NOTHING ELSE THAT DAY.** *1 new file, `app/lib/passwordHash.ts`. Unused; nothing imports it.*
+  - **Why this is the riskiest:** every other chunk fails loudly. This one fails **silently and permanently** — weak parameters, a truncated hash column, a non-constant-time comparison, or a library that silently falls back to a weaker algorithm all produce a system that *works perfectly* while being crackable. And unlike a wiring bug, it is **retroactive**: every hash written under a bad design stays bad until each user re-authenticates, so the damage is already in the database by the time anyone notices.
+  - Surface: `hashPassword(plain) → string`, `verifyPassword(plain, stored) → boolean`, `needsRehash(stored) → boolean` (so parameters can be raised later without a flag day).
+  - ⚠️ **Server-only, like `authProvider.server.ts`.** It must never be reachable from a `"use client"` file. Prove it with the same client-bundle scan used in 1.4/1.5/1.10 — the hashing library and its markers absent from all client chunks.
+  - ⚠️ **Never log, return, or error-message the plaintext or the hash** (CLAUDE.md §2.8). A thrown library error must not carry the input.
+  - ⚠️ **Verification must be constant-time** — use the library's own `verify`, never a manual string `===` on hashes.
+  - **Depends on:** 2.0(d). **Blocks:** 2.3, 2.4.
+  - **Verify:** unit-level round trip (hash → verify true; wrong password → false; tampered hash → false, not throw); two hashes of the same password differ (salting works); `needsRehash` returns true for a deliberately weakened parameter set; timing sanity check; **client-bundle scan clean**; build clean. ⚠️ **Confirm the chosen library actually runs in the deployed environment before building on it** — a hashing module that works locally and fails on Vercel discovers itself at the worst moment.
+
+- [ ] **CHUNK 2.3 — Declare the password operations on the seam (unused).** *1 file, `authProvider.server.ts` (server half — hashing is server-only).* 🟢 LOW RISK — additive, nothing calls it.
+  - `verifyPassword(phone, plain) → AuthenticationResult` and `setPassword(userId, plain) → result`. ⚠️ **`verifyPassword` MUST return the existing `AuthenticationResult` shape** — that is the whole reason 1.4 named the type after authentication rather than OTP. Downstream (1.8's identity write, 1.9's resolution) must need **zero** changes; if it needs any, the shape is wrong.
+  - Replace the `FUTURE (M10)` block at `authProvider.ts:34-46` with what was actually decided.
+  - **Depends on:** 2.0, 2.2. **Blocks:** 2.4, 2.6.
+  - **Verify:** build clean; grep shows zero importers; `AuthenticationResult` unchanged (a diff on the type is a red flag); OTP login still works untouched.
+
+- [ ] **CHUNK 2.4 — Set-password API route + the write path.** *1 new route + client call.* 🟡 MEDIUM — writes credentials, but cannot yet log anyone in.
+  - Authenticated via the existing `getVerifiedUser()` (a user sets a password for their OWN account only; `user_id` FORCED from the session, never read from the body — the Group 1/2 pattern).
+  - Password policy decided here (minimum length, and a rejection list rather than composition rules).
+  - ⚠️ **Deliberately no login path yet.** After this chunk a user can SET a password and nothing can authenticate with it. That is the point: credential storage ships and gets exercised before anything trusts it.
+  - **Depends on:** 2.1, 2.2, 2.3. **Blocks:** 2.5.
+  - **Verify:** set a password → row appears, hash is argon2id-shaped, plaintext appears nowhere in DB or logs; 401 unauthenticated; **403 setting a password for someone else's account**; re-setting replaces rather than duplicating; **`/api/dev-auth/lookup` still returns no credential data**; OTP login unaffected.
+
+- [ ] **CHUNK 2.5 — 🔴 OUR OWN SESSION TOKEN: issue + verify. SECOND-HIGHEST RISK — fresh session.** *Seam + `authProvider.server.ts`.*
+  - Issue a signed token on successful password verification; teach `getIdentityFromToken` to **try our issuer first, then fall back to Supabase** — both token types resolving to the same `users` row. This is A12 Phase 2's mechanism, built early.
+  - ⚠️ **A verification bug here is an AUTH BYPASS**, not a broken feature. Non-negotiables: verify the signature before reading any claim; pin the algorithm and **reject `alg: none` and algorithm substitution**; check issuer, audience and expiry; never trust an unverified claim for identity.
+  - ⚠️ **The Supabase fallback must remain intact** — every existing live session is a Supabase JWT, and breaking that branch logs out every current user.
+  - **Depends on:** 2.4. **Blocks:** 2.6.
+  - **Verify:** our token resolves to the right `users` row; a Supabase token still resolves (both in the same run); expired token → 401; tampered signature → 401; `alg: none` → 401; token signed with the wrong key → 401; the full Group 2 matrix re-run under each token type.
+
+- [ ] **CHUNK 2.6 — Login page offers OTP *or* password.** *`login/page.tsx` + seam wiring.* 🟡 MEDIUM — touches the login path, where a mistake locks users out.
+  - ⚠️ **OTP stays the default and stays fully working.** Password is an added choice, never a replacement, and never a required step.
+  - ⚠️ **Preserve login's routing tail exactly** — the ORDER MATTERS rule from 1.6/1.7 (`postVerifyRoute()` resolved BEFORE `applyIdentity()`; `fabverify_auth` written BEFORE navigating). Password login must reuse that same tail, not a parallel one.
+  - **Depends on:** 2.3, 2.5. **Blocks:** 2.7, 2.8.
+  - **Verify:** OTP login unchanged for all account types; password login lands identically; wrong password shows a real error and writes nothing to `localStorage`; dev bypass (A10) still works on localhost; **one production run with a real token** — localhost cannot exercise the production branches, the same constraint that applied to 1.5, 1.9 and 1.10.
+
+- [ ] **CHUNK 2.7 — Rate limiting / lockout on password attempts.** 🟡 MEDIUM.
+  - ⚠️ **This is not optional polish.** OTP is naturally rate-limited by SMS cost and the provider; **a password endpoint is free to attack and can be hammered indefinitely.** Shipping 2.6 without this leaves an unthrottled online guessing oracle against every account.
+  - Per-account and per-IP throttling with backoff; failures must not reveal whether the account exists (same response and timing for unknown phone vs wrong password).
+  - **Depends on:** 2.6. **Verify:** repeated wrong passwords throttle; a correct password still succeeds after the window; the OTP path is NOT throttled by this; enumeration timing indistinguishable.
+
+- [ ] **CHUNK 2.8 — Password reset via OTP.** 🟡 MEDIUM.
+  - The recovery path: prove the phone by OTP (already built and production-proven), then set a new password through 2.4's route. **No email reset links** — that is a whole new attack surface and we do not verify emails.
+  - ⚠️ Resetting a password must **invalidate existing sessions** for that account, or a reset does not evict an intruder — which is the entire point of having it. Ties into the Account Security & Recovery group, which was blocked on the durable link item 1 has now delivered.
+  - **Depends on:** 2.6. **Verify:** reset via OTP works; the old password stops working; existing sessions are ended; OTP login still works.
+
+- [ ] **CHUNK 2.9 — Docs, decisions and the honest status sweep.** 🟢 LOW.
+  - New `DECISIONS.md` entries for the storage shape, token strategy and argon2id parameters, each with its migration cost stated (X5). Update `PROJECT_MEMORY.md`, `MIGRATION.md` (§4.2 and the A12 Phase 2 section, which 2.5 partially delivers early) and `CHANGELOG.md`.
+  - Record explicitly which branches were exercised in production and which were not — the pattern item 1 used, which is what stopped 1.8 being believed to work when it had never run.
 
 ### 3. RLS decision 🟡 — see DECISIONS I8
 - [ ] **Formally retire RLS as a security mechanism** (decided). Server-side `getVerifiedUser()` + ownership checks are the boundary — proven end-to-end across Groups 1/2a/2b/2c.
