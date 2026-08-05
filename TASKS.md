@@ -17,7 +17,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > **Target: Supabase referenced in ONE file.** Today it is **six** (`login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts`) — plus the two client factories `supabase.ts` / `supabaseAdmin.ts`, which the seam absorbs. (Re-audited 2026-07-30: `app/lib/apiClient.ts:16` imports the client and calls `supabase.auth.getSession()` at line 75 to attach the bearer token. It was missing from the original count and from MIGRATION.md §1.1, which under-scoped chunk 1.10 — see that chunk.)
 
 #### 📍 STATUS — UPDATE THIS LINE EVERY SESSION
-**NEXT CHUNK: 1.8** · Last completed: **1.7** (2026-07-31) · Started 2026-07-29
+**NEXT CHUNK: 1.9** ⚠️ HIGHEST RISK · Last completed: **1.8** (code committed 2026-08-05, **not yet exercised** — see its entry) · Started 2026-07-29
 
 ---
 
@@ -105,10 +105,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 - [ ] **KEPT TEST ACCOUNT (created 2026-07-31 by the chunk 1.7 production signup) — do NOT delete.** Phone `9654324268` · `users.id` **`c9545590-6d92-4085-b319-64740e20eb30`** · Supabase auth uid **`de9c220c-f1ed-4541-bbea-3bc67644403b`** · `user_type` **artisan** · tier none. Deliberately retained by decision: it is the **only** account with a real Supabase auth identity and **no `auth_identities` row**, which makes it the exact verification target for **chunk 1.8** ("sign up a new user → row created"). Account count is now **11**; `auth.users` is **4**; `auth_identities` remains **1** (the founder's enterprise account). ⚠️ The two orphaned auth users are still **2** and unchanged — this signup created a `users` row, so it did NOT become a third orphan.
 
-- [ ] **CHUNK 1.8 — Write `auth_identities` on authentication.** *Small, 1–2 files.*
-  - On successful login/signup, upsert the `('supabase', <auth uid>)` identity so new users get one automatically and the table stops being backfill-only.
+- [~] **CHUNK 1.8 — CODE COMPLETE 2026-07-31, NOT YET EXERCISED (committed 2026-08-05).** *2 files: `db.ts` (+`ensureAuthIdentity`), `auth.ts` (`providerUid` on `PhoneAuthResult` + `recordIdentityOnce`).*
+  - On a successful authenticated request, insert the `('supabase', <auth uid>)` identity so accounts get one automatically and the table stops being backfill-only.
+  - ⚠️ **WRITTEN AT `getVerifiedUser`, NOT AT LOGIN/SIGNUP** — deliberately. At OTP-verify time the `users` row does not exist yet for a new signup, so there is no `user_id` to link. `getVerifiedUser` is the only place a provider identity and a `users.id` are both known server-side. Consequence: a signup is linked by onboarding's NEXT call, and a returning user by their first request after logging in. Self-healing, but **off by one step** from "signup writes the row".
+  - ⚠️ **`ensureAuthIdentity` MUST NEVER THROW.** Its caller's own catch maps exceptions to `unavailable` → 503, so an unguarded failure would turn cosmetic bookkeeping into a 503 on EVERY authenticated request across all 12 routes. It logs and returns `false` instead; the result is deliberately ignored.
+  - **INSERT-ONLY, never repoints.** `ignoreDuplicates: true` → `ON CONFLICT DO NOTHING` on `UNIQUE (provider, provider_uid)`. Re-authenticating is a no-op. A uid already mapped to a DIFFERENT `user_id` is left untouched — chunk 1.3's never-guess rule, now load-bearing because 1.9 reads this table.
+  - **Dev bypass guarded structurally,** not by string check: `providerUid` is `null` on the `x-dev-phone` path, and `recordIdentityOnce` returns early on null. No fabricated `dev-user-…` rows.
+  - ⚠️ **VERIFIED 2026-08-05: THIS CODE HAS NEVER RUN.** `auth_identities` is still **1 row** (the 1.3 backfill). The write only fires on a real-token production request, and the last two production sign-ins (`de9c220c…` 2026-07-30T22:30, `c3772075…` 2026-07-30T07:34) both predate the code. Committed unexercised, with the revert boundary kept separate from 1.9 on purpose. **Chunk 1.9's production test is what exercises it** — a first login writes the row, a second login then resolves through it.
+  - **Verify (pending, folded into 1.9's production run):** existing user logs in → identity row present, not duplicated; re-login creates no second row.
   - **Depends on:** 1.2, 1.6, 1.7. **Blocks:** 1.9.
-  - **Verify:** log in as an existing user → identity row present (not duplicated); sign up a new user → row created; re-login creates no second row.
 
 - [ ] **CHUNK 1.9 — Resolve identity VIA `auth_identities`, with phone fallback.** *Medium, 2–3 files. ⚠️ HIGHEST RISK CHUNK.*
   - `getVerifiedUser()` resolves the `users` row by auth identity where one exists, falling back to phone where it does not. **This is the actual decoupling of identity from phone number** and what mitigates DECISIONS I6.

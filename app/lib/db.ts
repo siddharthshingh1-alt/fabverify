@@ -92,6 +92,66 @@ export async function upsertUser(userData: {
   return data;
 }
 
+/**
+ * Record that `providerUid` (an auth-provider identity) belongs to `userId`.
+ * The durable auth link locked in DECISIONS I9 — added chunk 1.8 (2026-07-31),
+ * the first code to write `auth_identities`, which until now was backfill-only.
+ *
+ * ⚠️ INSERT-ONLY, AND NEVER REPOINTS AN EXISTING MAPPING.
+ * `ignoreDuplicates: true` compiles to ON CONFLICT DO NOTHING against
+ * UNIQUE (provider, provider_uid). Two consequences, both deliberate:
+ *   · Re-authenticating is a no-op — no duplicate row, no error to swallow.
+ *   · If this provider_uid already maps to a DIFFERENT user_id, the existing
+ *     row is left untouched and the conflict is logged, never auto-resolved.
+ *     That is chunk 1.3's never-guess rule: picking a side invents a link, and
+ *     once 1.9 reads this table a wrong link resolves a live session to the
+ *     wrong account.
+ *
+ * ⚠️ NEVER CALL THIS WITH A DEV-BYPASS IDENTITY. The A10 bypass (123456)
+ * creates no provider user, so there is no provider_uid; the caller guards on
+ * `providerUid` being non-null. Writing a synthesised `dev-user-…` value here
+ * would fabricate identities and pollute the table chunk 1.3's backfill was
+ * careful to keep honest. The guard is structural, not a string check.
+ *
+ * ⚠️ THIS FUNCTION MUST NEVER THROW. Its caller is getVerifiedUser(), whose
+ * own catch maps exceptions to `unavailable` → 503. An unguarded failure here
+ * would turn a cosmetic bookkeeping write into a 503 on EVERY authenticated
+ * request across all 12 routes. Identity linking is best-effort: on failure we
+ * log and return, auth proceeds, and the next request retries. "No row yet" is
+ * simply today's status quo, which 1.9's phone fallback already handles.
+ *
+ * Returns true only when a row was newly created (useful for tests//logging);
+ * false means "already linked, conflicted, or failed" — never an error.
+ */
+export async function ensureAuthIdentity(
+  userId: string,
+  providerUid: string,
+  provider = "supabase"
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("auth_identities")
+      .upsert(
+        { user_id: userId, provider, provider_uid: providerUid },
+        { onConflict: "provider,provider_uid", ignoreDuplicates: true }
+      )
+      .select();
+
+    if (error) {
+      console.error("[auth_identities] insert failed:", error.message);
+      return false;
+    }
+    // ignoreDuplicates returns an empty array when the row already existed.
+    return Array.isArray(data) && data.length > 0;
+  } catch (error) {
+    console.error(
+      "[auth_identities] insert threw:",
+      error instanceof Error ? error.message : String(error)
+    );
+    return false;
+  }
+}
+
 export async function updateUserType(phone: string, userType: string) {
   const { error } = await supabaseAdmin
     .from("users")

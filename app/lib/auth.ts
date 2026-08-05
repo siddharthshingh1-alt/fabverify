@@ -19,7 +19,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getUserByPhoneOrThrow } from "./db";
+import { ensureAuthIdentity, getUserByPhoneOrThrow } from "./db";
 // Token verification comes from the AUTH seam, not the data layer. It used to
 // live in db.ts as getPhoneFromAccessToken — auth logic inside the database
 // abstraction, which is exactly why the Supabase seam leaked (DECISIONS X5).
@@ -47,7 +47,24 @@ export type AuthFailure = {
   reason: "unauthenticated" | "unavailable";
 };
 
-export type PhoneAuthResult = { ok: true; phone: string } | AuthFailure;
+export type PhoneAuthResult =
+  | {
+      ok: true;
+      phone: string;
+      /**
+       * The provider's own id for this session — `auth_identities.provider_uid`.
+       * Added chunk 1.8. Additive: the only external consumer of this type
+       * (save-profile) reads `.phone` and is unaffected.
+       *
+       * ⚠️ NULL ON THE DEV PATH, and that is the structural dev-bypass signal
+       * server-side — the mirror of `providerUid: null` / `isDevBypass` in the
+       * browser half of the seam. The x-dev-phone header carries no token, so
+       * there is no provider identity to record. Anything writing
+       * `auth_identities` MUST guard on this being non-null.
+       */
+      providerUid: string | null;
+    }
+  | AuthFailure;
 
 type UserRow = NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>>;
 
@@ -95,17 +112,25 @@ export async function getVerifiedCallerPhone(request: Request): Promise<PhoneAut
     // this stays conservative; the database lookup below is where the
     // outage-vs-auth distinction actually matters.
     //
-    // The seam returns { providerUid, phone }. Only `phone` is used here, on
-    // purpose: `providerUid` is the durable auth link (DECISIONS I9) and its
-    // consumer is CHUNK 1.9, which resolves identity via `auth_identities`
-    // with a phone fallback. Wiring it in here would pull 1.9's risk — and
-    // its much heavier test burden — into what is otherwise a pure move.
+    // The seam returns { providerUid, phone }. Chunk 1.5 deliberately used
+    // only `phone` and left `providerUid` unused; chunk 1.8 stops discarding
+    // it so getVerifiedUser can RECORD the link in auth_identities. It is
+    // still not used to RESOLVE identity — that is 1.9, and it carries the
+    // real risk (a wrong resolution logs someone into the wrong account).
+    // Recording is safe; resolving is not, and they ship separately.
     const identity = await getIdentityFromToken(token);
-    return identity ? { ok: true, phone: identity.phone } : UNAUTHENTICATED;
+    return identity
+      ? { ok: true, phone: identity.phone, providerUid: identity.providerUid }
+      : UNAUTHENTICATED;
   }
 
+  // Dev path: no token exists, so there is no provider identity. providerUid
+  // is null, which is what stops chunk 1.8 fabricating ('supabase',
+  // 'dev-user-…') rows for the 9 dev-bypass accounts.
   const devPhone = request.headers.get("x-dev-phone");
-  return devPhone ? { ok: true, phone: normalisePhone(devPhone) } : UNAUTHENTICATED;
+  return devPhone
+    ? { ok: true, phone: normalisePhone(devPhone), providerUid: null }
+    : UNAUTHENTICATED;
 }
 
 /**
@@ -119,9 +144,48 @@ export async function getVerifiedUser(request: Request): Promise<UserAuthResult>
 
   try {
     const user = await getUserByPhoneOrThrow(caller.phone);
-    return user ? { ok: true, user } : UNAUTHENTICATED;
+    if (!user) return UNAUTHENTICATED;
+
+    // CHUNK 1.8: the only place a provider identity and a users.id are both
+    // known server-side, which is why the link is recorded here rather than at
+    // signup — the users row does not exist yet when the OTP is verified.
+    // Self-healing by design: any authenticated request links the account, so
+    // a new signup is linked by onboarding's next call and a returning user by
+    // their first request after logging in.
+    //
+    // Best-effort ONLY. ensureAuthIdentity never throws (see its contract in
+    // db.ts) and its result is deliberately ignored — a failed link must not
+    // turn into an auth failure, because this function's catch below maps
+    // exceptions to 503 across all 12 routes that use it.
+    await recordIdentityOnce(user.id, caller.providerUid);
+
+    return { ok: true, user };
   } catch {
     // The database is unreachable — NOT an authentication problem.
     return UNAVAILABLE;
   }
+}
+
+/**
+ * Per-process memo of identities already linked, so the upsert costs one
+ * round-trip per provider identity per server process instead of one per
+ * authenticated request.
+ *
+ * Deliberately a plain Set: bounded by the number of distinct users this
+ * process serves, and a cold start simply re-ensures (a no-op if the row
+ * exists). Only records a uid AFTER a non-throwing call, so a transient
+ * failure is retried on the next request rather than cached as done.
+ */
+const linkedProviderUids = new Set<string>();
+
+async function recordIdentityOnce(
+  userId: string,
+  providerUid: string | null
+): Promise<void> {
+  // Dev bypass (A10) has no provider identity — see PhoneAuthResult above.
+  if (!providerUid) return;
+  if (linkedProviderUids.has(providerUid)) return;
+
+  await ensureAuthIdentity(userId, providerUid);
+  linkedProviderUids.add(providerUid);
 }
