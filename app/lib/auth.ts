@@ -19,7 +19,12 @@
  */
 
 import { NextResponse } from "next/server";
-import { ensureAuthIdentity, getUserByPhoneOrThrow } from "./db";
+import {
+  ensureAuthIdentity,
+  getUserByPhone,
+  getUserByPhoneOrThrow,
+  getUserByProviderUid,
+} from "./db";
 // Token verification comes from the AUTH seam, not the data layer. It used to
 // live in db.ts as getPhoneFromAccessToken — auth logic inside the database
 // abstraction, which is exactly why the Supabase seam leaked (DECISIONS X5).
@@ -68,7 +73,20 @@ export type PhoneAuthResult =
 
 type UserRow = NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>>;
 
-export type UserAuthResult = { ok: true; user: UserRow } | AuthFailure;
+export type UserAuthResult =
+  | {
+      ok: true;
+      user: UserRow;
+      /**
+       * WHICH resolution path answered — added chunk 1.9. Additive and
+       * ignored by all 13 route call sites; it exists so tests and logs can
+       * assert that the identity path actually ran rather than silently
+       * falling back to phone every time (a fallback that always fires looks
+       * identical to a working identity path from the outside).
+       */
+      via: "identity" | "phone";
+    }
+  | AuthFailure;
 
 const UNAUTHENTICATED: AuthFailure = { ok: false, reason: "unauthenticated" };
 const UNAVAILABLE: AuthFailure = { ok: false, reason: "unavailable" };
@@ -113,11 +131,11 @@ export async function getVerifiedCallerPhone(request: Request): Promise<PhoneAut
     // outage-vs-auth distinction actually matters.
     //
     // The seam returns { providerUid, phone }. Chunk 1.5 deliberately used
-    // only `phone` and left `providerUid` unused; chunk 1.8 stops discarding
-    // it so getVerifiedUser can RECORD the link in auth_identities. It is
-    // still not used to RESOLVE identity — that is 1.9, and it carries the
-    // real risk (a wrong resolution logs someone into the wrong account).
-    // Recording is safe; resolving is not, and they ship separately.
+    // only `phone`; 1.8 started RECORDING providerUid in auth_identities; 1.9
+    // now also RESOLVES identity through it (see getVerifiedUser below).
+    // `phone` is still returned and still load-bearing — it is the fallback
+    // for every account without an identity row, which in this environment is
+    // most of them.
     const identity = await getIdentityFromToken(token);
     return identity
       ? { ok: true, phone: identity.phone, providerUid: identity.providerUid }
@@ -137,33 +155,152 @@ export async function getVerifiedCallerPhone(request: Request): Promise<PhoneAut
  * The caller's existing users row. Use for anything touching existing data.
  * A caller with a valid session but no account row is "unauthenticated" —
  * they have nothing to act on yet.
+ *
+ * ── CHUNK 1.9: IDENTITY-FIRST, PHONE-FALLBACK ────────────────────────────
+ * This is the actual decoupling of identity from phone number (DECISIONS I9,
+ * mitigating I6) and the highest-risk change in the auth batch, because a
+ * wrong answer here does not error — it logs someone into the wrong account.
+ *
+ * Order, and what moves to the next step:
+ *   1. No providerUid (always true on the dev path) ────────→ straight to 3
+ *   2. auth_identities lookup on (provider, provider_uid):
+ *        hit  → RESOLVED VIA IDENTITY
+ *        miss, or ANY error ─────────────────────────────────→ fall to 3
+ *   3. getUserByPhoneOrThrow(phone) — unchanged, still throws on outage:
+ *        hit   → RESOLVED VIA PHONE
+ *        null  → 401 · throws → 503
+ *
+ * ⚠️ NOTHING WAS REMOVED. Phone matching is fully intact and is still the
+ * primary path for 9 of 11 accounts (chunk 1.3: dev-bypass accounts have no
+ * provider identity at all). This chunk ADDS a path in front of it.
+ *
+ * ⚠️ THE FALLBACK CATCHES A MISSING ANSWER, NOT A WRONG ONE. Every failure of
+ * the identity lookup — no row, bad query, table invisible, timeout — falls
+ * through harmlessly. What it CANNOT catch is auth_identities containing a
+ * provider_uid mapped to the wrong user_id, because that returns confidently.
+ * That is a data risk, not a code risk, which is why chunk 1.3 refuses to
+ * guess a link and chunk 1.8 refuses to repoint one. auditAgainstPhone below
+ * is the only detector we have for it.
+ *
+ * Security note: falling back loses nothing. Both paths sit behind the same
+ * gate — a provider-verified OTP token (getIdentityFromToken). Phone matching
+ * is applied to a phone the provider itself attests to, never one the caller
+ * claimed. Identity-first is migration preparation and I6 mitigation, not the
+ * security boundary.
  */
 export async function getVerifiedUser(request: Request): Promise<UserAuthResult> {
   const caller = await getVerifiedCallerPhone(request);
   if (!caller.ok) return caller;
 
   try {
+    // ── 1. IDENTITY FIRST ────────────────────────────────────────────────
+    // Skipped entirely when providerUid is null, which is ALWAYS the case on
+    // the dev path (x-dev-phone carries no token). Localhost therefore cannot
+    // exercise this branch at all — proving it requires a real production
+    // token, the same constraint chunk 1.5 hit.
+    if (caller.providerUid) {
+      const linked = await getUserByProviderUid(caller.providerUid);
+      if (linked) {
+        const agreement = await auditAgainstPhone(linked, caller.phone);
+        logResolution(agreement, linked.id);
+        // No recordIdentityOnce here: resolving via identity proves the row
+        // already exists. Calling it would be a guaranteed no-op round-trip.
+        return { ok: true, user: linked, via: "identity" };
+      }
+    }
+
+    // ── 2. PHONE FALLBACK (unchanged, proven, still throws on outage) ─────
     const user = await getUserByPhoneOrThrow(caller.phone);
     if (!user) return UNAUTHENTICATED;
 
     // CHUNK 1.8: the only place a provider identity and a users.id are both
     // known server-side, which is why the link is recorded here rather than at
     // signup — the users row does not exist yet when the OTP is verified.
-    // Self-healing by design: any authenticated request links the account, so
-    // a new signup is linked by onboarding's next call and a returning user by
-    // their first request after logging in.
+    // Self-healing by design, and 1.9 is what closes the loop: this request
+    // resolves by phone and writes the link, so the NEXT request resolves via
+    // identity.
     //
     // Best-effort ONLY. ensureAuthIdentity never throws (see its contract in
     // db.ts) and its result is deliberately ignored — a failed link must not
     // turn into an auth failure, because this function's catch below maps
     // exceptions to 503 across all 12 routes that use it.
     await recordIdentityOnce(user.id, caller.providerUid);
+    logResolution("phone", user.id);
 
-    return { ok: true, user };
+    return { ok: true, user, via: "phone" };
   } catch {
     // The database is unreachable — NOT an authentication problem.
     return UNAVAILABLE;
   }
+}
+
+/**
+ * The only detector for the one failure the phone fallback cannot catch: an
+ * identity row that resolves CONFIDENTLY to the wrong account.
+ *
+ * Runs only when the identity path hit, so phone-only accounts still cost a
+ * single query. Deliberately uses the SWALLOWING getUserByPhone, never
+ * getUserByPhoneOrThrow — a throw here would be caught by getVerifiedUser's
+ * catch and turn a perfectly good identity resolution into a 503, which is
+ * exactly the "identity problems must never fail the request" rule this chunk
+ * is built on.
+ *
+ * Never suppressed by the log dedupe: a disagreement must be visible every
+ * single time it happens.
+ */
+async function auditAgainstPhone(
+  resolved: UserRow,
+  phone: string
+): Promise<"identity" | "identity-only"> {
+  const byPhone = await getUserByPhone(phone);
+
+  if (!byPhone) {
+    // Either the phone genuinely matches no account — the DECISIONS I6
+    // reassignment case, where identity resolving an account phone cannot is
+    // the whole point — or the lookup failed. getUserByPhone swallows its
+    // errors so the two are indistinguishable here; that is acceptable
+    // because this is an audit, not a decision.
+    return "identity-only";
+  }
+
+  if (byPhone.id !== resolved.id) {
+    // NOT routed through logResolution: a disagreement must be visible on
+    // every request it occurs on, never collapsed by the once-per-process
+    // dedupe.
+    console.error(
+      "[auth] ⚠️ IDENTITY/PHONE DISAGREEMENT — identity wins. " +
+        `identity→users.id=${resolved.id} · phone→users.id=${byPhone.id}. ` +
+        "Expected only after a phone reassignment (DECISIONS I6). Any other " +
+        "cause means auth_identities holds a wrong link — investigate before trusting it."
+    );
+  }
+
+  return "identity"; // the normal, expected case
+}
+
+/**
+ * Logs each distinct (path, user) resolution ONCE per server process, so the
+ * terminal shows which path answered without drowning in the 5-second FabChat
+ * poll. A restart re-logs, which is what makes it usable as a test
+ * instrument: start the server, log in, read one line.
+ */
+const loggedResolutions = new Set<string>();
+
+function logResolution(via: "identity" | "phone" | "identity-only", userId: string): void {
+  const key = `${via}:${userId}`;
+  if (loggedResolutions.has(key)) return;
+  loggedResolutions.add(key);
+
+  // Phone numbers are deliberately NOT logged; the users.id is enough to
+  // confirm which account resolved and is not personal data on its own.
+  const detail =
+    via === "identity"
+      ? "via IDENTITY (auth_identities) — phone lookup agrees"
+      : via === "identity-only"
+        ? "via IDENTITY (auth_identities) — phone lookup found NO match; identity resolved an account phone could not"
+        : "via PHONE FALLBACK — no identity link used for this request";
+
+  console.log(`[auth] resolved users.id=${userId} ${detail}`);
 }
 
 /**

@@ -152,6 +152,70 @@ export async function ensureAuthIdentity(
   }
 }
 
+/**
+ * Resolve an auth-provider identity to its `users` row — the durable link
+ * (DECISIONS I9) read for the first time here. Added chunk 1.9 (2026-08-05).
+ *
+ * ⚠️ THIS FUNCTION NEVER THROWS, AND THAT IS THE OPPOSITE OF
+ * `getUserByPhoneOrThrow` ON PURPOSE. The contracts are deliberately inverted
+ * because the two lookups play different roles:
+ *
+ *   · phone lookup    = REQUIRED path. Must throw, so a database outage
+ *                       surfaces as 503 and never as a bogus 401 (Issue E).
+ *   · identity lookup = OPTIONAL enhancement. Must never be able to break
+ *                       authentication, so every failure returns null and the
+ *                       caller quietly falls back to phone.
+ *
+ * This is not theoretical. `CREATE POLICY`/DDL work on this project has needed
+ * `NOTIFY pgrst, 'reload schema'` before PostgREST sees a new table — a stale
+ * schema cache means errors on `auth_identities` while `users` answers fine.
+ * Returning null there keeps the app working on the proven phone path; a throw
+ * would have turned a cache refresh into a 503 on EVERY authenticated request
+ * across all 12 routes that call getVerifiedUser().
+ *
+ * ⚠️ MATCHES ON (provider, provider_uid), NEVER provider_uid ALONE. That pair
+ * is what `UNIQUE (provider, provider_uid)` constrains, so it is the only
+ * lookup guaranteed to return at most one row. Matching on the uid alone is
+ * correct today only because 'supabase' is the sole provider — and DECISIONS
+ * A12 Phase 2 (dual-verify) exists specifically to add a second one, at which
+ * point a uid collision across providers would resolve a session to the wrong
+ * account. Free to get right now; expensive to discover at cutover.
+ *
+ * FUTURE (A12 Phase 2): `provider` is a defaulted parameter because the seam's
+ * getIdentityFromToken() does not yet report WHICH issuer validated the token.
+ * When a second provider is stood up, that function must return it and this
+ * default must go.
+ *
+ * An identity row can never outlive its user — the FK is ON DELETE CASCADE
+ * (chunk 1.2) — so a hit here cannot point at a deleted account.
+ */
+export async function getUserByProviderUid(
+  providerUid: string,
+  provider = "supabase"
+) {
+  try {
+    const { data: identity, error } = await supabaseAdmin
+      .from("auth_identities")
+      .select("user_id")
+      .eq("provider", provider)
+      .eq("provider_uid", providerUid)
+      .maybeSingle();
+
+    if (error || !identity) return null;
+
+    // getUserById also swallows its errors, which is the behaviour we want
+    // here: any problem loading the row means "identity path could not
+    // answer", and the caller falls through to phone.
+    return await getUserById(identity.user_id);
+  } catch (error) {
+    console.error(
+      "[auth_identities] lookup threw:",
+      error instanceof Error ? error.message : String(error)
+    );
+    return null;
+  }
+}
+
 export async function updateUserType(phone: string, userType: string) {
   const { error } = await supabaseAdmin
     .from("users")
