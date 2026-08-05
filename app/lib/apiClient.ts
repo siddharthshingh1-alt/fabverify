@@ -13,7 +13,7 @@
  * call sites need no change when their route is converted.
  */
 
-import { supabase } from "./supabase";
+import { getSession } from "./authProvider";
 
 const isDev =
   typeof window !== "undefined" &&
@@ -72,10 +72,24 @@ export async function authFetch(input: string, init: RequestInit = {}) {
       // an anonymous caller.
     }
   } else {
-    const { data } = await supabase.auth.getSession();
-    if (data.session?.access_token) {
-      headers.set("Authorization", `Bearer ${data.session.access_token}`);
+    // Chunk 1.10: through the AUTH SEAM, not the Supabase client. This is the
+    // browser-safe half (authProvider, never authProvider.server) — this file
+    // is reachable from "use client" code, so importing the server half would
+    // drag the service-role client into the browser module graph.
+    const result = await getSession();
+    if (result.status === "session") {
+      headers.set("Authorization", `Bearer ${result.session.accessToken}`);
     }
+    // status "none"   → genuinely signed out; send no header, the API answers
+    //                   401, which is correct.
+    // status "error"  → could not tell. We still send no header, so the API
+    //                   answers 401 — but the distinction is preserved in the
+    //                   type rather than thrown away, so this is the one place
+    //                   to revisit if transient session-read failures ever
+    //                   start pushing signed-in users to re-authenticate.
+    //                   Logged as a follow-up in TASKS.md rather than guessed
+    //                   at now: retrying or surfacing a 503-style message here
+    //                   is a behaviour CHANGE, and 1.10 is a wiring chunk.
   }
 
   return fetch(input, { ...init, headers });

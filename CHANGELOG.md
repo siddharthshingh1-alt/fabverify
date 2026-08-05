@@ -6,6 +6,33 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-05 · Chunks 1.8 / 1.9 / 1.10] — Item 1 COMPLETE: the durable auth link is live, and identity resolution is production-proven
+> The last three of the 10 chunks, in one session. **Item 1 (durable auth link + auth seam) is DONE.** Password login (M10), RLS retirement, remote logout and the whole A12 dual-verify phase were all blocked on this.
+
+### Added
+- **`auth_identities` is now written on authentication (1.8).** `db.ts ensureAuthIdentity()` + `recordIdentityOnce()` in `getVerifiedUser()`. Written there, not at login/signup, because at OTP-verify time a new signup has no `users` row yet — `getVerifiedUser` is the only place a provider identity and a `users.id` are both known server-side. INSERT-only (`ON CONFLICT DO NOTHING`), never repoints an existing mapping, and structurally excludes the dev bypass (`providerUid` is null there).
+- **Identity-first resolution with phone fallback (1.9).** `db.ts getUserByProviderUid()` + the resolution ladder in `getVerifiedUser()`. **This is the actual decoupling of identity from phone number** (DECISIONS I9, mitigating I6). Contracts are deliberately inverted: the phone lookup THROWS (an outage must be 503, not a bogus 401), the identity lookup NEVER throws (it is an optional enhancement and must not be able to break auth). `auditAgainstPhone` logs any identity/phone disagreement — the only detector for the one failure the fallback cannot catch, an identity row resolving confidently to the *wrong* account.
+- **`SessionResult` on the auth seam (1.10)** — a discriminated `session` / `none` / `error`, replacing a nullable session.
+
+### Changed
+- **`AuthGuard`, `UserContext` and `apiClient` now go through the seam (1.10).** **Zero application files import Supabase.** Consumer importers 5 → 0; 5 files remain by design (2 client factories + 3 seams).
+- **Doc target restated:** *"Supabase referenced in ONE file"* was never achievable — `db.ts` must import `supabaseAdmin` as the data seam, and a factory must exist to be imported. Corrected in TASKS.md and MIGRATION.md §1.1/§4.1, along with a stale `UserContext` comment citing login/signup as precedent for direct client imports (untrue since 1.6/1.7).
+
+### Fixed
+- **A latent bug the 1.10 swap would otherwise have shipped.** The seam's `getSession()` swallowed errors into `null`, collapsing "signed out" into "couldn't tell". `AuthGuard` would then have bounced users to `/login` on any flaky connection — its raw-client `.catch()` existed precisely to prevent that — and `apiClient` would have told signed-in users to re-authenticate over a transient glitch. The client-side twin of Issue E.
+
+### Nothing removed
+- 1.10 orphaned no code; the seam's `getSession`/`signOut` went unused → used. `providerFallback.ts` was specifically **kept** despite being unreachable by construction (chunk 1.7's explicit decision — "unreachable today" is not "dead"). The phone fallback in `getVerifiedUser` was never touched.
+
+### Verified
+- **Identity path PRODUCTION-PROVEN** with a real OTP: `[auth] resolved users.id=1ac55487-… via IDENTITY (auth_identities) — phone lookup agrees`. Corroborated by that auth user's `last_sign_in_at` moving to `2026-08-05T06:30:35Z`.
+- Localhost: build clean (155 pages), `tsc` silent, auth matrix 10/10 (200/401/403), browser dev login + sign-out (`localStorage` empty, API 401) + fresh-number signup → `/onboarding/profile` not bounced. 181 client chunks free of service-role markers. `users` 11 and `auth_identities` 1 throughout — the tests created nothing.
+
+### Not yet verified
+- **1.8's write has never executed**, and **1.9's miss-then-fallback branch** plus **1.10's two production-only branches** are unproven. All are behind production gates localhost cannot reach. One combined production session on the still-unlinked artisan account closes all of them — recorded in TASKS.md under chunk 1.10.
+
+---
+
 ## [2026-07-31 · Chunk 1.7] — The signup page is on the auth seam, proven by a REAL production signup on a fresh number
 > Seventh of the 10 chunks of Launch-Ready item 1, and the last delicate login-flow chunk — a mistake here blocks NEW users. **3 files** (`app/signup/page.tsx`, `app/login/page.tsx`, new `app/lib/providerFallback.ts`), +108/−119. **Zero `supabase` references remain in the signup page** (was 4). Both auth pages are now fully on the seam.
 

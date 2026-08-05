@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { supabase } from "../lib/supabase";
+import { getSession } from "../lib/authProvider";
 
 /**
  * Gates every PLATFORM route tree (/brand, /manufacturer, /enterprise, …).
@@ -140,21 +140,26 @@ export default function AuthGuard({
       // Stage 2: confirm a REAL session. Production only, per A10 above.
       if (isDevHost()) return;
 
-      supabase.auth
-        .getSession()
-        .then(({ data }) => {
-          if (cancelled) return;
-          if (!data.session) {
-            setAuthorised(false);
-            router.replace("/login");
-          }
-        })
-        .catch(() => {
-          // A network failure is NOT proof of a dead session. Leaving the
-          // user in place is the correct call: the API is the real boundary
-          // and answers 401 on its own if the session is genuinely gone.
-          // Bouncing here would log people out over a flaky connection.
-        });
+      // Chunk 1.10: through the AUTH SEAM, not the Supabase client.
+      //
+      // ⚠️ THE THREE-WAY CHECK IS LOAD-BEARING — do not simplify it to
+      // `if (!result.session)`. Only "none" is proof of being signed out.
+      // "error" means the question could not be answered, and a network
+      // failure is NOT proof of a dead session: the API is the real boundary
+      // and answers 401 on its own if the session is genuinely gone. Bouncing
+      // on "error" would log people out over a flaky connection — which is
+      // why the raw client call carried a deliberately-empty .catch() here,
+      // and why the seam returns a discriminated SessionResult instead of a
+      // nullable session (a swap to a nullable would have silently lost this).
+      getSession().then((result) => {
+        if (cancelled) return;
+        if (result.status === "none") {
+          setAuthorised(false);
+          router.replace("/login");
+        }
+      });
+      // No .catch needed: getSession never rejects, it reports { status:
+      // "error" }, which this deliberately ignores.
     };
 
     check();

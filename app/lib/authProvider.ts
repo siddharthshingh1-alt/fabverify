@@ -157,6 +157,35 @@ export type ProviderSession = {
   providerUid: string | null;
 };
 
+/**
+ * The result of ASKING about the session — three outcomes, not two.
+ *
+ * ⚠️ "none" AND "error" MUST STAY DISTINCT. This is the client-side twin of
+ * Issue E, where collapsing "not logged in" and "couldn't tell" into one null
+ * made a database outage look like an auth failure and sent users off to
+ * re-authenticate over a transient fault.
+ *
+ * The same trap exists here, and both consumers would have fallen into it if
+ * getSession() had kept returning a bare `ProviderSession | null`:
+ *
+ *   · AuthGuard bounces to /login on "none". On "error" it must do NOTHING —
+ *     a network failure is not proof of a dead session, and bouncing would log
+ *     people out over a flaky connection. That behaviour existed as a .catch()
+ *     on the raw client and would have been silently lost in the swap.
+ *   · apiClient attaches a Bearer token on "session". On "error" a caller that
+ *     silently sent no header would get a 401, which readSaveError turns into
+ *     "log in again" — telling a signed-in user to re-authenticate because of
+ *     a momentary glitch.
+ *
+ * Added chunk 1.10. Mirrors the discriminated shape of SendOtpResult above.
+ */
+export type SessionResult =
+  | { status: "session"; session: ProviderSession }
+  /** Definitively signed out — safe to bounce to /login. */
+  | { status: "none" }
+  /** Could not determine. NOT proof of being signed out — never bounce on this. */
+  | { status: "error" };
+
 // ── operations ──────────────────────────────────────────────────────────
 
 /**
@@ -287,23 +316,38 @@ export async function verifyOtp(
 }
 
 /**
- * The current session as the browser sees it, or null.
+ * The current session as the browser sees it.
  *
- * Serves both existing call sites: AuthGuard needs only "is there a
- * session", apiClient needs the access token to attach as a Bearer header.
+ * Serves both call sites: AuthGuard needs only "is there a session",
+ * apiClient needs the access token to attach as a Bearer header.
  *
- * Returns null under the dev bypass, correctly — 123456 creates no Supabase
+ * ⚠️ RETURNS A DISCRIMINATED SessionResult, NOT `ProviderSession | null`.
+ * The signature was widened in chunk 1.10 — see SessionResult above for why
+ * "signed out" and "could not tell" must never collapse into one value. This
+ * is NOT a rename; a caller treating a falsy result as "signed out" would
+ * reintroduce the exact bug the type exists to prevent.
+ *
+ * Reports `none` under the dev bypass, correctly — 123456 creates no Supabase
  * session at all. That is exactly why AuthGuard skips its session check on
  * localhost, and why apiClient sends `x-dev-phone` there instead.
  */
-export async function getSession(): Promise<ProviderSession | null> {
+export async function getSession(): Promise<SessionResult> {
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    if (!token) return null;
-    return { accessToken: token, providerUid: data.session?.user?.id ?? null };
+    if (!token) return { status: "none" };
+    return {
+      status: "session",
+      session: {
+        accessToken: token,
+        providerUid: data.session?.user?.id ?? null,
+      },
+    };
   } catch {
-    return null;
+    // Deliberately NOT "none". The caller decides what an unanswerable
+    // question means for it; guessing "signed out" here is what logs people
+    // out over a flaky connection.
+    return { status: "error" };
   }
 }
 

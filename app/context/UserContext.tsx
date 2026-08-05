@@ -2,10 +2,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { resolveAccount, type AccountType } from '../lib/accountType'
 // Client-side AUTH session only (sign-out), never database access — the
-// CORE T1 / DECISIONS A1 rule routes DB calls through db.ts. Same precedent
-// as login/page.tsx and signup/page.tsx, which import this client directly
-// for verifyOtp()/signOut().
-import { supabase } from '../lib/supabase'
+// CORE T1 / DECISIONS A1 rule routes DB calls through db.ts.
+//
+// Chunk 1.10 moved this off the Supabase client and onto the AUTH SEAM. The
+// previous comment here claimed login/page.tsx and signup/page.tsx as
+// precedent for "imports the client directly" — that stopped being true in
+// chunks 1.6 and 1.7, which put both pages on the seam. No application file
+// imports the Supabase client any more.
+//
+// Aliased: this module already defines its own `signOut` (the platform-wide
+// one below), so an unaliased seam import would be a duplicate declaration.
+// Same collision chunk 1.6 hit in login/page.tsx.
+import { signOut as providerSignOut } from '../lib/authProvider'
 
 export type UserType =
   | 'buyer'
@@ -346,10 +354,15 @@ export function UserProvider({ children }: {
    *      Clearing before it would simply be undone.
    */
   const signOut = async () => {
+    // Chunk 1.10: through the AUTH SEAM, not the Supabase client.
+    //
     // Best-effort: a network failure must not strand the user in a
-    // half-signed-out state. Local teardown below still runs.
+    // half-signed-out state. Local teardown below still runs. The seam's
+    // signOut() swallows its own failure for exactly this reason, so the
+    // try/catch here is now belt-and-braces rather than the only guard — kept
+    // deliberately, because step 1 failing must never skip steps 2 and 3.
     try {
-      await supabase.auth.signOut()
+      await providerSignOut()
     } catch {}
 
     applyIdentity(null)

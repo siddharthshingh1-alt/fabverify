@@ -24,11 +24,17 @@ Almost. **Nine** files import Supabase (re-audited 2026-07-30 — the original p
 | `app/lib/supabase.ts` | `createClient` | ✅ browser client factory |
 | `app/lib/supabaseAdmin.ts` | `createClient` | ✅ service-role factory |
 | ~~`app/api/test-db/route.ts`~~ | ~~**`supabase.from("users")`**~~ | ✅ **FIXED in chunk 1.1 (2026-07-30)** — now calls `db.ts checkDatabaseConnection()`. Was the sole CORE T1 / A1 violation. |
-| `app/login/page.tsx` | `auth.signInWithOtp`, `verifyOtp`, `signOut` | ⚠️ auth only, no DB |
-| `app/signup/page.tsx` | same | ⚠️ auth only, no DB |
-| `app/context/UserContext.tsx` | `auth.signOut` | ⚠️ auth only, no DB |
-| `app/components/AuthGuard.tsx` | `auth.getSession` | ⚠️ auth only, no DB |
-| `app/lib/apiClient.ts` | `auth.getSession` (line 75, inside `authFetch`) | ⚠️ auth only, no DB — **MISSED BY THE FIRST AUDIT** |
+| `app/lib/authProvider.ts` | `auth.signInWithOtp`, `verifyOtp`, `getSession`, `signOut` | ✅ **the AUTH seam, browser half** (added chunk 1.4) |
+| `app/lib/authProvider.server.ts` | `auth.getUser` (token → identity) | ✅ **the AUTH seam, server half** (added chunk 1.4) |
+| ~~`app/login/page.tsx`~~ | ~~`auth.signInWithOtp`, `verifyOtp`, `signOut`~~ | ✅ **on the seam, chunk 1.6** |
+| ~~`app/signup/page.tsx`~~ | ~~same~~ | ✅ **on the seam, chunk 1.7** |
+| ~~`app/context/UserContext.tsx`~~ | ~~`auth.signOut`~~ | ✅ **on the seam, chunk 1.10** |
+| ~~`app/components/AuthGuard.tsx`~~ | ~~`auth.getSession`~~ | ✅ **on the seam, chunk 1.10** |
+| ~~`app/lib/apiClient.ts`~~ | ~~`auth.getSession` (line 75, inside `authFetch`)~~ | ✅ **on the seam, chunk 1.10.** Was **MISSED BY THE FIRST AUDIT** |
+
+✅ **RESOLVED 2026-08-05 by chunk 1.10 — item 1 complete.** The count is now **5 files, all of them seams or factories**: `supabase.ts` / `supabaseAdmin.ts` (client factories) and `authProvider.ts` / `authProvider.server.ts` / `db.ts` (auth seam, both halves, plus the data seam). **Zero application files import Supabase** — consumer importers went 5 → 0.
+
+⚠️ **The old target "Supabase referenced in ONE file" was never achievable and has been restated.** `db.ts` must import `supabaseAdmin` — it is the data seam — and a factory must exist for anything to import. One file per seam plus the factories is the correct end state, and the meaningful metric is consumer importers reaching zero.
 
 **18 of 18 API routes now import `db.ts`** (17 of 18 before chunk 1.1). The discipline held through the entire auth-hardening batch, and the single violation — a one-line health check — is closed.
 
@@ -137,8 +143,9 @@ Locked order. Each item's abstraction layer is built **before** its first implem
 
 **Why a table, not a single `users.auth_user_id` column** (as I6 proposed): a column holds ONE identity and cannot express "this user exists in both Supabase and the new provider at once" — which is precisely what a parallel run *is*. A column forces a hard flip; the table makes the overlap a normal, representable state, and gives social/email login later for free.
 
-`getVerifiedUser()` / `getVerifiedCallerPhone()` stay as they are — they are already the right shape and sit on top of the seam.
-**Target: Supabase referenced in ONE file.** Today it is **six** — `login`, `signup`, `UserContext`, `AuthGuard`, `apiClient`, `db.ts` (corrected 2026-07-30; `apiClient` was missed, see §1.1).
+`getVerifiedCallerPhone()` stayed as it was. `getVerifiedUser()` gained the identity-first ladder in chunk 1.9 — it now resolves via `auth_identities` where a link exists and falls back to phone where it does not, which is what actually decouples identity from the phone number.
+
+✅ **DONE 2026-08-05.** All 10 chunks complete. Consumer importers of Supabase: **5 → 0**; what remains is 2 factories + 3 seams (see §1.1, where the "ONE file" target is restated accurately). The identity path is **production-proven** with a real OTP — the server logged `via IDENTITY (auth_identities) — phone lookup agrees` resolving token `sub c3772075…` to `users.id 1ac55487…`. Phone matching remains fully intact as the fallback and is still the primary path for 9 of 11 accounts.
 
 ### 4.2 Password login (M10) 🔴
 Hashes in **our** `users` table (argon2id), verification behind the seam. Login offers OTP **or** password.

@@ -4,6 +4,16 @@
 
 ---
 
+## ✅ ITEM 1 COMPLETE (2026-08-05) — durable auth link + auth seam
+
+All 10 chunks done. **Zero application files import Supabase** (consumer importers 5 → 0; 5 files remain by design: 2 client factories + 3 seams). `getVerifiedUser()` resolves identity via `auth_identities` with phone fallback — **the identity path is production-proven with a real OTP**, and phone matching stays fully intact as the fallback for the 9 dev-bypass accounts that have no provider identity.
+
+**➡️ NEXT: Launch-Ready item 2 — Password login (M10).** The migration safety net: hashes in **our** `users` table (argon2id), verification behind the seam, login offers OTP **or** password. ⚠️ **Never store passwords in Supabase Auth** — the single most expensive mistake available here.
+
+⚠️ **One open task against item 1, not a blocker for item 2 but do it before merging to `main`:** a single combined production login (artisan `9654324268` via `npm start` + LAN IP — re-confirm the IP, it is DHCP and has already changed once) proves 1.8's first-ever write, 1.9's miss-then-fallback branch, and 1.10's two production-only branches in one session. Details under chunk 1.10 in TASKS.md.
+
+---
+
 ## ➡️ NEXT UP — LAUNCH-READY (order locked 2026-07-29)
 
 The auth security batch is **complete and committed**. Next milestone is **Launch-Ready**, sequenced by migration dependency — see the locked order in `TASKS.md` and the full strategy in **`docs/ARCHITECTURE/MIGRATION.md`**.
