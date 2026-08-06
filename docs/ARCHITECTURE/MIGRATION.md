@@ -148,9 +148,15 @@ Locked order. Each item's abstraction layer is built **before** its first implem
 ✅ **DONE 2026-08-05.** All 10 chunks complete. Consumer importers of Supabase: **5 → 0**; what remains is 2 factories + 3 seams (see §1.1, where the "ONE file" target is restated accurately). The identity path is **production-proven** with a real OTP — the server logged `via IDENTITY (auth_identities) — phone lookup agrees` resolving token `sub c3772075…` to `users.id 1ac55487…`. Phone matching remains fully intact as the fallback and is still the primary path for 9 of 11 accounts.
 
 ### 4.2 Password login (M10) 🔴
-Hashes in **our** `users` table (argon2id), verification behind the seam. Login offers OTP **or** password.
+> **MULTI-SESSION BUILD, chunked 2026-08-05 into 2.0–2.9 — see `TASKS.md` for the ordered list and the 📍 M10 STATUS line.** Chunks 2.0/2.1 done 2026-08-06.
+
+Hashes (argon2id) in **our own `user_credentials` table**, verification behind the seam. Login offers OTP **or** password.
 **This is the migration safety net, not just a feature** — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong.
-⚠️ **NEVER store passwords in Supabase Auth.** That is the single most expensive mistake available here.
+⚠️ **NEVER store passwords in Supabase Auth.** That is the single most expensive mistake available here, and it rules out `supabase.auth.signInWithPassword()`.
+
+⚠️ **CORRECTED 2026-08-06 (chunk 2.0).** This section previously read *"hashes in our `users` table"*. That is now **[I10]: a separate `user_credentials` table, never a `users` column** — because `/api/dev-auth/lookup` is unauthenticated and returns `select("*")` on `users` for any phone, so a column there would hand an anonymous caller the hash for every account on the platform. The separate table makes that leak impossible by construction. Also decided: password writes no `auth_identities` row (**[I11]**), and session revocation is a `token_epoch` integer (**[I12]**).
+
+⚠️ **M10 PULLS PHASE 2 FORWARD.** Authentication must produce a SESSION, and Supabase will not sign a JWT for a credential it does not hold — while holding it there is precisely what M10 forbids. So M10 requires us to **issue and verify our own session tokens**, and to teach `getIdentityFromToken` to try our issuer first and fall back to Supabase. That is literally §3 Phase 2 (dual-verify), arriving early: roughly half of M10 is the token subsystem, not the credential. It is still correct to do first — a credential *and* a session we own is exactly what makes the RDS cutover survivable.
 
 ### 4.3 RLS 🟡 — see DECISIONS I8
 **Formally retired as a security mechanism.** Do not invest in `auth.uid()`-based policies; the migration deletes them. If a compliance requirement later demands defence-in-depth, rewrite against `current_setting('app.user_id')` set per-transaction — standard Postgres, portable to RDS.

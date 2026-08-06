@@ -278,3 +278,68 @@ CREATE INDEX IF NOT EXISTS idx_auth_identities_user_id
 -- with RLS off is browser-readable, and this one maps provider UIDs to
 -- internal user IDs. Service-role access (which bypasses RLS) does the work.
 ALTER TABLE auth_identities ENABLE ROW LEVEL SECURITY;
+
+-- User credentials — password hashes FabVerify itself owns (DECISIONS M10,
+-- built as the A12 migration safety net). Added by migration
+-- 003_user_credentials.sql, 2026-08-06, and duplicated here for the same
+-- reason as auth_identities above: the A12 Phase 3 RDS build is likely to be
+-- created from this file and must not miss it.
+--
+-- ⚠️ PASSWORDS ARE NEVER STORED IN SUPABASE AUTH — a credential we own works
+-- identically before, during and after the move, and is the fallback if the
+-- token cutover goes wrong.
+--
+-- ⚠️ A SEPARATE TABLE, NOT A `users.password_hash` COLUMN, because
+-- /api/dev-auth/lookup is unauthenticated and returns `select("*")` on
+-- `users` for any phone — a column there would hand an anonymous caller the
+-- hash for every account on the platform. A separate table cannot be reached
+-- by `select("*")` on `users`, so the leak is impossible by construction.
+--
+-- Password writes NO auth_identities row: the credential is ours, so there is
+-- no external provider and no external id. Chunk 1.9's identity and phone
+-- branches are unaffected.
+--
+-- Full per-column reasoning and the VERIFY queries live in
+-- supabase/migrations/003_user_credentials.sql. Keep the two in sync.
+CREATE TABLE IF NOT EXISTS user_credentials (
+  id                   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- ON DELETE CASCADE: a credential outliving its user is a live
+  -- authentication secret with no owner.
+  user_id              UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- No CHECK: adding a credential type (passkey, TOTP) must not need DDL.
+  credential_type      TEXT NOT NULL DEFAULT 'password',
+  -- The argon2id ENCODED string — carries its own salt AND parameters, so no
+  -- separate salt or params column. TEXT, never fixed-width: a truncated hash
+  -- fails silently and retroactively.
+  password_hash        TEXT NOT NULL,
+  -- Revocation. Our tokens are signed, not stored, so they cannot be deleted;
+  -- a password reset bumps this and every outstanding session for the account
+  -- fails verification at once (chunk 2.8's "reset ends existing sessions").
+  token_epoch          INTEGER NOT NULL DEFAULT 0,
+  -- Lockout (chunk 2.7). NOT NULL DEFAULT 0 deliberately: `failed_attempts +
+  -- 1` is NULL when the column is NULL, so a nullable counter never
+  -- increments — a lockout that never locks.
+  failed_attempts      INTEGER NOT NULL DEFAULT 0,
+  last_failed_at       TIMESTAMPTZ,
+  locked_until         TIMESTAMPTZ,
+  -- Reset (chunk 2.8). NO reset_token column by design — reset proves the
+  -- phone by OTP, which is already built. No email reset links.
+  password_changed_at  TIMESTAMPTZ,
+  -- "Enterprise default password" (Phase A): admin-set, user must replace.
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Application-maintained, not a trigger (MIGRATION.md §5 rule 3).
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Makes "re-setting a password replaces rather than duplicates" structural.
+  CONSTRAINT user_credentials_user_type_key UNIQUE (user_id, credential_type)
+);
+
+-- No separate user_id index, unlike auth_identities: the UNIQUE constraint
+-- above LEADS with user_id, so its automatic index already serves the FK
+-- cascade check and every lookup this table has.
+
+-- RLS on with NO policy = deny all. Higher stakes than any other table here:
+-- the anon key is public and this one holds password hashes. Service-role
+-- access (which bypasses RLS) does the work. An anon SELECT returning 0 rows
+-- on an empty table proves nothing — the proof is an anon INSERT → 42501.
+ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;

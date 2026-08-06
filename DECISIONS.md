@@ -198,4 +198,18 @@ Background `#07122a` · Cards `#0D1B33` · Border `#1C3050` · Gold accent `#f2c
 
 ---
 
+## PASSWORD-LOGIN DECISIONS (2026-08-06, chunk 2.0)
+> These are M10's foundational decisions. Locked BEFORE the table was created, because one of them determines a column in it. Implementation choices deliberately NOT locked here — argon2id parameters and the JWT library are decided at chunks 2.2 and 2.5, where they can be verified against a real runtime instead of on paper.
+
+**[I10] Password hashes live in their OWN `user_credentials` table — never a `users` column, and NEVER in Supabase Auth.** (2026-08-06) — Two independent reasons, either one sufficient.
+*Security:* `/api/dev-auth/lookup` has no authentication at all, accepts any phone, and returns `getUserByPhone(phone)` — which is `.select("*")` on `users` (`db.ts:38-39`) — as the entire row. A hash on `users` would be handed to an anonymous caller for **any phone number on the platform**: free offline-cracking material for the whole user base. `users` has five unqualified select sites in `db.ts` (38, 55, 66, 86, 264) and `getVerifiedUser` passes the full row to 13 route call sites, several of which embed user objects in responses — so a column would have multiple escape routes, not one. A separate table cannot be reached by `select("*")` on `users`, making the leak impossible **by construction** rather than prevented by remembering a column projection at 5+ call sites forever.
+*Migration:* a credential FabVerify owns works identically before, during and after the AWS RDS move and is the fallback if the token cutover goes wrong ([A12]). Storing it in Supabase Auth would re-couple us to the provider we are leaving and rules out `supabase.auth.signInWithPassword()`, which is the convenient thing that looks like it solves M10.
+**Migration cost: none.** Standard PostgreSQL table, standard FK; ports as-is.
+
+**[I11] Password authentication writes NO `auth_identities` row.** (2026-08-06) — **Resolves the open question parked in migration 002 and chunk 1.4.** The credential lives in our table, so there is no external provider and no external id; a `provider='password'` row would be self-referential noise (`provider_uid` = the very `user_id` it maps to). **Consequence for [I9]/chunk 1.9: the existing identity and phone branches are untouched by M10.** ⚠️ But the resolution ladder is NOT unchanged, and the M10 plan's original wording ("1.9's ladder is untouched") was too optimistic: at chunk 2.5 the ladder gains **one new branch above** the existing two, for tokens we issue ourselves, where `sub = users.id` needs no lookup at all. Recorded as a correction rather than discovered at 2.5, the auth-bypass chunk — the worst place to meet a contract mismatch.
+
+**[I12] Session revocation is a `token_epoch` integer on the credential row, not a sessions table.** (2026-08-06) — Our own session tokens are **signed, not stored**, so they cannot be deleted once issued. Chunk 2.8 requires that a password reset ENDS existing sessions, or a reset does not evict an intruder — which is the entire point of having it. The issued token carries the epoch it was minted under; verification rejects any token below the current value; a reset is a `+1` that invalidates every outstanding session for that account at once. One integer, one read. — A `sessions` table is the more powerful answer and is what per-device remote logout will eventually want; this decision does not block adding one later, and deliberately buys the smaller thing now. **Migration cost: none** (a plain integer column).
+
+---
+
 *Append new decisions below this line with the next ID and a date.*

@@ -6,6 +6,32 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-06 · Chunks 2.0 / 2.1] — M10 begins: password decisions locked, `user_credentials` table created (schema only)
+> First two chunks of password login. **No credential handling, no hashing, no token logic, and nothing authenticates by password.** Docs + one table.
+
+### Added
+- **`user_credentials` table** (`supabase/migrations/003_user_credentials.sql`, mirrored into `supabase/schema.sql`). 12 columns, RLS deny-all, `UNIQUE (user_id, credential_type)`, FK `ON DELETE CASCADE`. **0 rows; zero references under `app/`.** First writer is chunk 2.4.
+- **DECISIONS [I10] [I11] [I12]** — storage shape, no `auth_identities` row for password, and `token_epoch` revocation.
+
+### Changed
+- **A fuller schema than planned, by decision:** the lockout (2.7) and reset (2.8) columns were included upfront rather than added later, since altering a credentials table is more disruptive than carrying empty ones. Every one of them is nullable or NOT NULL-with-default, so they are inert until their chunk — **proven by an INSERT naming only `(user_id, password_hash)`**, not asserted.
+- **`MIGRATION.md` §4.2 corrected.** It said *"hashes in our `users` table"*; that is now a separate table per [I10], with the reason recorded.
+- **A doc claim corrected before it could mislead:** the M10 plan said 1.9's resolution ladder would be "untouched". Its existing identity and phone branches are, but chunk 2.5 adds **one new branch above them** for our own tokens. Fixed now rather than discovered at 2.5, the auth-bypass chunk.
+
+### Decided, deliberately NOT locked
+- **argon2id parameters and the hashing library move to 2.2; JWT algorithm/TTL/library move to 2.5** — a library decision that cannot be tested against the deployed runtime is a paper decision. ⚠️ We have never deployed, so proving Vercel compatibility means a **preview** deploy from this branch, which needs an explicit go-ahead.
+
+### Verified
+- Table shape 12 columns / 3 constraints (FK confirmed `ON DELETE CASCADE`) / 2 indexes / **0** policies / **0 rows read with the service-role key**.
+- **RLS proven by an anon `INSERT` returning `42501`**, run side by side with `auth_identities` as a control and returning byte-identical errors. An anon `SELECT` returned `200 []` on both tables — which proves nothing on an empty table, and is exactly why the INSERT is the test.
+- Build clean, exit 0, 155 pages · `tsc --noEmit` silent · grep zero `user_credentials` under `app/` · auth matrix **9/9** (orders, messages, conversations: 200 own / 401 anonymous / 403 cross-account) · all three account types log `via PHONE FALLBACK`, byte-identical to 1.9/1.10 · `users` **11** and `auth_identities` **1** before and after — the session created nothing.
+
+### Worth keeping (two "failures" that were reading artifacts)
+- The Supabase SQL Editor returns **only the LAST result set**, so a two-statement verify block hid the `relrowsecurity` answer and showed `policy_count = 0` in its place — making correct RLS look disabled on a table meant to hold password hashes. **One statement per verify block.**
+- The SQL Editor connects as a role that **bypasses RLS**, so it can never prove RLS works; that proof has to come from outside against PostgREST with the anon key.
+
+---
+
 ## [2026-08-05 · Chunks 1.8 / 1.9 / 1.10] — Item 1 COMPLETE: the durable auth link is live, and identity resolution is production-proven
 > The last three of the 10 chunks, in one session. **Item 1 (durable auth link + auth seam) is DONE.** Password login (M10), RLS retirement, remote logout and the whole A12 dual-verify phase were all blocked on this.
 
