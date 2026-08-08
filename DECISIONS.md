@@ -230,4 +230,21 @@ Background `#07122a` · Cards `#0D1B33` · Border `#1C3050` · Gold accent `#f2c
 
 ---
 
+## PASSWORD VERIFICATION DECISIONS (2026-08-08, chunk 2.5a)
+
+**[I16] Credential verification is SPLIT from session issuance — 2.5 is now 2.5a (verify) then 2.5b (token).** (2026-08-08) — The original plan bundled "check the password" and "issue a token" into one chunk. Splitting them means a bug in 2.5a is a wrong **answer that nothing acts on**, while a bug in 2.5b is an **auth bypass**; bundling them would have spent the same session's attention on both. 2.5a returns *"these credentials match, and they belong to this `users` row"* — no token, no session, no cookie. 2.5b turns that fact into a signed token and teaches `getIdentityFromToken` the new branch. **Migration cost: none** — it is a decomposition, not a design change.
+⚠️ **`verifyPasswordCredential` does NOT return `AuthenticationResult`, and reusing that type would have been a real bug.** `AuthenticationResult.providerUid: null` already carries a specific meaning — *"this was the A10 dev bypass"* — and chunk 1.8 keys its `auth_identities` write off exactly that. A password result setting `providerUid: null` would be indistinguishable from a dev-bypass login. It returns a narrow `PasswordVerification` instead. The plan's instruction to reuse `AuthenticationResult` was checked against the real type and rejected with reason.
+
+**[I17] Every password-verification failure is ONE indistinguishable result, and every path does identical work.** (2026-08-08) — Wrong password, no such account, and account-with-no-password-set must be indistinguishable in **value** and in **cost**, or the verifier hands out a free list of which phone numbers hold real accounts.
+*Value:* the result type has exactly one failure reason (`invalid-credentials`). There is no `no-such-account` variant to accidentally return — **the type is the control**, so the guarantee survives callers written by people who never read the comment.
+*Cost:* every path does **one `users` query, one `user_credentials` query, and one argon2id verify**. Two mechanisms make that true — a decoy hash verified against when no credential exists, and a deliberate second query against a guaranteed-miss UUID when no user exists.
+⚠️ **The decoy is DERIVED at module load from the current parameters, never a hardcoded string** — a literal decoy silently diverges the day the cost factors are raised, reopening the leak with every test still green.
+⚠️ **The wasted query is not waste.** Skipping it would make "no such account" one network round trip cheaper than every other outcome; against Supabase Singapore a round trip is *hundreds* of milliseconds, far larger than the ~45 ms argon2 cost. Equalising the hash while leaking the round trip would be timing-safety theatre.
+⚠️ **Honest scope: this does not close enumeration platform-wide.** `/api/dev-auth/lookup` is still unauthenticated and returns a full `users` row for any phone, so account existence is already free to discover. This is still correct to build — lookup will be locked down and this must not need retrofitting — but do not record enumeration as solved.
+
+**[I18] Password verification is NOT reachable over HTTP until login exists, and that is what makes deferring lockout safe.** (2026-08-08) — An endpoint answering *"are these credentials valid?"* without issuing a session is a credential-checking **oracle**: all of login's attack surface, none of its utility, and no legitimate client. So 2.5a ships as a seam function with **zero route importers** (asserted by the test suite, not just intended). Because nothing HTTP-reachable calls it, there is no brute-force surface and lockout can be deferred to its own focused chunk.
+⚠️ **THE WINDOW OPENS AT 2.6 (login UI). Lockout (2.7) MUST land with or before 2.6 — TASKS.md sequences it after, and that ordering is a trap.** Shipping 2.6 alone leaves an unthrottled online guessing oracle against every account on the platform.
+
+---
+
 *Append new decisions below this line with the next ID and a date.*

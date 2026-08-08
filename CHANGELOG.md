@@ -6,6 +6,36 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-08 · Chunk 2.5a] — Verify a password. Issue nothing.
+> Chunk 2.5 was **split**: 2.5a checks credentials, 2.5b issues the session token. A bug in 2.5a is a wrong answer nothing acts on; a bug in 2.5b is an auth bypass. Bundling them would have spent one session's attention on both.
+
+### Added
+- **`verifyPasswordCredential(phone, plain)` on `authProvider.server.ts`** — returns *"these credentials match, and they belong to this `users` row"*. No token, no session, no cookie.
+- **`scripts/verify-password-login.ts`** — 38 assertions. Plus `scripts/ts-resolve-hook.mjs` + `register-ts-resolve.mjs`, which let a plain Node script import the app's real modules and test a security function **directly instead of through HTTP**.
+- **DECISIONS [I16] [I17] [I18]** — the split, the enumeration model, and why no endpoint exists yet.
+- **Zero `db.ts` changes** — 2.4's `getUserCredential` and the existing `getUserByPhoneOrThrow` were already the right shape.
+
+### Changed
+- ⚠️ **`AuthenticationResult` deliberately NOT reused, contradicting the recorded plan.** That type's `providerUid: null` already means *"this was the A10 dev bypass"*, and chunk 1.8 keys its `auth_identities` write off exactly that — a password result setting it null would be indistinguishable from a dev-bypass login. Checked against the real type and rejected with reason; a narrow `PasswordVerification` is returned instead.
+
+### Fixed (both found by running, both had passed review)
+- ⚠️ **The timing test was worthless and was rewritten.** Wall-clock medians reported *wrong password* (1173 ms) as SLOWER than *correct password* (506 ms) — two paths that do byte-identical work. WAN latency to Supabase Singapore swamps the ~45 ms argon2 signal entirely. Replaced with `fetch` instrumentation that splits each call into network and local time: round-trip count is **exact**, local floor isolates the hash.
+- ⚠️ **The outage test reported a FALSE PASS.** Re-importing `authProvider.server.ts` in-process with a cache-busting query string still resolves its `./db` import to the **already-cached** module holding a working client — the broken host was never used and the call succeeded. Now run in a subprocess with a cold module graph. Second outage-test trap in two chunks.
+
+### Verified
+- **38/38.** Correct password verifies and resolves the right `users.id` · two accounts sharing an identical plaintext resolve to their **own** distinct ids · four phone formats resolve the same account.
+- ⚠️ **Enumeration, the point of the chunk:** wrong password, non-existent account, and account-with-no-password-set return **byte-identical** objects (`{"ok":false,"reason":"invalid-credentials"}`), and every path does **exactly 2 database round trips** with local floors of **42.3 / 44.3 / 45.3 / 45.4 ms** — no path skips the hash, none skips a query.
+- **A dead database THROWS** rather than reporting "invalid credentials" — an outage can never tell a user their correct password is wrong.
+- **No route imports it** (asserted by `git grep` in the suite; the symbol is tree-shaken out of the server bundle entirely). Repeated failures leave `failed_attempts` at **0**, confirming lockout is genuinely unbuilt rather than half-built.
+- Regression: hashing **42/42**, set-password **75/75**, build clean 156 pages, `tsc` silent, 184 client chunks free of every server-only marker, `user_credentials` back to 0 rows, `auth_identities` still 1.
+
+### Explicitly NOT done
+- **No HTTP surface** — no endpoint, deliberately ([I18]). ⚠️ **This is what makes deferring lockout safe today, and 2.6 is what ends it: 2.7 must land with or before 2.6, not after.**
+- **No token issuance** — strictly 2.5b.
+- **Enumeration is not closed platform-wide** — `/api/dev-auth/lookup` still hands out a full `users` row for any phone, unauthenticated.
+
+---
+
 ## [2026-08-08 · Chunks 2.2 / 2.3 / 2.4] — Password hashing, the seam operation, and the set-password endpoint
 > A user can now SET a password. **Nothing can authenticate with one** — there is still no password login path, deliberately. Credential storage ships and gets exercised before anything trusts it.
 

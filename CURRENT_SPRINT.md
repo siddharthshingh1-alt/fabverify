@@ -10,11 +10,13 @@ All 10 chunks done. **Zero application files import Supabase** (consumer importe
 
 **➡️ NEXT: Launch-Ready item 2 — Password login (M10).** The migration safety net. ⚠️ **Never store passwords in Supabase Auth** — the single most expensive mistake available here.
 
-📍 **M10 progress: 2.0+2.1 done 2026-08-06 · 2.2+2.3+2.4 done 2026-08-08 · NEXT IS 2.5.** Full chunk list and the 📍 M10 STATUS line are in `TASKS.md`.
+📍 **M10 progress: 2.0+2.1 done 2026-08-06 · 2.2+2.3+2.4+2.5a done 2026-08-08 · NEXT IS 2.5b.** Full chunk list and the 📍 M10 STATUS line are in `TASKS.md`.
 
-⚠️ **STATE OF PASSWORD LOGIN RIGHT NOW, so nobody misreads it:** a user can **SET** a password (`POST /api/account/password`, argon2id into `user_credentials`), and **nothing can authenticate with one**. No screen reaches the endpoint. That gap is deliberate — credential storage ships and is exercised before anything trusts it. Do not "finish the feature" by wiring login before **2.5** (our own session token) exists.
+⚠️ **STATE OF PASSWORD LOGIN RIGHT NOW, so nobody misreads it:** a user can **SET** a password (`POST /api/account/password`), and the server can **CHECK** one (`verifyPasswordCredential`) — but **nothing can LOG IN**, and no screen reaches either. The verifier has **zero route importers on purpose**. Do not "finish the feature" by wiring login before **2.5b** (our own session token) exists.
 
-⚠️ **2.5 is the last high-risk chunk — fresh session, nothing else that day.** A verification bug there is an **auth bypass**, and breaking the Supabase fallback logs out every currently-live user at once.
+⚠️ **2.5 was SPLIT into 2.5a (verify credentials, done) + 2.5b (issue/verify token).** 2.5b is the last high-risk chunk — fresh session, nothing else that day. A verification bug there is an **auth bypass**, and breaking the Supabase fallback logs out every currently-live user at once.
+
+⚠️ **SEQUENCING TRAP: 2.7 (lockout) must land WITH or BEFORE 2.6 (login UI).** `TASKS.md` lists it after. Password verification has no HTTP surface today — that is what makes deferring lockout safe — and **2.6 is what opens it**. Shipping 2.6 alone leaves an unthrottled guessing oracle against every account.
 
 Two findings from the original plan still shape the work:
 - **M10 requires us to issue our OWN session tokens** (chunk 2.5). Supabase will not sign a JWT for a credential it does not hold, and holding it there is what M10 forbids — so password login pulls **A12 Phase 2 dual-verify forward**. Roughly half of M10 is the token subsystem, not the credential.

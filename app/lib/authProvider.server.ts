@@ -28,8 +28,10 @@
 
 import { supabaseAdmin } from "./supabaseAdmin";
 import type { ProviderIdentity } from "./authProvider";
+import { randomBytes } from "node:crypto";
 import {
   PASSWORD_CREDENTIAL_TYPE,
+  getUserByPhoneOrThrow,
   getUserCredential,
   upsertUserCredential,
 } from "./db";
@@ -213,4 +215,131 @@ export async function setPassword(
   });
 
   return { ok: true, created: !existing };
+}
+
+// ── PASSWORD VERIFICATION (chunk 2.5a) ───────────────────────────────────
+//
+// ⚠️ ANSWERS A QUESTION. DOES NOT GRANT ANYTHING. This returns "do these
+// credentials match, and whose are they" — no token, no session, no cookie.
+// Turning that fact into a session is chunk 2.5, kept separate ON PURPOSE:
+// a bug here is a wrong ANSWER that nothing acts on, while a bug in token
+// verification is an auth bypass. Splitting them means 2.5's fresh session is
+// spent entirely on signature verification, algorithm pinning and the
+// Supabase fallback, with the credential half already proven.
+//
+// ⚠️ NOT REACHABLE OVER HTTP, AND THAT IS LOAD-BEARING, NOT AN OVERSIGHT.
+// No route calls this. An endpoint returning "these credentials are valid:
+// yes/no" without issuing a session is a credential-checking ORACLE — all of
+// login's attack surface with none of its utility — and rate limiting is
+// deliberately deferred to chunk 2.7. Because nothing HTTP-reachable calls
+// this, there is no brute-force surface today, which is precisely what makes
+// deferring lockout safe.
+// ⚠️ THE WINDOW OPENS AT CHUNK 2.6 (login UI). Lockout (2.7) must land WITH
+// or BEFORE 2.6, never after — TASKS.md currently lists it after, and that
+// ordering is a trap.
+
+/**
+ * ⚠️ ONE FAILURE REASON, BY DESIGN — THIS TYPE *IS* THE ENUMERATION CONTROL.
+ *
+ * There is deliberately no `no-such-account`, no `no-password-set`, no
+ * `wrong-password`. A caller cannot accidentally distinguish them because the
+ * type gives it nothing to distinguish, so the guarantee survives future
+ * callers written by someone who has not read this comment. Making that
+ * structural is worth more than a comment asking people to be careful.
+ *
+ * ⚠️ DATABASE FAILURES ARE NOT MODELLED HERE — they THROW. Returning
+ * "invalid credentials" during an outage would tell a user with a perfectly
+ * good password that it is wrong, and send them to reset a credential that
+ * was never broken. That is Issue E on the login path.
+ */
+export type PasswordVerification =
+  | { ok: true; user: NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>> }
+  | { ok: false; reason: "invalid-credentials" };
+
+const INVALID: PasswordVerification = { ok: false, reason: "invalid-credentials" };
+
+/**
+ * A UUID no row can hold, used to spend an identical credential query on the
+ * "no such account" path. See the round-trip note in verifyPasswordCredential.
+ */
+const NO_SUCH_USER = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * A real argon2id hash of a random value, verified against when there is no
+ * stored credential so that the failing path costs the same as the succeeding
+ * one.
+ *
+ * ⚠️ GENERATED AT MODULE LOAD FROM THE CURRENT PARAMETERS — never a hardcoded
+ * string. A literal decoy silently diverges the day someone raises the cost
+ * factors, and the timing leak reopens through the back door with every test
+ * still passing. Deriving it means it tracks the parameters automatically.
+ *
+ * Started eagerly (not awaited) so the ~60 ms cost is paid during process
+ * warm-up rather than by the first caller, which would itself be an anomaly.
+ * The no-op catch only prevents an unhandled rejection; the real await below
+ * still throws, which fails closed — no login is better than a timing leak.
+ */
+const decoyHash: Promise<string> = hashPassword(randomBytes(32).toString("hex"));
+decoyHash.catch(() => {});
+
+/**
+ * Verify a submitted password against the stored credential for a phone.
+ *
+ * ⚠️ THE PHONE COMES FROM THE CALLER, AND THAT IS UNAVOIDABLE HERE — the
+ * deliberate opposite of the set-password route, where the body carries no
+ * account identifier at all. Login happens BEFORE a session exists, so there
+ * is no verified identity to derive from; the phone is the input. The
+ * protection is therefore different in kind: it is not "ignore what they
+ * sent", it is "resolve exactly what they sent, on the canonical key, and
+ * grant nothing".
+ *
+ * ── EVERY PATH DOES IDENTICAL WORK ───────────────────────────────────────
+ * one users query · one credentials query · one argon2id verify — whether the
+ * account exists, has no password, has the wrong password, or succeeds.
+ *
+ * ⚠️ THE SECOND QUERY ON THE MISS PATH IS NOT WASTE. Skipping it when no user
+ * is found would make "no such account" one network round-trip cheaper than
+ * every other outcome — and against Supabase Singapore a round trip is tens
+ * of milliseconds, comfortably larger than the argon2 cost this function is
+ * careful to equalise. Equalising the hash while leaking the round trip would
+ * be timing-safety theatre.
+ *
+ * ⚠️ THE VERIFY IS UNCONDITIONAL AND ITS RESULT IS COMPUTED BEFORE ANY
+ * BRANCH. `if (!credential) return` before hashing would restore the leak
+ * this whole function exists to close, so there is deliberately no early
+ * return between the lookup and the comparison.
+ *
+ * Failure messaging is the caller's job, but the type above ensures every
+ * failure is the same value — see PasswordVerification.
+ */
+export async function verifyPasswordCredential(
+  phone: string,
+  plain: unknown
+): Promise<PasswordVerification> {
+  // Canonical key — bare last-10, byte-identical to normalisePhone() in
+  // auth.ts. users.phone is stored bare 10-digit while callers may send
+  // +91-prefixed or spaced input; an un-normalised comparison matches nothing
+  // (proven in chunk 1.3's backfill) and would fail every login closed.
+  const normalised = typeof phone === "string" ? phone.replace(/\D/g, "").slice(-10) : "";
+
+  // Throws on database failure — never collapses an outage into "wrong
+  // password" (Issue E).
+  const user = normalised.length === 10 ? await getUserByPhoneOrThrow(normalised) : null;
+
+  // Always one credential query, hitting a guaranteed-miss id when there is
+  // no user, so the round-trip count cannot vary by outcome.
+  const credential = await getUserCredential(
+    user ? user.id : NO_SUCH_USER,
+    PASSWORD_CREDENTIAL_TYPE
+  );
+
+  // Always one argon2id verify, against the decoy when there is nothing real
+  // to check. Computed unconditionally, before any branch.
+  const candidate = credential?.password_hash ?? (await decoyHash);
+  const matched =
+    typeof plain === "string" ? await verifyPasswordHash(plain, candidate) : false;
+
+  if (!user || !credential || !matched) return INVALID;
+
+  return { ok: true, user };
 }
