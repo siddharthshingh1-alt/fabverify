@@ -153,8 +153,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
 
 #### 📍 M10 STATUS — UPDATE EVERY SESSION
-**NEXT CHUNK: 2.2** · 2.0 (decisions) and 2.1 (table) DONE 2026-08-06 · Plan recorded 2026-08-05
-⚠️ **2.2 is the highest-risk chunk of M10 — argon2id hashing. Build it on a FRESH session, nothing else that day.** It is the one chunk that fails silently and retroactively.
+**NEXT CHUNK: 2.5** · 2.0+2.1 DONE 2026-08-06 · **2.2 + 2.3 + 2.4 DONE 2026-08-08** · Plan recorded 2026-08-05
+⚠️ **2.5 is the LAST high-risk chunk of M10 — our own session token, issue + verify. Build it on a FRESH session, nothing else that day.** A verification bug there is an **auth bypass**, and breaking the Supabase fallback logs out every currently-live user at once.
+⚠️ **A user can SET a password today and NOTHING can authenticate with one.** That is the intended state after 2.4 — do not "finish the feature" by wiring login before 2.5 exists.
+⚠️ **`token_epoch` increments on a password change but is INERT** — no code issues or verifies our tokens yet, and live sessions are Supabase JWTs that do not carry it. 2.5 is what makes it real. Do not read the incrementing column as working revocation.
 
 ---
 
@@ -192,7 +194,19 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - ⚠️ **Constraint filtered to `contype IN ('p','f','u')` in the verify query** — PostgreSQL 17 catalogues `NOT NULL` in `pg_constraint` too, so an unfiltered count differs by PG version for reasons unrelated to this table.
   - **Depends on:** 2.0. **Blocks:** 2.4.
 
-- [ ] **CHUNK 2.2 — 🔴🔴 THE HASHING MODULE. HIGHEST-RISK CHUNK OF M10 — BUILD ON A FRESH SESSION, NOTHING ELSE THAT DAY.** *1 new file, `app/lib/passwordHash.ts`. Unused; nothing imports it.*
+- [x] **CHUNK 2.2 — DONE 2026-08-08. The argon2id hashing module.** *`app/lib/passwordHash.server.ts` + `scripts/verify-password-hash.ts`.* Library and parameters locked as **DECISIONS [I13]**: `hash-wasm` (pure WASM — no native binding to survive the [A12] platform move), OWASP m=19456/t=2/p=1, 32-byte hash, 16-byte salt from `randomBytes`. **Server-only enforced at BUILD TIME** via `import "server-only"`.
+  - ⚠️ **THE FILE HAD BEEN WRITTEN IN A PRIOR SESSION AND LEFT UNCOMMITTED, UNRUN AND UNDOCUMENTED FOR TWO DAYS** — on disk from 2026-08-06, absent from git, with `TASKS.md` still showing 2.2 as the next chunk. It looked finished and was not: no recorded execution existed anywhere. **The suite was run before anything was built on it — 42/42 pass.** Worth keeping as a process note: "the code exists" and "the code is proven" are different claims, and this project's standard is the second.
+  - **Proven, not assumed:** parameters read back OUT of the emitted PHC string (configuration *applied*, not merely *passed*) · 8 hashes → 8 distinct salts · tampered/truncated/garbage/`null` input → `false`, never a throw, never `true` · argon2i and argon2d **rejected** even though the library could verify them · unicode + emoji round-trip · 100-byte password verifies while its 72-byte prefix does not (no bcrypt-style truncation) · hashing takes 60 ms (a no-op fallback would be instant).
+  - **Depends on:** 2.0(d). **Blocks:** 2.3, 2.4 — both now done.
+  - ⚠️ **Vercel compatibility still UNPROVEN** — we have never deployed. `hash-wasm` was chosen precisely so the runtime is platform-independent, but that is an argument, not a measurement. Closing it needs a preview deploy from this branch (outward-facing; needs an explicit go-ahead).
+
+- [x] **CHUNK 2.3 — DONE 2026-08-08 (partial, deliberately). `setPassword` declared on the seam.** *`authProvider.server.ts`, plus the `FUTURE (M10)` block in `authProvider.ts` replaced with what was decided.*
+  - ⚠️ **`verifyPassword` was NOT declared, and that is a scope decision, not an omission.** It authenticates, so it must also mint a SESSION — and Supabase will not sign a JWT for a credential it does not hold. Declaring its signature before the token design exists is exactly the guess chunk 1.4's block warned against. It belongs to 2.5.
+  - ✅ **`AuthenticationResult` is unchanged** — verified by diff. That was the red-flag test.
+  - ⚠️ **The re-verification gate lives HERE, not in the route** — a gate implemented in a route is a gate the next route can forget. A caller cannot reach the credential write without passing it.
+  - **No speculative bypass parameter.** The reset flow (2.8) will satisfy the gate by OTP instead of the current password; that variant gets added deliberately with its own review. An unreachable "skip verification" branch written today is a bypass waiting for someone to reach it.
+
+- [ ] ~~**CHUNK 2.2 — 🔴🔴 THE HASHING MODULE.**~~ *(original entry, kept for the notes below)*
   - **Why this is the riskiest:** every other chunk fails loudly. This one fails **silently and permanently** — weak parameters, a truncated hash column, a non-constant-time comparison, or a library that silently falls back to a weaker algorithm all produce a system that *works perfectly* while being crackable. And unlike a wiring bug, it is **retroactive**: every hash written under a bad design stays bad until each user re-authenticates, so the damage is already in the database by the time anyone notices.
   - Surface: `hashPassword(plain) → string`, `verifyPassword(plain, stored) → boolean`, `needsRehash(stored) → boolean` (so parameters can be raised later without a flag day).
   - ⚠️ **Server-only, like `authProvider.server.ts`.** It must never be reachable from a `"use client"` file. Prove it with the same client-bundle scan used in 1.4/1.5/1.10 — the hashing library and its markers absent from all client chunks.
@@ -207,12 +221,20 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - **Depends on:** 2.0, 2.2. **Blocks:** 2.4, 2.6.
   - **Verify:** build clean; grep shows zero importers; `AuthenticationResult` unchanged (a diff on the type is a red flag); OTP login still works untouched.
 
-- [ ] **CHUNK 2.4 — Set-password API route + the write path.** *1 new route + client call.* 🟡 MEDIUM — writes credentials, but cannot yet log anyone in.
-  - Authenticated via the existing `getVerifiedUser()` (a user sets a password for their OWN account only; `user_id` FORCED from the session, never read from the body — the Group 1/2 pattern).
-  - Password policy decided here (minimum length, and a rejection list rather than composition rules).
-  - ⚠️ **Deliberately no login path yet.** After this chunk a user can SET a password and nothing can authenticate with it. That is the point: credential storage ships and gets exercised before anything trusts it.
+- [x] **CHUNK 2.4 — DONE 2026-08-08. `POST /api/account/password` + the write path.** *3 files: new route, `db.ts` (+`getUserCredential`, `+upsertUserCredential`, `+PASSWORD_CREDENTIAL_TYPE`), new `app/lib/passwordPolicy.ts`. Plus `scripts/verify-set-password.ts` (75 assertions, committed).* **75/75 pass.**
+  - **Scope tightened from the plan by decision: no client call.** The plan said "1 new route + client call"; the UI moved to 2.6 where it can be tested as a real user journey instead of twice. The whole chunk is therefore provable by curl.
+  - ⚠️ **NOT under `/api/dev-auth/*`** — that is a legacy name for the unauthenticated lookup route.
+  - **THE GATE (DECISIONS [I14]):** credential exists → current password required; credential absent → session alone. **Which branch runs is a server-side DB read keyed on the session's `users.id` and a module-constant `credential_type`.** No identity field and no "first time" flag is read from the request.
+  - ⚠️ **THE BODY CARRIES NO ACCOUNT IDENTIFIER AT ALL** — `{ password, currentPassword? }`. Most converted routes derive the caller then 403 on a mismatch; here there is nothing to mismatch, so cross-account setting is impossible **by construction**. The ownership 403 is structurally unreachable, and that is the design.
+  - ⚠️ **`getUserCredential` THROWS on database failure — a SECURITY control, not a style choice.** Its result decides whether re-verification is required, so a swallowed outage would read as "no credential exists" and skip the gate. `db.ts` has ~14 legacy swallow sites; this must never join them.
+  - **BYPASS TESTS, all passing:** body `credential_type='password2'` / `credentialType` / `isFirstTime` / `hasPassword` / `skipVerification` / `force` → **all ignored, still 403**, no second row created, hash and epoch unmoved · body naming another account → write lands on the **authenticated** caller, the named account gets nothing · first set then immediate second set → 200 then **403** (the first-time→change transition is instant, not cached).
+  - ⚠️ **OUTAGE BYPASS PROVEN AT UNIT LEVEL WITH A CONTROL, after the HTTP version was discarded as inconclusive.** Against an unresolvable host, `getUserCredential` **throws** while `getUserByPhone` returns `null` on the identical failure. The route-level test proved nothing: `getVerifiedUser` also hits the database and answers 503 first, so the credential read was never reached. **Keep that trap in mind for 2.7 and 2.8** — any "what happens during an outage" test on an authenticated route hits auth first.
+  - ⚠️ **A REAL POLICY BUG WAS FOUND BY RUNNING IT, having passed review twice:** `password928374` was ACCEPTED. Leet-normalisation maps `8→b`/`7→t`/`4→a`, so it became `password92beta` and the "weak base + trailing digits" rule found no digits. Fixed by checking both the leet-mapped and plain forms with a length-ratio test. **The lesson is the 2.2 lesson again** — a policy that looks right and a policy that is right are different claims.
+  - ⚠️ **`token_epoch` increments on change but is INERT** until 2.5. Recorded as inert, not believed to be revoking anything.
   - **Depends on:** 2.1, 2.2, 2.3. **Blocks:** 2.5.
-  - **Verify:** set a password → row appears, hash is argon2id-shaped, plaintext appears nowhere in DB or logs; 401 unauthenticated; **403 setting a password for someone else's account**; re-setting replaces rather than duplicating; **`/api/dev-auth/lookup` still returns no credential data**; OTP login unaffected.
+  - **Also verified:** OTP login untouched · auth matrix unchanged (orders + conversations 200/401/403) · `/api/dev-auth/lookup` still exposes no credential material ([I10] holding) · anon key reads **0** of 2 real rows (RLS deny-all, proven with rows actually present, unlike the empty-table probe in 2.1) · build clean 156 pages · `tsc` silent · **184 client chunks free of every server-only marker**, with the same markers present server-side so the scan is a live test · `users` fingerprint byte-identical · `auth_identities` still 1 row.
+  - ⚠️ **NOT rate-limited** (2.7) and **not reachable from any screen** (2.6).
+  - ⚠️ **Deliberately no login path yet.** After this chunk a user can SET a password and nothing can authenticate with it. That is the point: credential storage ships and gets exercised before anything trusts it.
 
 - [ ] **CHUNK 2.5 — 🔴 OUR OWN SESSION TOKEN: issue + verify. SECOND-HIGHEST RISK — fresh session.** *Seam + `authProvider.server.ts`.*
   - Issue a signed token on successful password verification; teach `getIdentityFromToken` to **try our issuer first, then fall back to Supabase** — both token types resolving to the same `users` row. This is A12 Phase 2's mechanism, built early.

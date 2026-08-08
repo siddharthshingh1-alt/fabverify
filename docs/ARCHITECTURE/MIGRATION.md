@@ -69,9 +69,9 @@ Almost. **Nine** files import Supabase (re-audited 2026-07-30 — the original p
 |---|---|---|
 | Embedded-resource joins (`buyer:users!buyer_id(...)`) | **16** | real SQL `JOIN`s |
 | `.maybeSingle()` | 8 | `rows[0] ?? null` |
-| `.upsert(..., { onConflict })` | **2** | `INSERT … ON CONFLICT DO UPDATE` |
+| `.upsert(..., { onConflict })` | **3** | `INSERT … ON CONFLICT DO UPDATE` |
 
-Re-counted 2026-07-30: the upsert row previously read "3 / 2" and the true figure is **2** — `db.ts:77` (`users`, onConflict `phone`) and `db.ts:158` (`manufacturer_profiles`, onConflict `user_id`). The other two counts verified exact.
+Re-counted 2026-07-30: the upsert row previously read "3 / 2" and the true figure was **2** — `db.ts:77` (`users`, onConflict `phone`) and `db.ts:158` (`manufacturer_profiles`, onConflict `user_id`). The other two counts verified exact. ⚠️ **Now 3** — chunk 2.4 (2026-08-08) added `upsertUserCredential` (`user_credentials`, onConflict `user_id,credential_type`), which is what makes "re-setting a password replaces rather than duplicates" structural.
 
 ✅ **`db.ts`'s header claim that "All queries use standard PostgreSQL. No Supabase-specific features used" was corrected in chunk 1.1 (2026-07-30)** and now carries the counts above. It was inaccurate, and a future migration planned against that comment would have badly underestimated the work. The distinction the new header draws: the **data model** is standard PostgreSQL and ports as-is; the **query syntax** is a Supabase client feature and does not.
 
@@ -148,7 +148,7 @@ Locked order. Each item's abstraction layer is built **before** its first implem
 ✅ **DONE 2026-08-05.** All 10 chunks complete. Consumer importers of Supabase: **5 → 0**; what remains is 2 factories + 3 seams (see §1.1, where the "ONE file" target is restated accurately). The identity path is **production-proven** with a real OTP — the server logged `via IDENTITY (auth_identities) — phone lookup agrees` resolving token `sub c3772075…` to `users.id 1ac55487…`. Phone matching remains fully intact as the fallback and is still the primary path for 9 of 11 accounts.
 
 ### 4.2 Password login (M10) 🔴
-> **MULTI-SESSION BUILD, chunked 2026-08-05 into 2.0–2.9 — see `TASKS.md` for the ordered list and the 📍 M10 STATUS line.** Chunks 2.0/2.1 done 2026-08-06.
+> **MULTI-SESSION BUILD, chunked 2026-08-05 into 2.0–2.9 — see `TASKS.md` for the ordered list and the 📍 M10 STATUS line.** Chunks 2.0/2.1 done 2026-08-06; **2.2/2.3/2.4 done 2026-08-08** — argon2id hashing ([I13]), `setPassword` on the seam, and `POST /api/account/password`. ⚠️ **A user can SET a password; nothing can authenticate with one, and no screen reaches the endpoint.** Next is 2.5, the token subsystem.
 
 Hashes (argon2id) in **our own `user_credentials` table**, verification behind the seam. Login offers OTP **or** password.
 **This is the migration safety net, not just a feature** — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong.

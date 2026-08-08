@@ -31,17 +31,31 @@
  * deliberate: it makes every later chunk a pure swap instead of a swap plus
  * a design decision.
  *
- * FUTURE (M10 — password login, Launch-Ready item 2)
- * `verifyPassword` and `setPassword` are deliberately NOT declared here yet.
- * The `provider_uid` meaning for `provider = 'password'` is still undecided
- * (parked in chunk 1.2): the credential will live in our own `users` table,
- * so there is no external id — either `users.id` doubles as the uid, or
- * password is a `users` column and never a row in `auth_identities`. A
- * guessed signature would be worse than none, because chunks 1.6–1.10 could
- * build against it and item 2 would then have to break it. Adding a method
- * later is a one-line change with no migration cost.
- * What IS already accounted for: `AuthenticationResult` is named after
- * AUTHENTICATION, not OTP, so a future `verifyPassword` returns the same
+ * M10 — PASSWORD LOGIN (Launch-Ready item 2). Status, updated chunk 2.4:
+ *
+ * ⚠️ PASSWORD OPERATIONS LIVE IN `authProvider.server.ts`, NOT HERE, AND MUST
+ * STAY THERE. Hashing is server-only (argon2id, 19 MiB per call, enforced at
+ * build time by `import "server-only"`), and a hash computed in the browser is
+ * worthless — the hash simply becomes the password. Nothing password-related
+ * may be added to this browser-safe half.
+ *
+ * · `setPassword(userId, plain, currentPassword?)` — BUILT in chunk 2.4. Sets
+ *   or replaces the caller's own credential in `user_credentials`, gated on a
+ *   server-side existence check (change requires the current password;
+ *   first-time set does not).
+ * · `verifyPassword` — still NOT declared. It authenticates, which means it
+ *   must also mint a SESSION, and Supabase will not sign a JWT for a
+ *   credential it does not hold. That is chunk 2.5 (our own token issue and
+ *   verify), and declaring the signature before the token design exists would
+ *   be the guess this block originally warned against.
+ *
+ * The open question this block used to carry is CLOSED: DECISIONS I10 puts the
+ * credential in its own `user_credentials` table (never a `users` column), and
+ * I11 settles that password authentication writes NO `auth_identities` row —
+ * the credential is ours, so there is no external provider and no external id.
+ *
+ * What remains accounted for: `AuthenticationResult` is named after
+ * AUTHENTICATION, not OTP, so chunk 2.5's `verifyPassword` returns the same
  * shape and nothing downstream (1.8's identity write, 1.9's resolution) has
  * to be reshaped when it arrives.
  */

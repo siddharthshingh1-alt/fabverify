@@ -10,7 +10,13 @@ All 10 chunks done. **Zero application files import Supabase** (consumer importe
 
 **➡️ NEXT: Launch-Ready item 2 — Password login (M10).** The migration safety net. ⚠️ **Never store passwords in Supabase Auth** — the single most expensive mistake available here.
 
-📍 **M10 is now chunked into 10 steps (2.0–2.9) in `TASKS.md`, with its own STATUS line. Plan recorded 2026-08-05; NO code was written.** Read that section before building — two findings there change the shape of the work:
+📍 **M10 progress: 2.0+2.1 done 2026-08-06 · 2.2+2.3+2.4 done 2026-08-08 · NEXT IS 2.5.** Full chunk list and the 📍 M10 STATUS line are in `TASKS.md`.
+
+⚠️ **STATE OF PASSWORD LOGIN RIGHT NOW, so nobody misreads it:** a user can **SET** a password (`POST /api/account/password`, argon2id into `user_credentials`), and **nothing can authenticate with one**. No screen reaches the endpoint. That gap is deliberate — credential storage ships and is exercised before anything trusts it. Do not "finish the feature" by wiring login before **2.5** (our own session token) exists.
+
+⚠️ **2.5 is the last high-risk chunk — fresh session, nothing else that day.** A verification bug there is an **auth bypass**, and breaking the Supabase fallback logs out every currently-live user at once.
+
+Two findings from the original plan still shape the work:
 - **M10 requires us to issue our OWN session tokens** (chunk 2.5). Supabase will not sign a JWT for a credential it does not hold, and holding it there is what M10 forbids — so password login pulls **A12 Phase 2 dual-verify forward**. Roughly half of M10 is the token subsystem, not the credential.
 - ⚠️ **A `users.password_hash` COLUMN would be publicly readable today.** `/api/dev-auth/lookup` is unauthenticated and returns `select("*")` on `users` to any caller — a hash there would be handed out for any phone number. M10 therefore recommends a separate `user_credentials` table, which makes the leak impossible by construction.
 

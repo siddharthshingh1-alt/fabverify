@@ -6,6 +6,42 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-08 · Chunks 2.2 / 2.3 / 2.4] — Password hashing, the seam operation, and the set-password endpoint
+> A user can now SET a password. **Nothing can authenticate with one** — there is still no password login path, deliberately. Credential storage ships and gets exercised before anything trusts it.
+
+### Added
+- **`app/lib/passwordHash.server.ts` (chunk 2.2)** — argon2id via `hash-wasm`. `hashPassword` / `verifyPasswordHash` / `needsRehash`. Server-only, enforced at **build time** by `import "server-only"` (strictly stronger than the convention-plus-grep used elsewhere). ⚠️ Written in a prior session and left **uncommitted and never run**; this session audited it and ran its suite — **42/42 pass** — before anything was built on it.
+- **`app/lib/passwordPolicy.ts` (new)** — length-over-complexity validation per [I15]. Pure, no I/O.
+- **`setPassword()` on `authProvider.server.ts` (chunk 2.3)** — the credential lifecycle, including the re-verification gate. ⚠️ Placed on the seam, not in the route, because **a gate implemented in a route is a gate the next route can forget**. `verifyPassword` is still NOT declared — it must mint a session, which is chunk 2.5.
+- **`db.ts`: `getUserCredential` + `upsertUserCredential` + `PASSWORD_CREDENTIAL_TYPE`** — first code to read or write `user_credentials`.
+- **`POST /api/account/password` (chunk 2.4)** — sets or changes the caller's own password. Deliberately **not** under `/api/dev-auth/*`.
+- **`scripts/verify-set-password.ts`** — committed, re-runnable, 75 assertions.
+- **DECISIONS [I13] [I14] [I15]** — hashing library + parameters, the re-verification model with its accepted risk, and the password policy.
+
+### Changed
+- **`db.ts` header: upsert count 2 → 3**, and `MIGRATION.md` §1.2 with it.
+- **The `FUTURE (M10)` block in `authProvider.ts` replaced** with what was actually decided; the open question it carried ("is password a `users` column or an `auth_identities` row?") is closed by [I10]/[I11].
+
+### Fixed (found by the verification suite, not by review)
+- ⚠️ **The password policy ACCEPTED `password928374`.** Two of its own rules cancelled each other: leet-normalisation maps `8→b`, `7→t`, `4→a`, so the string became `password92beta` and the "weak base followed by digits" test found no digits to match. Now checked against **both** the leet-mapped and plain forms, with a **length-ratio** test (weak word ≥ half the password) instead of "the remainder is all digits". A real gap that only a run could find — review had passed it twice.
+- **Test isolation in the D group.** One wrongly-accepted password created a credential, so every later case hit the change-gate and failed with a misleading 403 — one real finding presenting as eight. Each case now cleans up after itself.
+
+### Verified
+- **75/75** on the endpoint suite (localhost, `next dev`, curl + service-role reads). First-time set · change gated · cross-account impossible · policy · malformed input · no leak · non-regression.
+- ⚠️ **The bypass group specifically:** body-supplied `credential_type` / `credentialType` / `isFirstTime` / `skipVerification` all **ignored** → still 403, **no second credential row created**, hash and `token_epoch` unmoved. A change cannot be disguised as a first-time set.
+- ⚠️ **The outage bypass ([I14]'s load-bearing property), proven at unit level with a control:** against an unresolvable host, `getUserCredential` **throws** while `getUserByPhone` (a legacy swallow site) returns null on the identical failure. Had it swallowed, an outage would read as "no credential exists" and skip re-verification. The first attempt at this test through HTTP was **discarded as inconclusive** — `getVerifiedUser` also hits the database and answers 503 first, so the route-level 503 proved nothing about the credential read.
+- Build clean, exit 0, **156 pages** (155 + the new route); `tsc --noEmit` silent.
+- **184 client chunks free of** `argon2` / `hash-wasm` / `passwordHash` / `user_credentials` / `supabaseAdmin` / `SUPABASE_SERVICE_ROLE_KEY` / `getIdentityFromToken`, with the same markers **present** in server bundles so the scan is a live test rather than a vacuous pass.
+- `users` fingerprint byte-identical before and after (`ecfae37db1c314e7`); `auth_identities` still **1** row (password writes none — [I11]); `user_credentials` returned to **0** rows.
+
+### Explicitly NOT done
+- **Nothing is wired into the signup or login UI.** No user can reach this endpoint from a screen.
+- **`token_epoch` increments but is INERT** — nothing issues or verifies our own tokens yet, and live sessions are Supabase JWTs that do not carry it. It revokes nothing until chunk 2.5. Recorded as inert, not believed to be protecting anything.
+- **No rate limiting** on the route (chunk 2.7). It is authenticated and only ever touches the caller's own account, so it is not an enumeration oracle — but it is not throttled.
+- **Not exercised in production.** Localhost proves the whole route: nothing in it sits behind a production-only branch, and the identity path it stands on was production-proven in 1.5/1.9.
+
+---
+
 ## [2026-08-06 · Chunks 2.0 / 2.1] — M10 begins: password decisions locked, `user_credentials` table created (schema only)
 > First two chunks of password login. **No credential handling, no hashing, no token logic, and nothing authenticates by password.** Docs + one table.
 

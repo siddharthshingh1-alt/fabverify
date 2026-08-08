@@ -28,6 +28,13 @@
 
 import { supabaseAdmin } from "./supabaseAdmin";
 import type { ProviderIdentity } from "./authProvider";
+import {
+  PASSWORD_CREDENTIAL_TYPE,
+  getUserCredential,
+  upsertUserCredential,
+} from "./db";
+import { hashPassword, verifyPasswordHash } from "./passwordHash.server";
+import { validatePassword, type PasswordContext } from "./passwordPolicy";
 
 // `import type` is erased at compile time, so this does NOT pull the
 // browser-safe module (or its anon client) into the server bundle at runtime.
@@ -74,4 +81,136 @@ export async function getIdentityFromToken(
     // normalisation is load-bearing, not cosmetic (proven in chunk 1.3).
     phone: data.user.phone.replace(/\D/g, "").slice(-10),
   };
+}
+
+// ── PASSWORD CREDENTIALS (M10, chunk 2.4) ────────────────────────────────
+//
+// ⚠️ THESE ARE *OUR* CREDENTIALS, NOT THE PROVIDER'S. Nothing below touches
+// Supabase Auth, and that is the point of M10: `supabase.auth.updateUser({
+// password })` is the convenient thing that looks like it solves this, and it
+// would re-couple us to the provider we are leaving (DECISIONS I10, A12).
+//
+// They live on the seam rather than in the route because the RE-VERIFICATION
+// GATE MUST TRAVEL WITH THE OPERATION. A gate implemented in a route is a gate
+// the next route can forget; a gate inside setPassword cannot be bypassed by
+// adding a second caller. The reset flow will need to satisfy it by a
+// different proof (OTP) — that variant gets added deliberately, with its own
+// review, and is NOT pre-declared here. An unreachable "skip verification"
+// branch written today is a bypass waiting for someone to reach it.
+
+/**
+ * `ok` carries `created` so callers can distinguish a first-time set from a
+ * change. Failures are discriminated so the route maps them to distinct
+ * statuses (403 vs 400) rather than one catch-all.
+ *
+ * ⚠️ DATABASE FAILURES ARE NOT MODELLED HERE — they THROW, and the route turns
+ * them into 503/500 via dbErrorResponse. Folding "the database was
+ * unreachable" into this union as another `ok: false` is precisely the Issue E
+ * mistake, and here it would be worse than a wrong status code: the existence
+ * check below decides whether re-verification is required, so a swallowed
+ * outage becomes an authorisation bypass.
+ */
+export type SetPasswordResult =
+  | { ok: true; created: boolean }
+  | {
+      ok: false;
+      reason: "reverification-required" | "reverification-failed" | "weak-password";
+      message: string;
+    };
+
+/**
+ * Set or replace the password credential for ONE user.
+ *
+ * ⚠️ `userId` MUST come from a verified session and never from request input.
+ * This function cannot check that for itself — it trusts its caller — so the
+ * route derives it from `getVerifiedUser()` and the request body carries no
+ * account identifier at all. That is what makes cross-account setting
+ * impossible by construction rather than by a comparison someone could later
+ * refactor away.
+ *
+ * ── THE ANTI-HIJACK GATE ─────────────────────────────────────────────────
+ *   credential EXISTS  → `currentPassword` is REQUIRED and must verify
+ *   credential ABSENT  → a valid session alone is sufficient
+ *
+ * ⚠️ WHICH BRANCH RUNS IS DECIDED BY A SERVER-SIDE DATABASE READ, NEVER BY THE
+ * CALLER. There is no "first time" flag in the request, and none is honoured
+ * if sent. `credential_type` is a module constant (see db.ts), so a caller
+ * cannot steer the lookup at an unused type to force a miss. The read throws
+ * on database failure, so an outage can never be mistaken for "no credential".
+ * Those three properties are the whole bypass argument.
+ *
+ * ⚠️ THE EXISTENCE READ HAPPENS EXACTLY ONCE and its result is passed forward
+ * to both the gate and the epoch decision. Reading twice would let the two
+ * disagree under a race.
+ *
+ * ⚠️ ORDER IS DELIBERATE: re-verify BEFORE validating or hashing the new
+ * password. An unauthorised caller must not learn the password policy, and
+ * must not be able to spend 19 MiB of argon2 work per request.
+ *
+ * ACCEPTED RISK, RECORDED NOT OVERLOOKED (decision 2026-08-08): allowing a
+ * first-time set on the session alone means a hijacked session can mint a
+ * DURABLE credential — escalating temporary access into access that outlives
+ * the session and does not depend on the phone. Accepted because the recovery
+ * path exists: the real owner proves their phone by OTP, resets, and the
+ * `token_epoch` bump evicts every attacker session while overwriting the
+ * attacker's password. Tightening this to require proof of recent
+ * authentication is a small, additive change if that trade is ever revisited.
+ */
+export async function setPassword(
+  userId: string,
+  newPassword: unknown,
+  currentPassword?: string,
+  context: PasswordContext = {}
+): Promise<SetPasswordResult> {
+  // ── 1. THE ONE EXISTENCE READ. Throws on any database fault. ───────────
+  const existing = await getUserCredential(userId, PASSWORD_CREDENTIAL_TYPE);
+
+  // ── 2. THE GATE — only when a credential actually exists ───────────────
+  if (existing) {
+    if (typeof currentPassword !== "string" || currentPassword.length === 0) {
+      return {
+        ok: false,
+        reason: "reverification-required",
+        message: "Enter your current password to change it.",
+      };
+    }
+
+    // Constant-time comparison via the library's own verify — never a manual
+    // string comparison on hashes.
+    const proven = await verifyPasswordHash(currentPassword, existing.password_hash);
+    if (!proven) {
+      return {
+        ok: false,
+        reason: "reverification-failed",
+        message: "Current password is incorrect.",
+      };
+    }
+  }
+
+  // ── 3. POLICY — after the gate, so unauthorised callers learn nothing ──
+  const validation = validatePassword(newPassword, context);
+  if (!validation.ok) {
+    return { ok: false, reason: "weak-password", message: validation.message };
+  }
+
+  // ── 4. HASH the NORMALISED form, never the raw input ───────────────────
+  // Hashing the un-normalised string would defeat the NFKC fix and could lock
+  // a user out of a password they typed correctly on another keyboard.
+  const passwordHash = await hashPassword(validation.normalised);
+
+  // ── 5. WRITE. Epoch +1 on a change (DECISIONS I12 revocation), default on
+  // a first-time set — there is nothing to revoke.
+  //   ⚠️ INERT TODAY: nothing issues or verifies our own tokens yet, and live
+  //   sessions are Supabase JWTs that do not carry this epoch. It revokes
+  //   NOTHING until chunk 2.5. Written now because the column exists and the
+  //   semantics belong with the write — but recorded as inert, not believed to
+  //   be protecting anything.
+  await upsertUserCredential({
+    userId,
+    passwordHash,
+    credentialType: PASSWORD_CREDENTIAL_TYPE,
+    tokenEpoch: existing ? existing.token_epoch + 1 : undefined,
+  });
+
+  return { ok: true, created: !existing };
 }

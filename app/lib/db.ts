@@ -11,7 +11,8 @@
  *    functions:
  *      · 16 embedded-resource joins (`buyer:users!buyer_id(...)`) → SQL JOINs
  *      ·  8 `.maybeSingle()`                                      → `rows[0] ?? null`
- *      ·  2 `.upsert(..., { onConflict })`                        → INSERT … ON CONFLICT DO UPDATE
+ *      ·  3 `.upsert(..., { onConflict })`                        → INSERT … ON CONFLICT DO UPDATE
+ *        (was 2; chunk 2.4 added upsertUserCredential — keep MIGRATION.md §1.2 in step)
  * 3. All other files stay unchanged
  *
  * The DATA MODEL is standard PostgreSQL — no Supabase-specific column types,
@@ -214,6 +215,128 @@ export async function getUserByProviderUid(
     );
     return null;
   }
+}
+
+// ── USER CREDENTIALS (passwords we own — DECISIONS I10, M10) ───────────
+//
+// ⚠️ NEVER add credential columns to `users`. The hash lives in its own table
+// specifically because `/api/dev-auth/lookup` is unauthenticated and returns
+// `.select("*")` on `users` for any phone — a hash there would be handed to
+// anonymous callers for every account on the platform. Separate table = the
+// leak is impossible by construction, not prevented by remembering a column
+// projection at five call sites forever. See migrations/003.
+
+/**
+ * ⚠️ THE ONLY DEFINITION OF THE PASSWORD CREDENTIAL TYPE. This is a SECURITY
+ * CONTROL, not a tidiness constant.
+ *
+ * `UNIQUE (user_id, credential_type)` means a differing value does not error —
+ * it creates a SECOND credential row alongside the first. Two consequences:
+ *   · a typo ('passwords') silently writes a duplicate credential
+ *   · worse, if this value were ever taken from a REQUEST, a caller could send
+ *     an unused type, make the existence lookup below miss, and be treated as
+ *     a first-time set — skipping the re-verification gate entirely while the
+ *     real credential survives untouched.
+ * It is therefore a module constant and must NEVER be sourced from caller
+ * input. Callers pass a user id and nothing else.
+ */
+export const PASSWORD_CREDENTIAL_TYPE = "password";
+
+/**
+ * The caller's stored credential row, or null when they have none.
+ *
+ * ⚠️ THIS FUNCTION MUST THROW ON DATABASE FAILURE, AND THAT IS A SECURITY
+ * REQUIREMENT — not the stylistic choice it resembles.
+ *
+ * Its result decides whether re-verification is required: a row means "change"
+ * (current password mandatory), null means "first-time set" (session alone is
+ * sufficient). db.ts has ~14 legacy `if (error) return null` sites; if this
+ * followed that pattern, a transient database failure would return null, be
+ * read as "no credential exists", and let a hijacked session change a password
+ * WITHOUT re-verification. An attacker would not even need to cause the
+ * outage — retrying until one occurs naturally is enough, and this project has
+ * already seen an unplanned Supabase outage mid-test.
+ *
+ * Throwing means the route answers 503 and writes nothing. "Absent" is
+ * concluded ONLY from a successful read that returned zero rows. Same
+ * reasoning as getUserByPhoneOrThrow (Issue E), applied to an authorisation
+ * decision instead of a status code.
+ */
+export async function getUserCredential(
+  userId: string,
+  credentialType: string = PASSWORD_CREDENTIAL_TYPE
+) {
+  const { data, error } = await supabaseAdmin
+    .from("user_credentials")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("credential_type", credentialType)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Create or replace a user's credential. First writer to `user_credentials`
+ * (chunk 2.4) — the table was schema-only until now.
+ *
+ * ⚠️ REPLACES, NEVER DUPLICATES — and that is STRUCTURAL, not conditional.
+ * The upsert conflict-targets `UNIQUE (user_id, credential_type)`, so a second
+ * password row for the same user cannot exist to be verified against by
+ * mistake. Proven by migration 003 STEP 3b.
+ *
+ * ⚠️ THROWS on failure, deliberately. A credential write that quietly failed
+ * would tell the user their password was changed when it was not — they would
+ * then be unable to log in with either the old or the new one. The route maps
+ * the throw to 503/500 via dbErrorResponse.
+ *
+ * `tokenEpoch` is passed explicitly rather than incremented in SQL because
+ * PostgREST cannot express `token_epoch = token_epoch + 1` in an upsert. The
+ * caller reads the current value and passes value+1. Omit it on a first-time
+ * set so the column takes its DEFAULT 0.
+ *   ⚠️ Read-then-write is NOT atomic. Two concurrent password changes for the
+ *   same user could compute the same next epoch. Consequence is benign (UNIQUE
+ *   still prevents duplicate rows; one write wins) and the scenario is not a
+ *   threat — a user racing themselves. Recorded rather than glossed.
+ *
+ * Deliberately does NOT touch `failed_attempts` / `locked_until`: those carry
+ * chunk 2.7's lockout semantics, which are not built. Inventing behaviour for
+ * them here would bury a policy decision in a write helper. On upsert-update,
+ * columns absent from the payload keep their existing values.
+ */
+export async function upsertUserCredential(params: {
+  userId: string;
+  passwordHash: string;
+  credentialType?: string;
+  tokenEpoch?: number;
+}) {
+  const now = new Date().toISOString();
+
+  const row: Record<string, unknown> = {
+    user_id: params.userId,
+    credential_type: params.credentialType ?? PASSWORD_CREDENTIAL_TYPE,
+    password_hash: params.passwordHash,
+    password_changed_at: now,
+    // Application-maintained, NOT a database trigger — a trigger is vendor SQL
+    // carrying behaviour that would have to be re-created on RDS
+    // (MIGRATION.md §5 rule 3).
+    updated_at: now,
+    // The user has just chosen their own password, so any admin-provisioned
+    // "must change on first use" flag is satisfied by definition.
+    must_change_password: false,
+  };
+
+  if (params.tokenEpoch !== undefined) row.token_epoch = params.tokenEpoch;
+
+  const { data, error } = await supabaseAdmin
+    .from("user_credentials")
+    .upsert(row, { onConflict: "user_id,credential_type" })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 export async function updateUserType(phone: string, userType: string) {

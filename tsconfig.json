@@ -6,6 +6,13 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // Permits the explicit `.ts` extension in import specifiers. Required by
+    // scripts/verify-password-hash.ts, which Node runs directly via type
+    // stripping — Node's ESM resolver needs the real extension, while tsc
+    // rejects it without this flag. Legal only because `noEmit` is true above.
+    // It RELAXES a restriction and changes nothing for existing code: no other
+    // import in the project uses a .ts extension.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
