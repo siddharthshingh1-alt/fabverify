@@ -255,15 +255,25 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - **Verify:** our token resolves to the right `users` row; a Supabase token still resolves (both in the same run); expired token → 401; tampered signature → 401; `alg: none` → 401; token signed with the wrong key → 401; the full Group 2 matrix re-run under each token type.
 
 - [ ] **CHUNK 2.6 — Login page offers OTP *or* password.** *`login/page.tsx` + seam wiring.* 🟡 MEDIUM — touches the login path, where a mistake locks users out.
+  - 🛑 **HARD PREREQUISITE — 2.7 (LOCKOUT) MUST BE IN PLACE BEFORE THIS CHUNK IS MERGED. LOCKED 2026-08-08, DECISIONS [I18].**
+    **This chunk is the one that creates the brute-force surface.** Password verification exists today (`verifyPasswordCredential`, chunk 2.5a) and is safe *only* because **nothing HTTP-reachable calls it** — that is the entire basis on which lockout was deferred. 2.6 is what wires it to a public, unauthenticated, network-reachable form. The moment it merges, every account on the platform is exposed to unlimited offline-speed online guessing, with no counter, no delay and no alert.
+    ⚠️ **The dependency direction in this file was originally BACKWARDS** — 2.6 was written as `Blocks: 2.7`, i.e. lockout scheduled *after* the thing that makes lockout necessary. Corrected here. **Do not restore the old order**, and do not treat 2.7 as follow-up polish: it is a gate on merging 2.6, not a task that comes after it.
+    **Acceptable orderings:** build 2.7 first · or build both and merge them together. **Not acceptable:** merge 2.6 and "do 2.7 next."
   - ⚠️ **OTP stays the default and stays fully working.** Password is an added choice, never a replacement, and never a required step.
   - ⚠️ **Preserve login's routing tail exactly** — the ORDER MATTERS rule from 1.6/1.7 (`postVerifyRoute()` resolved BEFORE `applyIdentity()`; `fabverify_auth` written BEFORE navigating). Password login must reuse that same tail, not a parallel one.
-  - **Depends on:** 2.3, 2.5. **Blocks:** 2.7, 2.8.
+  - ⚠️ **Preserve 2.5a's enumeration guarantee through the UI.** The seam returns one indistinguishable failure ([I17]); the page must not undo that by rendering "no account found" for one case and "wrong password" for another. Whatever the server refuses to distinguish, the screen must refuse to distinguish too.
+  - **Depends on:** 2.5a, 2.5b, **and 2.7 (hard prerequisite above)**. **Blocks:** 2.8.
   - **Verify:** OTP login unchanged for all account types; password login lands identically; wrong password shows a real error and writes nothing to `localStorage`; dev bypass (A10) still works on localhost; **one production run with a real token** — localhost cannot exercise the production branches, the same constraint that applied to 1.5, 1.9 and 1.10.
 
-- [ ] **CHUNK 2.7 — Rate limiting / lockout on password attempts.** 🟡 MEDIUM.
-  - ⚠️ **This is not optional polish.** OTP is naturally rate-limited by SMS cost and the provider; **a password endpoint is free to attack and can be hammered indefinitely.** Shipping 2.6 without this leaves an unthrottled online guessing oracle against every account.
+- [ ] **CHUNK 2.7 — Rate limiting / lockout on password attempts.** 🟡 MEDIUM. **🛑 GATES CHUNK 2.6 — must ship before or with it (locked 2026-08-08, [I18]).**
+  - ⚠️ **This is not optional polish.** OTP is naturally rate-limited by SMS cost and the provider; **a password login form is free to attack and can be hammered indefinitely.** Shipping 2.6 without this leaves an unthrottled online guessing oracle against every account.
   - Per-account and per-IP throttling with backoff; failures must not reveal whether the account exists (same response and timing for unknown phone vs wrong password).
-  - **Depends on:** 2.6. **Verify:** repeated wrong passwords throttle; a correct password still succeeds after the window; the OTP path is NOT throttled by this; enumeration timing indistinguishable.
+  - **The columns are already there and provably inert** — `failed_attempts` / `last_failed_at` / `locked_until` were built in chunk 2.1 and 2.5a's suite asserts that five consecutive failures still leave `failed_attempts` at **0**. So this chunk starts from a known-zero baseline, not from half-written state.
+  - ⚠️ **`failed_attempts` is `NOT NULL DEFAULT 0` for a reason** — `failed_attempts + 1` evaluates to `NULL` on a nullable column, so a nullable counter silently never increments: a lockout that never locks, which reads as working right up until someone is being brute-forced.
+  - ⚠️ **A counter write on a failed attempt is a database write on an unauthenticated path** — i.e. an amplification vector in its own right. Throttle the write, not just the login.
+  - ⚠️ **Lockout must not become an enumeration oracle** — "this account is locked" reveals the account exists. Locked and non-existent must stay indistinguishable, preserving [I17].
+  - ⚠️ **Use 2.5a's measurement technique for the timing assertions** — `fetch` instrumentation splitting network from local time. Wall-clock medians against Supabase Singapore are useless; that was proven, not guessed (see 2.5a).
+  - **Depends on:** 2.5a. **Blocks:** 2.6.
 
 - [ ] **CHUNK 2.8 — Password reset via OTP.** 🟡 MEDIUM.
   - The recovery path: prove the phone by OTP (already built and production-proven), then set a new password through 2.4's route. **No email reset links** — that is a whole new attack surface and we do not verify emails.
