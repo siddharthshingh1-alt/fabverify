@@ -268,12 +268,54 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - **Also verified:** two accounts sharing an identical plaintext resolve to their own distinct `users.id` · four phone formats (`+91`, `91`, spaced, dashed) resolve the same account · malformed phone/password give the same generic failure · a dead database **throws** rather than reporting "invalid credentials" (Issue E on the login path) · repeated failures leave `failed_attempts` at 0, confirming 2.7 is genuinely unbuilt rather than half-built · no token/session/epoch on the success result.
   - **Depends on:** 2.2, 2.4. **Blocks:** 2.5b.
 
-- [ ] **CHUNK 2.5b — 🔴 OUR OWN SESSION TOKEN: issue + verify. THE LAST HIGH-RISK CHUNK — fresh session.** *Seam + `authProvider.server.ts`.* ⚠️ Credential verification is already done and proven in **2.5a** — this chunk is purely the token subsystem.
-  - Issue a signed token on successful password verification; teach `getIdentityFromToken` to **try our issuer first, then fall back to Supabase** — both token types resolving to the same `users` row. This is A12 Phase 2's mechanism, built early.
-  - ⚠️ **A verification bug here is an AUTH BYPASS**, not a broken feature. Non-negotiables: verify the signature before reading any claim; pin the algorithm and **reject `alg: none` and algorithm substitution**; check issuer, audience and expiry; never trust an unverified claim for identity.
-  - ⚠️ **The Supabase fallback must remain intact** — every existing live session is a Supabase JWT, and breaking that branch logs out every current user.
-  - **Depends on:** 2.4. **Blocks:** 2.6.
-  - **Verify:** our token resolves to the right `users` row; a Supabase token still resolves (both in the same run); expired token → 401; tampered signature → 401; `alg: none` → 401; token signed with the wrong key → 401; the full Group 2 matrix re-run under each token type.
+- [ ] **CHUNK 2.5b — 🔴 OUR OWN SESSION TOKEN: issue + verify. THE LAST HIGH-RISK CHUNK — fresh session, nothing else that day.**
+  > **FULL DESIGN LOCKED 2026-08-08 (planning session, zero code written). Decisions: [I19] [I20] [I21] [I22]. Build from this spec.**
+  > ⚠️ Credential verification is already done and proven in **2.5a** — this chunk is *purely* the token subsystem. ⚠️ **It does not divide further:** issue, verify, and the ladder branch are one unit — a token you can mint but not validate is untestable, and a validator with no minter has nothing to validate.
+  > ⚠️ **FIRST ACT OF THE SESSION: confirm the library choice against a real runtime**, then write it into DECISIONS.md. [I19] locks the *design*; the library line is PROVISIONAL by the same rule chunk 2.0 applied to hashing. Recommendation: **`jose`** over `jsonwebtoken` — actively maintained, WebCrypto-based, and it *requires* an explicit algorithm allowlist on verify rather than inferring one from the token (which is defence D2 below, enforced by the library instead of by our discipline).
+
+  **① WHAT GETS ISSUED** — [I19]. Signed JWT, HS256, `SESSION_TOKEN_SECRET` (server-only, ≥32 random bytes). Claims: `iss` `aud` `sub`=`users.id` `iat` `exp` `epoch` `amr:["pwd"]`. No PII. TTL **7 days**, no refresh token ([I20]).
+  ⚠️ **The secret must THROW at module load if missing or short.** Do NOT copy `supabaseAdmin.ts`'s `|| "placeholder-…"` fallback — a published default *signing* key is a total forgery hole, not a degraded client.
+
+  **② WHAT CHANGES**
+  - `app/lib/sessionToken.server.ts` (new) — `issueSessionToken(userId, epoch)` / `verifySessionToken(token)`. Isolated and unit-testable with **no database and no network**, which is what makes the bypass matrix cheap to prove.
+  - `app/lib/authProvider.server.ts` — widen `getIdentityFromToken` to the [I21] union; try ours, fall back to Supabase.
+  - `app/lib/auth.ts` — the new ladder branch.
+  - `app/lib/db.ts` — resolve `users` + `token_epoch` together.
+  ⚠️ **Use ONE embedded join** (`users?select=*,user_credentials(token_epoch)`) rather than two round trips — the epoch check otherwise costs an extra query on *every* authenticated password request. This adds a 17th embedded join; update MIGRATION.md §1.2's count.
+
+  **③ THE TYPE PROBLEM — SOLVE IT FIRST, IT BLOCKS EVERYTHING** ([I21])
+  `getIdentityFromToken` returns `ProviderIdentity | null` = `{ providerUid: string; phone: string }`, **both required**. A password token has **neither**. Widen to `{kind:"provider";providerUid;phone} | {kind:"local";userId;epoch}` before writing any verifier logic.
+  ⚠️ **`getVerifiedCallerPhone` must ALSO learn the local kind**, not just `getVerifiedUser`. It is called directly by `save-profile`, it currently performs **no database access at all**, and the local branch needs one (`users.id` → row → phone) — so its error contract changes and an outage there must surface as **503, never 401** (Issue E). Do not leave it provider-only on the assumption that password users never hit account-creation paths; that assumption is unverified.
+
+  **④ 🛑 THE AUTH-BYPASS REGISTER — every way in, and the specific defence.** Each row gets its own test in ⑥.
+
+  | # | Attack | Defence |
+  |---|---|---|
+  | **D1** | **Signature forgery** — craft a token from scratch | HMAC-SHA256 over a ≥32-byte random server-only secret; `jwtVerify` validates the signature **before** any claim is readable |
+  | **D2** | **`alg: none`** — strip the signature | Explicit `algorithms: ["HS256"]` allowlist passed to verify. **Never** read `alg` from the token to choose a key |
+  | **D3** | **Algorithm substitution / HS-RS confusion** — sign with the "public" key as an HMAC secret | Only HS256 is allowlisted, only one key exists, no public key exists to abuse |
+  | **D4** | **Expiry ignored** | `exp` **required** — a token without it is rejected, not treated as eternal. Small explicit `clockTolerance` (~5 s), never open-ended |
+  | **D5** | **Token for A accepted as B** | `sub` is the **only** identity source and sits inside the signed payload. Changing it breaks the MAC. No route reads a user id from header, body or query |
+  | **D6** | **Payload tampering** | Any byte change invalidates the MAC (same mechanism as D1) |
+  | **D7** | **Replay of a stolen valid token** | ⚠️ **NOT PREVENTED — stated honestly.** Bearer tokens are replayable by definition; only binding (DPoP/mTLS) stops it, which we are not building. Mitigations: 7-day TTL, `token_epoch` revocation, HTTPS. **Do not claim replay protection** |
+  | **D8** | **Cross-issuer confusion** | `iss` **and** `aud` both checked. Cross-acceptance is impossible anyway: Supabase never signed ours, we never signed theirs |
+  | **D9** | **Routing on unverified claims** | ⚠️ **Never parse-then-decide.** Attempt our verifier; on any failure attempt Supabase. Reading `iss` from an unverified payload to pick a verifier lets the attacker steer verification |
+  | **D10** | **Stale token after a password reset** | Compare the token's `epoch` against the stored `token_epoch`; reject if lower. ⚠️ **Fail closed** — if the epoch cannot be read, answer **503**, never "allow" |
+  | **D11** | **Credential deleted, sessions live on** | No credential row ⇒ **reject the token**. A session minted from a credential must not outlive it |
+  | **D12** | **Missing/weak secret at boot** | Throw at module load ([I19]) |
+  | **D13** | **`sub` type confusion** — `sub` as a number, array or object | Assert `typeof sub === "string"` **and** UUID-shaped before it is used to look anything up |
+  | **D14** | **Password token used where OTP-grade proof is required** | `amr` recorded now so future sensitive-action re-auth can demand a fresh factor |
+
+  **⑤ COEXISTENCE** ([I22]) — ours first (local, microseconds), Supabase second (network). ⚠️ **THE SUPABASE FALLBACK BREAKING IS THE WORST OUTCOME IN THIS CHUNK** — every live session is a Supabase JWT, so a regression there logs out every existing user at once. Test both types **in the same run**, every time.
+
+  **⑥ TEST PLAN**
+  - *Pure unit, no DB or network — the whole D-register:* valid → right `sub` · tampered payload → reject · tampered signature → reject · **`alg:none` → reject** · algorithm switched → reject · signed with wrong key → reject · expired → reject · **missing `exp` → reject** · wrong/missing `iss` → reject · wrong/missing `aud` → reject · `sub` as number/array/object → reject · not-a-JWT garbage → reject, never throw uncaught · **swap A's `sub` for B's → signature breaks** (D5).
+  - *Integration:* our token resolves to the right `users` row · **a Supabase token still resolves, in the SAME run** · epoch below current → reject · no credential row → reject · DB unavailable during the epoch check → **503, not 401 and not allow**.
+  - *Boot:* `SESSION_TOKEN_SECRET` unset or short → hard failure, **no placeholder**.
+  - *Regression:* full Group 2 auth matrix under **each** token type · OTP login unchanged for all account types · resolution log still shows the existing branches for non-password sessions · 2.4 (75/75) and 2.5a (38/38) still green · client-bundle scan clean — **the secret and the signing code must be absent from all client chunks**.
+  - ⚠️ **Timing/outage assertions must use 2.5a's `fetch`-instrumentation technique.** Wall-clock medians against Supabase Singapore were *proven* useless this session, and an in-process re-import cannot test an outage (module cache) — use a subprocess. Both traps cost a false result already.
+
+  - **Depends on:** 2.5a. **Blocks:** 2.6.
 
 - [ ] **CHUNK 2.6 — Login page offers OTP *or* password.** *`login/page.tsx` + seam wiring.* 🟡 MEDIUM — touches the login path, where a mistake locks users out.
   - 🛑 **HARD PREREQUISITE — 2.7 (LOCKOUT) MUST BE IN PLACE BEFORE THIS CHUNK IS MERGED. LOCKED 2026-08-08, DECISIONS [I18].**

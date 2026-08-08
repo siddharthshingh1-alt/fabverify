@@ -247,4 +247,37 @@ Background `#07122a` · Cards `#0D1B33` · Border `#1C3050` · Gold accent `#f2c
 
 ---
 
+## OUR OWN SESSION TOKEN — DESIGN DECISIONS (2026-08-08, planning for chunk 2.5b)
+> ⚠️ **DESIGN LOCKED ON PAPER; THE RUNTIME CHOICE IS PROVISIONAL.** Chunk 2.0 deferred these deliberately, on the principle that *"a library decision that cannot be tested is a paper decision"*. That principle still holds, so this splits in two: the **reasoning-based** decisions below are LOCKED (claims, algorithm, secret handling, TTL, the ladder branch, the bypass defences), while the **library choice is PROVISIONAL** until it runs — exactly the pattern chunk 2.0 used for hashing, where `hash-wasm` was recommended on paper and only proven at 2.2. Do not treat [I19]'s library line as settled before the smoke test.
+
+**[I19] Our session token is a signed JWT (JWS compact), HS256, with a server-only secret that FAILS CLOSED.** (2026-08-08)
+*Format:* signed, **never encrypted** — it carries no secret, so encryption would add a key-management burden for nothing.
+*Algorithm:* **HS256.** The issuer and the verifier are the same server, so asymmetric signing buys nothing today. ⚠️ **Migration note with its cost stated (X5):** if verification ever moves to a separate service or the Edge runtime, asymmetric (EdDSA/ES256) would let us distribute a public key instead of copying a shared secret. Revisit at that point; the change is a key-type swap plus a re-issue window, not a redesign.
+*Claims:* `iss` (`fabverify`), `aud` (`fabverify-api`), **`sub` = `users.id`**, `iat`, `exp`, `epoch` (the `token_epoch` it was minted under, [I12]), `amr: ["pwd"]` (the authentication method — recorded now so "re-authenticate for sensitive actions" can later demand a fresh factor without a token format change).
+⚠️ **NO PII IN THE TOKEN — no phone, no name, no email.** It lives in `localStorage` and travels on every request. `sub = users.id` is deliberate and is also what makes this the *cheapest* branch of the resolution ladder: our own token needs no lookup to identify the account, unlike the provider branch (`auth_identities`) and the phone branch.
+*Secret:* **`SESSION_TOKEN_SECRET`**, server-only, ≥32 random bytes, never `NEXT_PUBLIC_` (A4).
+⚠️ **IT MUST THROW AT MODULE LOAD IF MISSING OR TOO SHORT. DO NOT COPY `supabaseAdmin.ts`'s PLACEHOLDER-FALLBACK PATTERN** (`|| "placeholder-service-role-key"`). That pattern is tolerable for a client that will simply fail its requests; for a **signing key it is a catastrophic forgery hole** — a known, published default secret means anyone can mint a valid token for any `users.id`. Fail closed, loudly, at boot.
+**Migration cost: none.** A JWT we sign with our own secret is issuer-independent and works identically on Supabase, RDS or anywhere else. That is the whole point of M10 as the migration safety net.
+
+**[I20] Access-token TTL is 7 days. NO refresh token in 2.5b.** (2026-08-08) — A refresh-token subsystem (rotation, reuse detection, storage, revocation-on-reuse) is a second security-critical build, and 2.5b is the one chunk that must stay small. Deliberately deferred.
+*Why 7 days is defensible without refresh:* revocation is **real** here — `token_epoch` ([I12]) is checked on every request and a password reset invalidates every outstanding session at once. The usual argument for short TTLs is "we cannot revoke", and that does not apply.
+*Accepted cost:* at day 7 a password session ends abruptly and the user logs in again. That is the [A12]-accepted standard already on record — *worst case for any user is one ordinary login*.
+⚠️ **Sliding renewal is the cheap upgrade, and it belongs to 2.6, not here** — re-issuing the token when it is past half-life avoids the whole refresh-token machinery, but it requires the client to store a token returned mid-session, which is client wiring. Note it, do not build it in 2.5b.
+
+**[I21] The resolution ladder gains a THIRD branch, ABOVE the existing two — and the trust root's return type must widen to a discriminated union.** (2026-08-08) — **This is the structural finding that shapes the chunk, and it was verified against the real types rather than assumed.**
+`getIdentityFromToken` currently returns `ProviderIdentity | null` where `ProviderIdentity = { providerUid: string; phone: string }` — **both required**. A password token has *neither*: no `providerUid` ([I11]: password writes no `auth_identities` row) and no phone ([I19]: no PII in the token). **The existing type cannot represent a password identity, so 2.5b cannot be built without widening it.**
+*Shape:* `{ kind: "provider"; providerUid; phone } | { kind: "local"; userId; epoch }`.
+*Ladder order:* **(1) our token** → `sub` IS `users.id`, no lookup needed · **(2) provider token** → `auth_identities` (chunk 1.9, unchanged) · **(3) phone fallback** (unchanged).
+⚠️ **`AuthenticationResult` is NOT the type in question, despite the plan's wording.** That type is the BROWSER-side result of `verifyOtp`; chunks 1.8 and 1.9 consume `PhoneAuthResult` and `UserAuthResult` server-side. Conflating them sends the design at the wrong file.
+⚠️ **A password result must NOT be expressed as `providerUid: null`.** In `AuthenticationResult` that value already means *"this was the A10 dev bypass"*, and chunk 1.8 keys its identity write off exactly that. It would *accidentally* produce the right behaviour (skipping the write, which [I11] wants) via a signal that means something else entirely — correct by coincidence is not correct. Same trap already caught and avoided at 2.5a.
+
+**[I22] Both token types must verify, ours is tried FIRST, and neither is ever parsed before it is verified.** (2026-08-08)
+*Order:* try our verifier first (a local HMAC check, microseconds, no network), fall back to Supabase (a network call) on any failure.
+⚠️ **NEVER read an unverified claim to decide which verifier to use.** Peeking at `iss` in the unparsed payload to "route" the token is the classic anti-pattern — it lets an attacker steer verification with data they control. Just *attempt* our verifier; if it fails for any reason, attempt Supabase. A Supabase token failing our HMAC check is cheap and expected.
+⚠️ **THE SUPABASE FALLBACK MUST SURVIVE INTACT.** Every currently-live session is a Supabase JWT; breaking that branch logs out every existing user at once, on a platform holding their orders. This is the single highest-consequence regression available in this chunk.
+*Cross-acceptance is impossible by construction:* a Supabase token cannot pass our verifier (different secret, and `iss`/`aud` are checked), and our token cannot pass Supabase's (they never signed it).
+⚠️ **A password token must never satisfy a check that requires provider-level proof.** The `amr` claim exists so future sensitive-action re-authentication can demand a fresh OTP rather than accepting a week-old password session.
+
+---
+
 *Append new decisions below this line with the next ID and a date.*
