@@ -115,6 +115,8 @@ Add `auth_identities`; backfill Supabase identities for existing users; add pass
 ### Phase 2 — Dual-verify (weeks before migration)
 Stand up the new provider. `getIdentityFromToken()` tries the new issuer first and falls back to Supabase. Both token types resolve to the same `users` row via `auth_identities`. New logins receive new-provider tokens; existing Supabase sessions keep working untouched. **Nobody is logged out.** Hold this window long enough that most active users re-authenticate onto the new provider naturally.
 
+⚠️ **PARTIALLY DELIVERED EARLY BY M10 CHUNK 2.5b** (design locked 2026-08-08, code not yet built — see §4.2.1). Our own signed token *is* a second issuer, and the try-ours-then-fall-back-to-Supabase ladder *is* this mechanism. When Phase 2 formally arrives the ladder already exists and only gains providers. ⚠️ One difference worth noting: a token we issue ourselves carries `sub = users.id` and needs **no `auth_identities` lookup at all** — it resolves more directly than either existing branch (DECISIONS **[I11]**, **[I21]**).
+
 ### Phase 3 — Data migration (the RDS move)
 Logical replication Supabase → RDS; cut writes over in a low-traffic window. Because auth was decoupled in Phase 1, **this is now purely a data operation.** Sessions are unaffected — tokens do not live in the database.
 
@@ -157,6 +159,21 @@ Hashes (argon2id) in **our own `user_credentials` table**, verification behind t
 ⚠️ **CORRECTED 2026-08-06 (chunk 2.0).** This section previously read *"hashes in our `users` table"*. That is now **[I10]: a separate `user_credentials` table, never a `users` column** — because `/api/dev-auth/lookup` is unauthenticated and returns `select("*")` on `users` for any phone, so a column there would hand an anonymous caller the hash for every account on the platform. The separate table makes that leak impossible by construction. Also decided: password writes no `auth_identities` row (**[I11]**), and session revocation is a `token_epoch` integer (**[I12]**).
 
 ⚠️ **M10 PULLS PHASE 2 FORWARD.** Authentication must produce a SESSION, and Supabase will not sign a JWT for a credential it does not hold — while holding it there is precisely what M10 forbids. So M10 requires us to **issue and verify our own session tokens**, and to teach `getIdentityFromToken` to try our issuer first and fall back to Supabase. That is literally §3 Phase 2 (dual-verify), arriving early: roughly half of M10 is the token subsystem, not the credential. It is still correct to do first — a credential *and* a session we own is exactly what makes the RDS cutover survivable.
+
+#### 4.2.1 `SESSION_TOKEN_SECRET` — the cutover implications
+> Design locked 2026-08-08 (DECISIONS **[I19] [I20] [I21] [I22]**); code is chunk 2.5b, not yet built.
+
+Our own session token is a **signed JWT (HS256)** whose only dependency is `SESSION_TOKEN_SECRET`, a server-only environment variable. Four consequences for the migration, one of them load-bearing:
+
+**1. ⚠️ THE SECRET MUST BE CARRIED ACROSS THE CUTOVER, NEVER REGENERATED.** This is the single most important migration fact about M10 and the easiest to get wrong, because provisioning a fresh environment normally means provisioning fresh secrets. **A new secret invalidates every outstanding password token at the instant of the flip — a mass logout, which is precisely the outcome [A12] exists to prevent.** Treat it as data to migrate, not config to regenerate. It belongs on the cutover checklist beside the database, not in the "set up the new environment" step.
+
+**2. The token itself is issuer-independent, and that is the whole point.** Nothing about it references Supabase, PostgREST or any vendor. It verifies identically on Vercel today, on AWS later, and during the parallel run — which is exactly why M10 is described as the migration safety net rather than a feature. **Migration cost of the token subsystem itself: none.**
+
+**3. 2.5b partially DELIVERS Phase 2 (§3), it does not merely prepare for it.** The dual-verify mechanism — try the new issuer first, fall back to Supabase, both resolving to the same `users` row — *is* what 2.5b builds. When the real Phase 2 arrives, the ladder already exists and only gains providers. ⚠️ **The Supabase fallback branch must therefore stay alive until the longest legacy session TTL expires** (§3 Phase 4), exactly as planned — do not delete it when RDS goes live.
+
+**4. Secret rotation, if ever needed, follows the same parallel-run pattern.** Accept both the old and new secret during a window at least as long as the token TTL (**7 days**, [I20]), then retire the old one. Same shape as the provider cutover; worth knowing before an incident forces it.
+
+⚠️ **HS256 is a SHARED secret, chosen because the issuer and verifier are the same server.** If verification ever moves to a separate service or the Edge runtime, that secret would have to be copied to every verifier — at which point asymmetric signing (EdDSA/ES256, distribute a public key instead) becomes the right answer. Logged here with its cost per **[X5]**: the change is a key-type swap plus a re-issue window, not a redesign.
 
 ### 4.3 RLS 🟡 — see DECISIONS I8
 **Formally retired as a security mechanism.** Do not invest in `auth.uid()`-based policies; the migration deletes them. If a compliance requirement later demands defence-in-depth, rewrite against `current_setting('app.user_id')` set per-transaction — standard Postgres, portable to RDS.

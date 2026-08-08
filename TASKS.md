@@ -162,17 +162,25 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 >
 > **IT IS ONE INDIVISIBLE UNIT — DO NOT TRY TO SPLIT IT FURTHER.** Issuing a token, verifying a token, and adding the new branch to `getVerifiedUser`'s resolution ladder are the same piece of work: a token you can issue but not verify is useless, and a verifier with no issuer cannot be tested. ⚠️ The credential half was ALREADY carved out as **2.5a and is done and proven** — that is the split, and it has been taken. What remains does not divide again.
 >
-> **DECISIONS FIRST, CODE SECOND.** Chunk 2.0 deliberately did NOT lock the algorithm, TTL, library or secret location — they were deferred to here so they could be decided against a real runtime instead of on paper. Recommendations on the table, none of them locked: `jose` (not `jsonwebtoken`), HS256 (issuer and verifier are the same server, so asymmetric buys nothing), `SESSION_TOKEN_SECRET` server-only and **never** `NEXT_PUBLIC_` (A4), claims `iss` / `aud` / `sub = users.id` / `iat` / `exp` + the `token_epoch`. Write the decisions into DECISIONS.md before writing the verifier.
+> ## ✅ THE DESIGN IS ALREADY DONE — DO NOT RE-DERIVE IT
 >
-> **THE NON-NEGOTIABLES:**
-> - Verify the signature **before reading any claim**. Never trust an unverified claim for identity.
-> - **Pin the algorithm.** Reject `alg: none` and algorithm substitution explicitly — do not rely on a library default.
-> - Check **issuer, audience and expiry**, not just the signature.
-> - ⚠️ **THE SUPABASE FALLBACK MUST SURVIVE INTACT.** Every currently-live session is a Supabase JWT. Breaking that branch logs out every existing user at once, on a platform holding their orders.
-> - ⚠️ **The ladder gains ONE NEW BRANCH ABOVE the existing two** — for our own tokens, where `sub = users.id` needs no lookup at all. This was recorded in [I11] on purpose, so it would not be discovered *during* the auth-bypass chunk. The existing identity and phone branches are untouched.
-> - `token_epoch` becomes REAL here. It increments today (chunk 2.4) but **revokes nothing** — no code reads it yet. 2.5b is what makes revocation actually work.
+> **A full planning session ran 2026-08-08 and produced the complete spec. Build from it; do not start from a blank page.**
+> · **`DECISIONS.md` [I19] [I20] [I21] [I22]** — token format, claims, algorithm, secret handling, TTL, the ladder branch, coexistence rules.
+> · **The CHUNK 2.5b entry below** — sections ①–⑥: what gets issued · what changes · **the type problem to solve first** · the **14-row auth-bypass register (D1–D14)**, each vector with its specific defence · coexistence · the full test plan.
 >
-> **Verify:** our token resolves to the right `users` row · a Supabase token still resolves, **in the same run** · expired → 401 · tampered signature → 401 · `alg: none` → 401 · wrong key → 401 · epoch below current → rejected · the full Group 2 auth matrix re-run under **each** token type.
+> ⚠️ **ONE THING IS DELIBERATELY STILL OPEN: the LIBRARY.** [I19] locks the *design* on reasoning; the library locks on *evidence*, which is the same rule chunk 2.0 applied to hashing (`hash-wasm` recommended on paper, proven at 2.2). **First act of the build session:** smoke-test the choice — `jose` is the recommendation, over `jsonwebtoken`, because it *requires* an explicit algorithm allowlist on verify rather than inferring one from the token, which makes defence **D2** the library's job instead of our discipline. Then write that line into DECISIONS.md.
+>
+> **THE FOUR THINGS MOST LIKELY TO GO WRONG** (full register in ④ below):
+> - **Verify the signature BEFORE reading any claim**, and never read an unverified claim to decide *which* verifier to use (**D9**) — that hands the attacker the steering wheel.
+> - **Pin the algorithm** to an explicit `["HS256"]` allowlist. Reject `alg: none` and substitution outright; never rely on a library default (**D2**, **D3**).
+> - ⚠️ **THE SUPABASE FALLBACK MUST SURVIVE INTACT.** Every currently-live session is a Supabase JWT — a regression there logs out every existing user at once, on a platform holding their orders. **The single highest-consequence mistake available in this chunk.**
+> - ⚠️ **The secret must THROW at module load if absent.** Do NOT copy `supabaseAdmin.ts`'s `|| "placeholder-…"` fallback: for a *signing* key a published default is total forgery, not a degraded client (**D12**).
+>
+> **Two structural notes carried in from planning, so they are not discovered mid-build:**
+> - **The trust root's return type MUST widen before any verifier logic is written** ([I21]) — `ProviderIdentity` requires *both* `providerUid` and `phone`, and a password token has neither. Solve this first; it blocks everything.
+> - `token_epoch` **becomes real here.** It increments today (chunk 2.4) but revokes nothing — no code reads it yet.
+>
+> **⚠️ Two test traps already paid for this session — do not re-learn them:** an outage test needs a **subprocess** (an in-process re-import keeps the cached module and reports a false pass), and timing assertions need **`fetch` instrumentation** (wall-clock medians against Supabase Singapore are useless — WAN jitter swamps the signal).
 
 ⚠️ **SEQUENCING TRAP — 2.7 (lockout) MUST LAND WITH OR BEFORE 2.6 (login UI), NEVER AFTER.** Corrected in the chunk entries below ([I18]); the original ordering had 2.6 blocking 2.7, which is backwards. Password verification has **no HTTP surface today** — that is precisely what makes deferring lockout safe, and **2.6 is what opens it.** Shipping 2.6 alone leaves an unthrottled online guessing oracle against every account on the platform.
 
