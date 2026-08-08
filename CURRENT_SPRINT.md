@@ -10,7 +10,12 @@ All 10 chunks done. **Zero application files import Supabase** (consumer importe
 
 **➡️ NEXT: Launch-Ready item 2 — Password login (M10).** The migration safety net. ⚠️ **Never store passwords in Supabase Auth** — the single most expensive mistake available here.
 
-📍 **M10 progress: 2.0+2.1 done 2026-08-06 · 2.2+2.3+2.4+2.5a done 2026-08-08 · NEXT IS 2.5b.** Full chunk list and the 📍 M10 STATUS line are in `TASKS.md`.
+📍 **M10 progress: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a ALL DONE. NEXT IS 2.5b — the token subsystem.**
+
+> 🛑 **2.5b IS THE HIGH-RISK CHUNK. Fresh session, decisions first, nothing else that day.**
+> **A bug there is an AUTH BYPASS, not a broken feature.** It is **one indivisible unit** — issue, verify, and the new resolution-ladder branch are the same piece of work. The credential half was already carved out as 2.5a and is done; what remains does not split again. The algorithm, TTL, library and secret location were deliberately left unlocked at chunk 2.0 so they could be decided against a real runtime — **write those decisions before writing the verifier.**
+> ⚠️ **The Supabase fallback must survive intact** — every currently-live session is a Supabase JWT, and breaking that branch logs out every existing user at once.
+> Full briefing: the 📍 M10 STATUS block in `TASKS.md`.
 
 ⚠️ **STATE OF PASSWORD LOGIN RIGHT NOW, so nobody misreads it:** a user can **SET** a password (`POST /api/account/password`), and the server can **CHECK** one (`verifyPasswordCredential`) — but **nothing can LOG IN**, and no screen reaches either. The verifier has **zero route importers on purpose**. Do not "finish the feature" by wiring login before **2.5b** (our own session token) exists.
 

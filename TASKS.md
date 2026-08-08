@@ -153,9 +153,30 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
 
 #### 📍 M10 STATUS — UPDATE EVERY SESSION
-**NEXT CHUNK: 2.5b** · 2.0+2.1 DONE 2026-08-06 · **2.2 + 2.3 + 2.4 + 2.5a DONE 2026-08-08** · Plan recorded 2026-08-05
-⚠️ **2.5 WAS SPLIT INTO 2.5a (verify credentials) + 2.5b (issue/verify token) — DECISIONS [I16].** 2.5a is done. **2.5b is the LAST high-risk chunk of M10. Build it on a FRESH session, nothing else that day.** A verification bug there is an **auth bypass**, and breaking the Supabase fallback logs out every currently-live user at once. The split means 2.5b is now purely the token subsystem — the credential half is already proven.
-⚠️ **SEQUENCING TRAP — 2.7 (lockout) MUST LAND WITH OR BEFORE 2.6 (login UI), NOT AFTER IT.** The list below still has 2.7 after 2.6. Password verification has **no HTTP surface today**, which is exactly what makes deferring lockout safe ([I18]); 2.6 is what opens it. Shipping 2.6 without 2.7 leaves an unthrottled online guessing oracle against every account on the platform.
+**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a** (2.0+2.1 on 2026-08-06; the rest on 2026-08-08)
+**NEXT: 2.5b — THE TOKEN SUBSYSTEM. 🔴 THE HIGH-RISK CHUNK. FRESH SESSION, DECISIONS FIRST, NOTHING ELSE THAT DAY.**
+
+> ## 🛑 READ THIS BEFORE STARTING 2.5b
+>
+> **A BUG HERE IS AN AUTH BYPASS — not a broken feature.** Every other chunk of M10 fails loudly: a wiring bug 401s, a bad query 503s, a weak password is rejected. This one fails by *letting the wrong person in*, and it looks perfectly healthy from the outside while doing it.
+>
+> **IT IS ONE INDIVISIBLE UNIT — DO NOT TRY TO SPLIT IT FURTHER.** Issuing a token, verifying a token, and adding the new branch to `getVerifiedUser`'s resolution ladder are the same piece of work: a token you can issue but not verify is useless, and a verifier with no issuer cannot be tested. ⚠️ The credential half was ALREADY carved out as **2.5a and is done and proven** — that is the split, and it has been taken. What remains does not divide again.
+>
+> **DECISIONS FIRST, CODE SECOND.** Chunk 2.0 deliberately did NOT lock the algorithm, TTL, library or secret location — they were deferred to here so they could be decided against a real runtime instead of on paper. Recommendations on the table, none of them locked: `jose` (not `jsonwebtoken`), HS256 (issuer and verifier are the same server, so asymmetric buys nothing), `SESSION_TOKEN_SECRET` server-only and **never** `NEXT_PUBLIC_` (A4), claims `iss` / `aud` / `sub = users.id` / `iat` / `exp` + the `token_epoch`. Write the decisions into DECISIONS.md before writing the verifier.
+>
+> **THE NON-NEGOTIABLES:**
+> - Verify the signature **before reading any claim**. Never trust an unverified claim for identity.
+> - **Pin the algorithm.** Reject `alg: none` and algorithm substitution explicitly — do not rely on a library default.
+> - Check **issuer, audience and expiry**, not just the signature.
+> - ⚠️ **THE SUPABASE FALLBACK MUST SURVIVE INTACT.** Every currently-live session is a Supabase JWT. Breaking that branch logs out every existing user at once, on a platform holding their orders.
+> - ⚠️ **The ladder gains ONE NEW BRANCH ABOVE the existing two** — for our own tokens, where `sub = users.id` needs no lookup at all. This was recorded in [I11] on purpose, so it would not be discovered *during* the auth-bypass chunk. The existing identity and phone branches are untouched.
+> - `token_epoch` becomes REAL here. It increments today (chunk 2.4) but **revokes nothing** — no code reads it yet. 2.5b is what makes revocation actually work.
+>
+> **Verify:** our token resolves to the right `users` row · a Supabase token still resolves, **in the same run** · expired → 401 · tampered signature → 401 · `alg: none` → 401 · wrong key → 401 · epoch below current → rejected · the full Group 2 auth matrix re-run under **each** token type.
+
+⚠️ **SEQUENCING TRAP — 2.7 (lockout) MUST LAND WITH OR BEFORE 2.6 (login UI), NEVER AFTER.** Corrected in the chunk entries below ([I18]); the original ordering had 2.6 blocking 2.7, which is backwards. Password verification has **no HTTP surface today** — that is precisely what makes deferring lockout safe, and **2.6 is what opens it.** Shipping 2.6 alone leaves an unthrottled online guessing oracle against every account on the platform.
+
+⚠️ **STATE OF PLAY IN ONE LINE:** a user can **set** a password and the server can **check** one — **nobody can log in with one**, and no screen reaches any of it. `user_credentials` holds **0 real rows**.
 ⚠️ **A user can SET a password today and NOTHING can authenticate with one.** That is the intended state after 2.4 — do not "finish the feature" by wiring login before 2.5 exists.
 ⚠️ **`token_epoch` increments on a password change but is INERT** — no code issues or verifies our tokens yet, and live sessions are Supabase JWTs that do not carry it. 2.5 is what makes it real. Do not read the incrementing column as working revocation.
 
