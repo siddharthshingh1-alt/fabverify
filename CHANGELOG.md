@@ -6,6 +6,38 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-20 · Chunk 2.7] — Lockout. Ten tries, fifteen minutes, and nothing a prober can read.
+
+> Built AHEAD of 2.6, which is the point: password verification has no HTTP surface yet, and 2.6 is what opens one. Shipping the login UI first would have left an unthrottled guessing oracle against every account on the platform ([I18]).
+
+### Added
+- **Per-account lockout inside `verifyPasswordCredential`** — 10 consecutive failures set a **fixed 15-minute auto-expiring cooldown**. No admin unlock, no support queue. Cleared on a successful login and lazily on expiry.
+- **`recordFailedPasswordAttempt` / `clearFailedPasswordAttempts` in `db.ts`** — two guarded single-round-trip updates. Deliberately dumb: handed the values to store, never deciding them.
+- **`PASSWORD_LOCKOUT_THRESHOLD` / `PASSWORD_LOCKOUT_MINUTES` in `passwordPolicy.ts`** — policy in one findable place, not buried in a query builder.
+- **`scripts/verify-password-lockout.ts`** — 51 assertions across threshold, entry-refusal, enumeration, cost, expiry, reset, concurrency, isolation and outage.
+- **DECISIONS [I23] [I24] [I25] [I26]** — the policy, the ownership-gated disclosure, the after-the-hash ordering, and the concurrency mechanism with its measured limit.
+- **Zero DDL.** 2.1 built these columns inert in advance; this chunk only starts writing them, so it reverts with one `git revert`.
+
+### Changed
+- ⚠️ **[I17]'s "one failure reason" is AMENDED, not broken** — `PasswordVerification` now has two failure reasons, and the second is reachable only by a caller who supplied the **correct password**. Someone holding valid credentials learns nothing from "this account is locked"; a prober can never reach the branch. Enforced structurally — the locked result is constructed inside the `matched` branch and nowhere else — then fuzz-tested (12 wrong guesses against a locked account, zero leaks) and type-asserted at exactly two reasons.
+- ⚠️ **Three assertions in `scripts/verify-password-login.ts` were INVERTED, not deleted.** They encoded *"2.7 is unbuilt"* — five failures must leave `failed_attempts` at 0 — which was correct on 2026-08-08 and is a silent security failure today. They now assert the counter moves. T1's *"exactly 2 round trips"* became *"all paths equal"*: pinning the literal number turned a security property into a change-detector that a correct future chunk has to edit, which is how a real assertion quietly gets weakened.
+- Section [C] of that suite now reseeds first — the timing section fires enough wrong passwords to trip the new lockout, which is the lockout working on a suite written before it existed.
+
+### The one that matters
+- ⚠️ **The lock is checked AFTER the argon2id verify, never before** ([I25]). The obvious early return is precisely wrong: skipping the ~45 ms hash makes a **locked account answer measurably faster than a wrong password**, which is an oracle for account existence — and one an attacker **manufactures on demand** by hammering any number ten times and then timing it. A number with an account gets fast; a number without one never changes. That would have been a *better* enumeration channel than the one 2.5a was built to close.
+- **Proven by a negative control rather than by assertion.** The early-return version was deliberately written and run: locked paths drop to **2 round trips / 1.1 ms** against the correct build's uniform **3 round trips / 45.9–49.6 ms**, failing D1/D2/D3. The suite catches the bug it was written for.
+- **Exactly one counter write on every path**, issued unconditionally against the same sentinel id the credential read uses. The WHERE clause — not a branch in application code — decides whether it matches a row. No branch means no path that can diverge.
+
+### Known and recorded, not fixed
+- ⚠️ **Password spraying is still unhandled.** Per-account lockout never trips on one guess each against 10,000 accounts. Per-IP is deliberately unbuilt: shared office/carrier NAT IPs make naive per-IP a denial-of-service tool, and there is no shared state store. **2.6 must not merge without a decision here.**
+- ⚠️ **The counter race has a measured limit** ([I26]). PostgREST cannot express `failed_attempts + 1`, so the increment is read-modify-write with optimistic concurrency and 3 retry rounds. **A 10-parallel burst advances the counter by 5, and the lock arrives after 3 bursts** rather than 1. Bounded degradation, not a bypass — sustained parallel guessing still locks. Proper fix is an atomic increment, free at the [A12] RDS cutover.
+- **No time-decay window** — ten failures spread over months still lock. Left open deliberately.
+- **2.8 must clear the lock on reset**, or the recovery path cannot recover a locked account.
+
+### Verified
+9 failures still let the correct password in (the off-by-one direction real users hit) · the 10th locks · **the correct password is refused during cooldown** · hammering extends neither the cooldown nor the counter · six prober-reachable paths collapse to **one distinct value** · expiry restores login and restarts the counter at **1, not 11** · success resets to 0 · sequential attempts count exactly 1..10 · an outage **throws** (subprocess, cold module graph — the trap that produced a false pass at 2.5a) · **zero route importers**, so [I18] still holds · verification logs nothing · cleanup leaves 0 credential rows and `auth_identities` at 1.
+**Regression:** 2.2 42/42 · 2.4 75/75 · 2.5a 37/37 · 2.5b module 54/54 + 72/72 · `npm run build` clean, exit 0, 156 pages · `tsc --noEmit` silent.
+
 ## [2026-08-08 · Chunk 2.5a] — Verify a password. Issue nothing.
 > Chunk 2.5 was **split**: 2.5a checks credentials, 2.5b issues the session token. A bug in 2.5a is a wrong answer nothing acts on; a bug in 2.5b is an auth bypass. Bundling them would have spent one session's attention on both.
 

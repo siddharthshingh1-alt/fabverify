@@ -280,4 +280,39 @@ Background `#07122a` · Cards `#0D1B33` · Border `#1C3050` · Gold accent `#f2c
 
 ---
 
+---
+
+## LOCKOUT — DECISIONS (2026-08-20, chunk 2.7)
+
+**[I23] Password lockout is PER-ACCOUNT: 10 consecutive failures, a fixed 15-minute auto-expiring cooldown, cleared on success and on expiry.** (2026-08-20)
+*Threshold 10*, not 5 — OWASP's range is 5–10 and NIST SP 800-63B tolerates far more, so the top of the range is defensible and forgives an honest run of typos. The real brake is not the number: every attempt already costs ~45 ms of argon2id plus two database round trips.
+*Duration 15 minutes, FIXED and AUTO-EXPIRING* — no admin unlock, no support queue for a team that does not exist. ⚠️ **Escalating backoff was designed and rejected.** It was free to implement (duration as a function of the counter, no new column) but it requires the counter to SURVIVE expiry — and a surviving counter means that after one lockout the user gets exactly one attempt every 15 minutes for ever. Fixed duration plus a clean slate is the friendlier failure mode.
+*The cost, stated plainly:* a sustained attacker gets 10 guesses per 15 minutes, ~960/day/account. Against argon2id and a 12-character floor that is not a threat.
+*Reset* on a successful password login, and on cooldown expiry — lazily, on the next attempt, so there is no cron and no background job.
+⚠️ **NO time-decay window on pre-lockout failures.** Ten failures spread over months still lock. Left deliberately open rather than silently added; revisit if real users hit it.
+⚠️ **PER-ACCOUNT ONLY. Per-IP is NOT built,** and it is not a simple addition: shared egress IPs (an office, a mobile carrier NAT) mean one attacker behind the same address can lock out every real user, converting a brute-force defence into a denial-of-service tool. There is also no shared state store — no Redis, and Vercel lambdas share no memory.
+⚠️ **RESIDUAL, ACCEPTED NOT SOLVED: per-account lockout does NOT stop password spraying** — one guess each against 10,000 accounts never trips any single counter. **2.6 must not merge without a decision on this.**
+
+**[I24] The locked state is revealed ONLY to a caller who supplied the correct password — amending [I17]'s "one failure reason".** (2026-08-20)
+[I17] made every failure one indistinguishable value, and its strength was structural: the type admitted no other reason, so a leak was impossible rather than merely avoided. This adds a SECOND reason, `account-locked`, and it is a deliberate amendment, not drift.
+*Why it is safe:* the informative response is gated behind proof of ownership. Anyone who can trigger it already holds the correct password, so "this account exists and is locked" tells them nothing they did not already know. A prober — by definition someone without the password — can never reach that branch, and what they observe is byte-identical to 2.5a.
+*Made structural again:* the locked result is constructed INSIDE the `matched` branch and nowhere else, so it is unreachable without a successful argon2id verify rather than merely unreached today. Fuzz-tested (12 wrong guesses against a locked account, zero leaks) and type-asserted (exactly two failure reasons).
+⚠️ **THE COST, ACCEPTED WITH EYES OPEN:** an attacker who guesses correctly DURING a cooldown is told so, instead of receiving a generic failure that might have made them discard a working password. The trade is that a real user who mistyped ten times learns to wait rather than being told their correct password is wrong.
+⚠️ **NEVER ADD A THIRD REASON.** Any reason reachable WITHOUT a correct password re-opens the oracle 2.5a exists to close.
+
+**[I25] The lockout check runs AFTER the argon2id verify, never before, and every path spends exactly one counter write.** (2026-08-20) — **the chunk's central engineering decision, and the least obvious one.**
+The natural implementation checks `locked_until` first and returns early. It is precisely wrong: skipping the ~45 ms hash makes a LOCKED account answer measurably FASTER than a wrong password, which is an oracle for account existence — and one the attacker **manufactures on demand** by hammering any number ten times and then timing it. A number with an account gets fast; a number without one never changes. That is a *better* enumeration channel than the one 2.5a was built to close.
+*So:* the verify runs on locked accounts too and its result is discarded; the lock is read from the row already in hand, costing no extra query; and the counter write is issued unconditionally against the same sentinel id the credential read uses, with the WHERE clause — not a branch in application code — deciding whether it matches a row. No branch means no path that can diverge. **Measured: 3 round trips and a ~46 ms local floor on all five paths.**
+⚠️ **Proven by a NEGATIVE CONTROL, not by assertion.** The early-return version was deliberately written and run: it drops the locked paths to **2 round trips and 1.1 ms** and fails D1/D2/D3. The suite catches the bug it was written for.
+⚠️ **The counter write is AWAITED, never fire-and-forget.** Vercel may freeze the function after the response, so a background write would sometimes vanish — and a counter that silently drops writes is a lockout that never locks. `waitUntil` would fix it and is platform-specific, which CORE T2 rules out.
+
+**[I26] The failure counter uses optimistic concurrency with bounded retry, and its convergence limit is recorded rather than hidden.** (2026-08-20)
+PostgREST cannot express `failed_attempts = failed_attempts + 1` (already documented for `token_epoch`), so the increment is read-modify-write. **Unguarded, ten simultaneous guesses all read the same counter and all write the same value — the counter advances by ONE**: a lockout that fails open under exactly the load an attacker generates, while every sequential test still passes.
+*Mechanism:* `WHERE updated_at = <the value just read>`; a write that lost the race matches zero rows, and the seam re-reads and retries, bounded at 3 rounds. It gives up silently — losing a race is not a database fault, and turning contention into a 503 would hand an attacker a way to break login by generating load.
+⚠️ **MEASURED LIMIT, NOT A GUESS:** each retry round lands one write, so a burst of 10 parallel attempts advances the counter by **5**, and the lock arrives after **3 bursts** rather than 1. Bounded degradation, not a bypass — sustained parallel guessing still locks the account (test G4).
+⚠️ **A second, smaller residual:** only a real unlocked account can retry, so under attacker-induced concurrency the round-trip count can differ from the miss path. Far weaker than the channel it replaces — it needs deliberate parallel requests against one number, and the signal is a fraction of WAN jitter — and the uncontended path, where a prober actually operates, stays exactly equal.
+*The proper fix is an atomic increment,* which PostgREST cannot express and which becomes a single statement at the [A12] RDS cutover. Revisit there, or sooner with a SQL function if 2.6 traffic warrants it.
+
+---
+
 *Append new decisions below this line with the next ID and a date.*

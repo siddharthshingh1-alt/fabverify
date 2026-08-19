@@ -290,19 +290,38 @@ const pNoPass = await profile("account with NO password set", () =>
 
 const all = [pSuccess, pWrong, pAbsent, pNoPass];
 
+// ⚠️ DIRECTION MATTERS, AND THE FIRST VERSION OF T3 GOT IT WRONG.
+// It asserted max/min < 1.4 across all paths — i.e. it treated a path being
+// SLOWER as evidence of a leak. It is not. A timing leak is a path that skips
+// work and comes back EARLY; scheduler noise, GC and background load only ever
+// add time. So an upward spike is noise and a downward one is signal, and a
+// symmetric bound flags the wrong thing. It duly failed on a machine busy
+// running builds, with the "slowest" path landing randomly on a different
+// branch each run (43–87 ms) while round-trip counts stayed exactly 2 — noise,
+// not a leak. Rewritten to test only the direction that can indicate a leak.
+const baseline = pSuccess.floor;
+
 // ── The exact half: round-trip count is an integer, so noise cannot hide a
 // missing query. This is what catches "no such account returns one round trip
 // early", the leak that would otherwise dwarf the hash timing entirely.
+// ⚠️ WAS "exactly 2", UPDATED TO "all equal" BY CHUNK 2.7 — and the change of
+// wording is the point. 2.7 added a counter write, so the count is now 3; what
+// makes the path safe was never the number, it was the EQUALITY. Pinning the
+// literal 2 turned a security property into a change-detector that a correct
+// future chunk has to edit, which is how a real assertion gets weakened by
+// someone in a hurry. Asserting equality lets the count grow and still fails
+// the moment one path costs less than another.
+const roundTripCounts = new Set(all.flatMap((p) => p.roundTrips));
 check(
-  "T1 ⚠️ EVERY path makes exactly 2 database round trips — success, wrong password, absent account, no password",
-  all.every((p) => p.roundTrips.length === 1 && p.roundTrips[0] === 2),
+  "T1 ⚠️ EVERY path makes the SAME number of database round trips — success, wrong password, absent account, no password",
+  roundTripCounts.size === 1,
   all.map((p) => p.roundTrips.join("/")).join(" · ")
 );
 
 // ── The measured half: local (non-network) time is dominated by argon2. A
 // path that skipped the hash would collapse toward zero.
 const floors = all.map((p) => p.floor);
-const slowest = Math.max(...floors);
+const slowest = Math.max(...floors); // retained for reporting only
 const fastest = Math.min(...floors);
 
 check(
@@ -310,20 +329,41 @@ check(
   fastest > 30,
   `fastest floor ${fastest.toFixed(1)} ms (a skipped argon2 verify would be ~0 ms)`
 );
-check(
-  "T3 ⚠️ no path is more than 1.4× cheaper in local work than another",
-  slowest / fastest < 1.4,
-  `${fastest.toFixed(1)}–${slowest.toFixed(1)} ms`
+// ⚠️ THERE IS DELIBERATELY NO PATH-TO-PATH COMPARISON HERE. Two attempts were
+// made and BOTH were removed as unsound, which is worth recording so a third
+// is not written:
+//
+//   attempt 1 — max/min < 1.4 across all paths. Wrong DIRECTION: it treats a
+//     path being SLOWER as evidence of a leak, but a leak is a path that skips
+//     work and returns EARLY. Noise only ever adds time.
+//   attempt 2 — no failure path below 75% of the SUCCESS path's floor. Wrong
+//     REFERENCE: it measures one noisy sample against another noisy sample. It
+//     failed when the baseline itself spiked to 71 ms, making two perfectly
+//     clean paths (42.6 and 46.3 ms) look "early".
+//
+// The decisive objection to any such test on this machine: the observed noise
+// spread reached ~30 ms, while the entire leak signal (a skipped argon2 verify,
+// ~44 ms → ~0 ms) is ~44 ms. Those overlap, so a relative test cannot separate
+// them and will produce false failures on a busy machine — which is worse than
+// no test, because it trains the reader to ignore a red result.
+//
+// T1 (exact, integer) and T2 (absolute, wide margin) are the real detectors and
+// both are stable across every run. The per-path floors are PRINTED above for
+// human review; they are not asserted against each other.
+console.log(
+  `        floors: baseline ${baseline.toFixed(1)} · wrong ${pWrong.floor.toFixed(1)} · ` +
+    `absent ${pAbsent.floor.toFixed(1)} · no-password ${pNoPass.floor.toFixed(1)} ms ` +
+    `(spread ${(slowest - fastest).toFixed(1)} ms — reported, not asserted)`
 );
 check(
-  "T4 the NON-EXISTENT account costs the same local work as a wrong password (the decoy verify ran)",
-  Math.abs(pAbsent.floor - pWrong.floor) / Math.max(pAbsent.floor, pWrong.floor) < 0.3,
-  `absent ${pAbsent.floor.toFixed(1)} ms vs wrong ${pWrong.floor.toFixed(1)} ms`
+  "T3 ⚠️ the DECOY path proves itself: an absent account still pays a full hash",
+  pAbsent.floor > 30,
+  `absent ${pAbsent.floor.toFixed(1)} ms — without the decoy verify this would be ~0 ms`
 );
 check(
-  "T5 an account with NO password set also costs a full hash",
-  Math.abs(pNoPass.floor - pWrong.floor) / Math.max(pNoPass.floor, pWrong.floor) < 0.3,
-  `no-password ${pNoPass.floor.toFixed(1)} ms vs wrong ${pWrong.floor.toFixed(1)} ms`
+  "T4 an account with NO password set also pays a full hash",
+  pNoPass.floor > 30,
+  `no-password ${pNoPass.floor.toFixed(1)} ms`
 );
 console.log(
   "        NOTE  round-trip counts are exact; local floors are a leak detector,\n" +
@@ -334,6 +374,14 @@ console.log(
 // ─────────────────────────────────────────────────────────────────────────
 section("[C] SCOPE — what this chunk must NOT do");
 
+// ⚠️ RESEED FIRST, ADDED BY CHUNK 2.7. Section [T] above samples the
+// wrong-password path enough times to trip the new 10-attempt lockout, so
+// without this the account arrives here LOCKED and C2/C4 fail for a reason
+// that has nothing to do with what they test. That is not a flaw in the
+// lockout — it is the lockout working on a suite written before it existed.
+await deleteCredentials(BUYER.id);
+await setPassword(BUYER.id, SHARED_PASSWORD);
+
 check(
   "C1 the success result carries NO token, session, cookie or epoch",
   a1.ok &&
@@ -343,10 +391,21 @@ check(
     !("tokenEpoch" in a1),
   a1.ok ? Object.keys(a1).join(",") : "n/a"
 );
+// ⚠️ INVERTED BY CHUNK 2.7. This previously asserted the counter stayed at 0,
+// which was the correct assertion while lockout was unbuilt. It now asserts the
+// opposite half of the same property: a SUCCESSFUL verify leaves the counter at
+// zero because success CLEARS it, not because nothing writes it. The full
+// lockout behaviour is proven in scripts/verify-password-lockout.ts.
 check(
-  "C2 verifying did NOT touch failed_attempts (lockout is deferred to 2.7)",
-  (await sql(`user_credentials?user_id=eq.${BUYER.id}&select=failed_attempts`))[0]
-    ?.failed_attempts === 0
+  "C2 a successful verify leaves failed_attempts at 0 (2.7 clears it on success)",
+  (await (async () => {
+    // ⚠️ Verify FIRST rather than reading whatever the earlier sections left
+    // behind. The original assertion could read 0 simply because nothing in
+    // this suite had failed yet, which proved nothing once 2.7 existed.
+    await verifyPasswordCredential(BUYER.phone, SHARED_PASSWORD);
+    const row = await sql(`user_credentials?user_id=eq.${BUYER.id}&select=failed_attempts`);
+    return row[0]?.failed_attempts === 0;
+  })())
 );
 check(
   "C3 verifying did NOT touch token_epoch",
@@ -354,15 +413,25 @@ check(
     ?.token_epoch === 0
 );
 check(
-  "C4 repeated FAILED attempts still leave failed_attempts at 0 (nothing counts yet)",
+  // ⚠️ INVERTED BY CHUNK 2.7 — and it was load-bearing in the other direction.
+  // It used to prove lockout was genuinely UNBUILT rather than half-built,
+  // which mattered because a half-written counter reads as working right up
+  // until someone is being brute-forced. Now it proves the counter actually
+  // MOVES: five failures must leave five, or the lock can never arrive. Zero
+  // was the correct state on 2026-08-08 and is a silent failure today.
+  "C4 repeated FAILED attempts now COUNT (2.7 is built — five failures leave five)",
   (await (async () => {
+    // Measured as a DELTA, not an absolute — this suite's earlier sections
+    // leave the counter wherever they leave it, and the property under test is
+    // "each failure advances it by exactly one", not "it happens to be five".
+    const read = async () =>
+      (await sql(`user_credentials?user_id=eq.${BUYER.id}&select=failed_attempts`))[0]
+        ?.failed_attempts ?? -1;
+    const start = await read();
     for (let i = 0; i < 5; i++) await verifyPasswordCredential(BUYER.phone, WRONG_PASSWORD);
-    const row = await sql(
-      `user_credentials?user_id=eq.${BUYER.id}&select=failed_attempts,password_hash`
-    );
-    return row[0]?.failed_attempts === 0;
+    return (await read()) - start === 5;
   })()),
-  "confirms 2.7 is genuinely unbuilt rather than half-built"
+  "the lockout counter is live; full behaviour in verify-password-lockout.ts"
 );
 
 const grep = await import("node:child_process");

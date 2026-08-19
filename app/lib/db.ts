@@ -339,6 +339,110 @@ export async function upsertUserCredential(params: {
   return data;
 }
 
+/**
+ * ── THE LOCKOUT WRITES (chunk 2.7) ──────────────────────────────────────
+ *
+ * Two guarded, single-round-trip updates. Both are DUMB ON PURPOSE: they are
+ * handed the values to store and never decide them. The threshold and the
+ * cooldown live in passwordPolicy.ts; the read they are based on is
+ * getUserCredential above, which already returns every lockout column, so the
+ * check costs no extra query.
+ *
+ * ⚠️ WHY A GUARD CLAUSE AND NOT A PLAIN UPDATE. PostgREST cannot express
+ * `failed_attempts = failed_attempts + 1` (same limitation documented for
+ * token_epoch above), so the increment is read-modify-write, which races: N
+ * concurrent attempts all read k and all write k+1, and the counter advances
+ * by one instead of N. That is not a slow counter — it is a LOCKOUT THAT
+ * NEVER LOCKS under exactly the parallel load an attacker generates, and it
+ * reads as working perfectly in every sequential test. The
+ * `.eq("updated_at", expectedUpdatedAt)` filter is optimistic concurrency:
+ * a write that lost the race matches ZERO rows and says so, and the seam
+ * re-reads and retries.
+ *
+ * ⚠️ THEY RETURN `matched`, AND THE CALLER MUST NOT READ IT AS AN ERROR.
+ * Zero rows is the normal, expected outcome on three different paths: no such
+ * account, an account with no password set, and an account already locked.
+ * Only the seam knows which, because only the seam knows whether a real
+ * unlocked row was there to hit.
+ */
+
+/**
+ * Record one failed password attempt, and lock the account if the caller says
+ * this failure reaches the threshold.
+ *
+ * ⚠️ THE `.or()` CLAUSE IS THE "DO NOT TOUCH A LOCKED ROW" RULE, AND IT IS
+ * LOAD-BEARING TWICE OVER. It means an already-locked account is not
+ * re-locked and its counter does not climb, so a cooldown cannot be extended
+ * by hammering it — the user genuinely only waits the 15 minutes they were
+ * told about. It also means the LOCKED path and the NO-SUCH-ACCOUNT path both
+ * come back with zero rows after exactly one round trip, which is what keeps
+ * them indistinguishable in cost as well as in value.
+ *
+ * ⚠️ THROWS on database failure, like every other credential function here.
+ * Swallowing the error would let an outage silently disable the lockout.
+ */
+export async function recordFailedPasswordAttempt(params: {
+  userId: string;
+  expectedUpdatedAt: string;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  now: string;
+  credentialType?: string;
+}): Promise<{ matched: boolean }> {
+  const { data, error } = await supabaseAdmin
+    .from("user_credentials")
+    .update({
+      failed_attempts: params.failedAttempts,
+      last_failed_at: params.now,
+      locked_until: params.lockedUntil,
+      updated_at: params.now,
+    })
+    .eq("user_id", params.userId)
+    .eq("credential_type", params.credentialType ?? PASSWORD_CREDENTIAL_TYPE)
+    .eq("updated_at", params.expectedUpdatedAt)
+    .or(`locked_until.is.null,locked_until.lte.${params.now}`)
+    .select("id");
+
+  if (error) throw error;
+  return { matched: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * Clear the failure counter after a successful password login.
+ *
+ * ⚠️ NO RETRY ON A LOST RACE, deliberately — unlike the increment. Losing
+ * this write means the counter stays where it was, and the very next
+ * successful login clears it; the failure mode is a user who is briefly
+ * closer to a lockout than they should be. Retrying would spend extra round
+ * trips on the SUCCESS path only, which is precisely the asymmetry the whole
+ * function is written to avoid.
+ *
+ * ⚠️ Does NOT touch password_hash, token_epoch or must_change_password. A
+ * login is not a credential change.
+ */
+export async function clearFailedPasswordAttempts(params: {
+  userId: string;
+  expectedUpdatedAt: string;
+  now: string;
+  credentialType?: string;
+}): Promise<{ matched: boolean }> {
+  const { data, error } = await supabaseAdmin
+    .from("user_credentials")
+    .update({
+      failed_attempts: 0,
+      last_failed_at: null,
+      locked_until: null,
+      updated_at: params.now,
+    })
+    .eq("user_id", params.userId)
+    .eq("credential_type", params.credentialType ?? PASSWORD_CREDENTIAL_TYPE)
+    .eq("updated_at", params.expectedUpdatedAt)
+    .select("id");
+
+  if (error) throw error;
+  return { matched: (data?.length ?? 0) > 0 };
+}
+
 export async function updateUserType(phone: string, userType: string) {
   const { error } = await supabaseAdmin
     .from("users")

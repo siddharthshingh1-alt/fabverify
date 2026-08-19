@@ -31,12 +31,19 @@ import type { ProviderIdentity } from "./authProvider";
 import { randomBytes } from "node:crypto";
 import {
   PASSWORD_CREDENTIAL_TYPE,
+  clearFailedPasswordAttempts,
   getUserByPhoneOrThrow,
   getUserCredential,
+  recordFailedPasswordAttempt,
   upsertUserCredential,
 } from "./db";
 import { hashPassword, verifyPasswordHash } from "./passwordHash.server";
-import { validatePassword, type PasswordContext } from "./passwordPolicy";
+import {
+  PASSWORD_LOCKOUT_MS,
+  PASSWORD_LOCKOUT_THRESHOLD,
+  validatePassword,
+  type PasswordContext,
+} from "./passwordPolicy";
 
 // `import type` is erased at compile time, so this does NOT pull the
 // browser-safe module (or its anon client) into the server bundle at runtime.
@@ -239,13 +246,39 @@ export async function setPassword(
 // ordering is a trap.
 
 /**
- * ⚠️ ONE FAILURE REASON, BY DESIGN — THIS TYPE *IS* THE ENUMERATION CONTROL.
+ * ⚠️ ONE FAILURE REASON FOR ANYONE WHO CANNOT PROVE OWNERSHIP — THIS TYPE
+ * *IS* THE ENUMERATION CONTROL.
  *
  * There is deliberately no `no-such-account`, no `no-password-set`, no
  * `wrong-password`. A caller cannot accidentally distinguish them because the
  * type gives it nothing to distinguish, so the guarantee survives future
  * callers written by someone who has not read this comment. Making that
  * structural is worth more than a comment asking people to be careful.
+ *
+ * ── ⚠️ THE ONE EXCEPTION, AND EXACTLY WHY IT IS SAFE (chunk 2.7, [I23]) ──
+ *
+ * `account-locked` is a SECOND failure reason, which amends [I17]'s original
+ * "one indistinguishable result" — deliberately, not by drift. It is
+ * returned ONLY to a caller who supplied the CORRECT password, i.e. who has
+ * already proven they own the account. Someone holding valid credentials
+ * learns nothing from "this account exists and is locked": they knew it
+ * existed, because they can authenticate to it.
+ *
+ * A prober — by definition someone WITHOUT the password — can never reach
+ * this branch, so what they observe is byte-identical to chunk 2.5a. That is
+ * enforced structurally below: the locked result is constructed inside the
+ * `matched` branch and nowhere else, so it is unreachable without a
+ * successful argon2id verify rather than merely unreached today.
+ *
+ * ⚠️ THE COST, ACCEPTED WITH EYES OPEN: an attacker who happens to guess
+ * correctly DURING a cooldown is told so, instead of being handed a generic
+ * failure that might have made them discard a working password. The trade is
+ * that a real user who mistyped ten times learns to wait rather than being
+ * told their correct password is wrong — which is the failure that generates
+ * support load and password resets.
+ *
+ * ⚠️ NEVER add a third reason. Any reason reachable WITHOUT a correct
+ * password re-opens the enumeration oracle 2.5a exists to close.
  *
  * ⚠️ DATABASE FAILURES ARE NOT MODELLED HERE — they THROW. Returning
  * "invalid credentials" during an outage would tell a user with a perfectly
@@ -254,15 +287,39 @@ export async function setPassword(
  */
 export type PasswordVerification =
   | { ok: true; user: NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>> }
-  | { ok: false; reason: "invalid-credentials" };
+  | { ok: false; reason: "invalid-credentials" }
+  | { ok: false; reason: "account-locked"; retryAfterSeconds: number };
 
-const INVALID: PasswordVerification = { ok: false, reason: "invalid-credentials" };
+/**
+ * ⚠️ ONE FROZEN VALUE, RETURNED BY REFERENCE ON EVERY UNPROVEN FAILURE. Not a
+ * fresh object literal per path — identical construction is what makes "these
+ * two outcomes are indistinguishable" checkable by the test suite rather than
+ * by eye.
+ */
+const INVALID: PasswordVerification = Object.freeze({
+  ok: false,
+  reason: "invalid-credentials",
+});
 
 /**
  * A UUID no row can hold, used to spend an identical credential query on the
  * "no such account" path. See the round-trip note in verifyPasswordCredential.
  */
 const NO_SUCH_USER = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * The optimistic-concurrency token used when there is no credential row to
+ * guard. Any value that cannot equal a real timestamptz works; it exists so
+ * the failure write is issued with the SAME shape on the miss path as on the
+ * real one, rather than being skipped.
+ */
+const NEVER_UPDATED = "1970-01-01T00:00:00.000Z";
+
+/**
+ * How many times a lost counter write is retried. Three is enough for the
+ * realistic burst and small enough that contention cannot turn into a stall.
+ */
+const FAILED_WRITE_MAX_ROUNDS = 3;
 
 /**
  * A real argon2id hash of a random value, verified against when there is no
@@ -339,7 +396,169 @@ export async function verifyPasswordCredential(
   const matched =
     typeof plain === "string" ? await verifyPasswordHash(plain, candidate) : false;
 
-  if (!user || !credential || !matched) return INVALID;
+  // ── LOCKOUT (chunk 2.7) ────────────────────────────────────────────────
+  //
+  // ⚠️ READ FROM THE ROW WE ALREADY HAVE — NOT A SECOND QUERY. `locked_until`
+  // came back with the credential above, so the lockout check adds no round
+  // trip and therefore cannot be timed.
+  //
+  // ⚠️ AND IT IS EVALUATED **AFTER** THE VERIFY, NEVER BEFORE. The obvious
+  // implementation short-circuits here — `if (isLocked) return INVALID` above
+  // the hash — and it is precisely wrong: skipping the ~45 ms argon2id makes a
+  // LOCKED account answer measurably FASTER than a wrong password, which is an
+  // oracle for "this account exists". Worse, it is an oracle the attacker
+  // MANUFACTURES ON DEMAND: hammer any phone ten times, then time it. A number
+  // with an account gets fast; a number without one never changes. That would
+  // be a better enumeration channel than the one this function was written to
+  // close. So the verify above runs on locked accounts too, and its result is
+  // deliberately discarded.
+  const now = Date.now();
+  const lockedUntilMs = credential?.locked_until ? Date.parse(credential.locked_until) : 0;
+  const isLocked = lockedUntilMs > now;
 
-  return { ok: true, user };
+  // "Authentic" = the credentials are right. Deliberately distinct from
+  // "allowed in", which the lockout can still refuse.
+  const authentic = Boolean(user && credential && matched);
+
+  // ── EXACTLY ONE WRITE ROUND TRIP, ON EVERY PATH ────────────────────────
+  //
+  // ⚠️ IF ONLY REAL ACCOUNTS WERE WRITTEN TO, THE ROUND-TRIP COUNT WOULD LEAK
+  // EXISTENCE — and equalising the two reads and the hash while leaking the
+  // write would be timing-safety theatre. So a write is issued unconditionally
+  // against the same sentinel id the credential read uses; whether it matches
+  // a row is decided by the WHERE clause in db.ts, not by a branch here. No
+  // branch means no path that can diverge.
+  //
+  // ⚠️ AWAITED, NEVER FIRE-AND-FORGET. Computing the response and letting the
+  // write finish in the background would be one round trip cheaper and would
+  // read beautifully — and Vercel may freeze the function after the response,
+  // so the write would sometimes simply vanish. A counter that silently drops
+  // writes is a lockout that never locks. `waitUntil` would fix it and is
+  // platform-specific, which the migration rule (CORE T2) rules out.
+  const nowIso = new Date(now).toISOString();
+
+  if (authentic && !isLocked) {
+    await clearFailedPasswordAttempts({
+      userId: user!.id,
+      expectedUpdatedAt: credential!.updated_at,
+      now: nowIso,
+    });
+  } else {
+    await recordFailure({
+      userId: user ? user.id : NO_SUCH_USER,
+      credential,
+      // ⚠️ PASSED IN, NOT RE-DERIVED. Without it the locked path spends a
+      // FOURTH round trip re-reading a row it already knows is locked, while
+      // the unknown-phone path spends three — reopening the existence oracle
+      // in the retry logic after the main path was so careful to close it.
+      // Caught by test D1, which counts round trips per path.
+      wasLocked: isLocked,
+      now,
+      nowIso,
+    });
+  }
+
+  // ── THE OUTCOME ────────────────────────────────────────────────────────
+  //
+  // ⚠️ THE LOCKED BRANCH IS NESTED INSIDE `authentic` ON PURPOSE. It is not
+  // reachable without a successful argon2id verify, which is what makes "only
+  // a proven owner is ever told about the lock" a property of the control flow
+  // rather than a promise in a comment. DO NOT HOIST IT.
+  if (isLocked) {
+    if (authentic) {
+      return {
+        ok: false,
+        reason: "account-locked",
+        retryAfterSeconds: Math.max(1, Math.ceil((lockedUntilMs - now) / 1000)),
+      };
+    }
+    return INVALID;
+  }
+
+  if (!authentic) return INVALID;
+
+  return { ok: true, user: user! };
+}
+
+/**
+ * Apply one failed attempt to the credential row, if there is one to apply it
+ * to. Returns nothing, deliberately: the caller's response must not depend on
+ * what happened here, or the counter state becomes observable.
+ *
+ * ⚠️ THE RETRY IS NOT DEFENSIVE PADDING — IT IS THE WHOLE POINT. PostgREST
+ * cannot express `failed_attempts = failed_attempts + 1`, so this is
+ * read-modify-write. Without the optimistic guard and this loop, ten guesses
+ * arriving together all read the same counter and all write the same value,
+ * and the counter advances by ONE. Every sequential test still passes. That is
+ * a lockout that fails open under exactly the load an attacker generates,
+ * which is the only load that matters.
+ *
+ * ⚠️ BOUNDED AT 3 ROUNDS, and it gives up SILENTLY rather than throwing.
+ * Losing a race is not a database fault, and turning contention into a 503
+ * would hand an attacker a way to break login by generating load.
+ *
+ * ⚠️ RESIDUAL, RECORDED RATHER THAN GLOSSED: a retry costs extra round trips,
+ * and only a real unlocked account can retry — so under attacker-induced
+ * concurrency the round-trip count can differ from the miss path. It is a far
+ * weaker channel than the one it replaces (it needs deliberate parallel
+ * requests against one number, and the signal is a fraction of WAN jitter),
+ * and the uncontended path — where a prober actually operates — stays exactly
+ * equal. Closing it properly needs an atomic increment, which arrives free at
+ * the RDS cutover as a single statement.
+ */
+async function recordFailure(params: {
+  userId: string;
+  credential: Awaited<ReturnType<typeof getUserCredential>>;
+  wasLocked: boolean;
+  now: number;
+  nowIso: string;
+}) {
+  let row = params.credential;
+  let expectedUpdatedAt = row?.updated_at ?? NEVER_UPDATED;
+
+  for (let round = 0; round < FAILED_WRITE_MAX_ROUNDS; round++) {
+    // ⚠️ A COOLDOWN THAT HAS RUN OUT RESETS THE COUNTER TO ZERO — it does not
+    // resume from 10. This is the direct consequence of choosing a FIXED
+    // duration over an escalating one: if the count survived expiry, the very
+    // next mistake would re-lock instantly and the user would be reduced to
+    // one attempt every 15 minutes for ever.
+    const expired = row?.locked_until ? Date.parse(row.locked_until) <= params.now : false;
+    const baseline = expired ? 0 : row?.failed_attempts ?? 0;
+    const failedAttempts = baseline + 1;
+
+    const { matched } = await recordFailedPasswordAttempt({
+      userId: params.userId,
+      expectedUpdatedAt,
+      failedAttempts,
+      // The lock is set ON the threshold failure, so the 10th attempt is the
+      // last one processed normally and the 11th is the first one refused.
+      lockedUntil:
+        failedAttempts >= PASSWORD_LOCKOUT_THRESHOLD
+          ? new Date(params.now + PASSWORD_LOCKOUT_MS).toISOString()
+          : null,
+      now: params.nowIso,
+    });
+
+    if (matched) return;
+
+    // Zero rows means one of: no such account · no password set · already
+    // locked · lost the race. Only the last is worth retrying, and only a real
+    // credential row can have lost anything.
+    //
+    // ⚠️ THE `wasLocked` CHECK IS A TIMING CONTROL, NOT AN OPTIMISATION. A
+    // locked row is EXPECTED to match zero rows — that is the guard clause
+    // working. Re-reading to discover what we already knew would cost the
+    // locked path an extra round trip that the miss path never pays, which is
+    // the existence oracle in a new hiding place.
+    if (!row || params.wasLocked) return;
+
+    const fresh = await getUserCredential(params.userId, PASSWORD_CREDENTIAL_TYPE);
+    if (!fresh) return;
+    // An unchanged `updated_at` means we did NOT lose a race — the row was
+    // skipped because it is locked. Nothing to retry.
+    if (fresh.updated_at === expectedUpdatedAt) return;
+
+    row = fresh;
+    expectedUpdatedAt = fresh.updated_at;
+  }
 }

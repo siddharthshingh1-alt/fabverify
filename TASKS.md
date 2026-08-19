@@ -153,8 +153,17 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
 
 #### 📍 M10 STATUS — UPDATE EVERY SESSION
-**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a** (2.0+2.1 on 2026-08-06; the rest on 2026-08-08)
+**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.7** (2.0+2.1 on 2026-08-06; 2.2–2.5a on 2026-08-08; **2.7 on 2026-08-20**)
 **NEXT: 2.5b — THE TOKEN SUBSYSTEM. 🔴 THE HIGH-RISK CHUNK. FRESH SESSION, DECISIONS FIRST, NOTHING ELSE THAT DAY.**
+
+> ⚠️ **2.7 WAS BUILT OUT OF ORDER, DELIBERATELY.** It depends only on 2.5a, not on 2.5b, and it is a hard gate on 2.6 — so it was taken while 2.5b's fresh session was still pending. Nothing about 2.5b changed.
+>
+> 🛑 **2.5b IS HALF-BUILT AND UNCOMMITTED — READ THIS BEFORE STARTING IT.** As of 2026-08-20 the working tree carries, UNTRACKED: `app/lib/sessionToken.server.ts` (issue **and** verify, 336 lines), `scripts/verify-session-token-issue.ts`, `scripts/verify-session-token.ts`, and `jose@6.2.8` in `package.json`. **The suites pass — 54/54 and 72/72, re-run 2026-08-20.** What does NOT exist is the integration half:
+> · **[I21]'s type widening never happened** — `ProviderIdentity` is still `{ providerUid; phone }`, both required. The spec calls this "solve it FIRST, it blocks everything."
+> · **No ladder branch** — `auth.ts` untouched, `getVerifiedCallerPhone` untouched, `db.ts` has no embedded `token_epoch` join. **Zero app files import `sessionToken.server.ts`.**
+> · The file's own header still says *"PIECE 1 OF 2 — ISSUE ONLY"*, which is stale: `verifySessionToken` is at line 304.
+> · `DECISIONS.md` still marks the `jose` line **PROVISIONAL** even though it ran.
+> ⚠️ **This is the chunk-2.2 trap repeating** — a file written, left uncommitted, unrun and undocumented while the status line still called it "next". *"The code exists"* and *"the code is proven"* are different claims, and only the module half is proven.
 
 > ## 🛑 READ THIS BEFORE STARTING 2.5b
 >
@@ -182,9 +191,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 >
 > **⚠️ Two test traps already paid for this session — do not re-learn them:** an outage test needs a **subprocess** (an in-process re-import keeps the cached module and reports a false pass), and timing assertions need **`fetch` instrumentation** (wall-clock medians against Supabase Singapore are useless — WAN jitter swamps the signal).
 
-⚠️ **SEQUENCING TRAP — 2.7 (lockout) MUST LAND WITH OR BEFORE 2.6 (login UI), NEVER AFTER.** Corrected in the chunk entries below ([I18]); the original ordering had 2.6 blocking 2.7, which is backwards. Password verification has **no HTTP surface today** — that is precisely what makes deferring lockout safe, and **2.6 is what opens it.** Shipping 2.6 alone leaves an unthrottled online guessing oracle against every account on the platform.
+✅ **SEQUENCING GATE SATISFIED 2026-08-20 — 2.7 (lockout) IS BUILT, AHEAD OF 2.6 (login UI).** Corrected in the chunk entries below ([I18]); the original ordering had 2.6 blocking 2.7, which is backwards. Password verification has **no HTTP surface today** — that is precisely what makes deferring lockout safe, and **2.6 is what opens it.** Shipping 2.6 alone leaves an unthrottled online guessing oracle against every account on the platform.
 
-⚠️ **STATE OF PLAY IN ONE LINE:** a user can **set** a password and the server can **check** one — **nobody can log in with one**, and no screen reaches any of it. `user_credentials` holds **0 real rows**.
+⚠️ **STATE OF PLAY IN ONE LINE:** a user can **set** a password, the server can **check** one, and a brute-forcer gets **locked out after 10 tries** — but **nobody can log in with one**, and no screen reaches any of it. `user_credentials` holds **0 real rows**.
 ⚠️ **A user can SET a password today and NOTHING can authenticate with one.** That is the intended state after 2.4 — do not "finish the feature" by wiring login before 2.5 exists.
 ⚠️ **`token_epoch` increments on a password change but is INERT** — no code issues or verifies our tokens yet, and live sessions are Supabase JWTs that do not carry it. 2.5 is what makes it real. Do not read the incrementing column as working revocation.
 
@@ -336,7 +345,22 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - **Depends on:** 2.5a, 2.5b, **and 2.7 (hard prerequisite above)**. **Blocks:** 2.8.
   - **Verify:** OTP login unchanged for all account types; password login lands identically; wrong password shows a real error and writes nothing to `localStorage`; dev bypass (A10) still works on localhost; **one production run with a real token** — localhost cannot exercise the production branches, the same constraint that applied to 1.5, 1.9 and 1.10.
 
-- [ ] **CHUNK 2.7 — Rate limiting / lockout on password attempts.** 🟡 MEDIUM. **🛑 GATES CHUNK 2.6 — must ship before or with it (locked 2026-08-08, [I18]).**
+- [x] **CHUNK 2.7 — DONE 2026-08-20. Per-account lockout on password attempts. 51/51 pass.** *3 files: `authProvider.server.ts` (lockout inside `verifyPasswordCredential` + a `recordFailure` helper), `db.ts` (+`recordFailedPasswordAttempt`, +`clearFailedPasswordAttempts`), `passwordPolicy.ts` (the two policy constants). Plus `scripts/verify-password-lockout.ts`, and three stale assertions updated in `scripts/verify-password-login.ts`.* Policy locked as **DECISIONS [I23] [I24] [I25] [I26]**.
+  - **ZERO DDL** — 2.1's columns were already applied, so this chunk is revertible with one `git revert` and the columns simply go inert again.
+  - **10 failures → 15-minute fixed auto-expiring cooldown**, cleared on success and lazily on expiry. ⚠️ **Escalating backoff designed and rejected** ([I23]): it needs the counter to survive expiry, which reduces a recovered user to one attempt per cooldown for ever.
+  - ⚠️ **THE INFORMATIVE LOCKED RESPONSE IS GATED ON PROOF OF OWNERSHIP** ([I24]) — only a caller who supplied the CORRECT password is told "locked, wait N seconds". A prober sees the byte-identical generic failure of 2.5a. This AMENDS [I17]'s one-reason rule and is made structural: the locked result is constructed inside the `matched` branch and nowhere else. **Fuzz-proven** — 12 wrong guesses against a locked account, zero leaks — and type-asserted at exactly two reasons.
+  - ⚠️ **THE LOCK CHECK RUNS *AFTER* THE ARGON2 VERIFY, NEVER BEFORE** ([I25]), and this is the whole chunk. The obvious early return makes locked accounts answer ~45 ms FASTER — an existence oracle the attacker MANUFACTURES by hammering any number ten times. **Proven by a negative control:** the early-return version was written and run, and drops the locked paths to **2 round trips / 1.1 ms** against the correct build's uniform **3 round trips / ~46 ms**. The suite catches the bug it exists for.
+  - ⚠️ **EXACTLY ONE COUNTER WRITE ON EVERY PATH**, issued unconditionally against the same sentinel id the credential read uses — the WHERE clause, not a branch, decides whether it matches. Writing only for real accounts would have leaked existence through the round-trip count after the reads and the hash were so carefully equalised.
+  - ⚠️ **THE RACE IS REAL AND ITS LIMIT IS MEASURED** ([I26]). PostgREST cannot express `failed_attempts + 1`, so this is read-modify-write; unguarded, 10 parallel guesses advance the counter by ONE while every sequential test passes. Optimistic concurrency on `updated_at` + 3 retry rounds. **Measured: a 10-parallel burst advances it by 5, and the lock arrives after 3 bursts.** Bounded degradation, not a bypass — sustained parallel guessing still locks (G4). Proper fix is an atomic increment, free at the RDS cutover.
+  - **Verified:** 9 failures still let the correct password in (the off-by-one real users hit) · the 10th locks · **the correct password is refused during cooldown** · hammering extends neither the cooldown nor the counter · 6 prober paths collapse to **1 distinct value** · **3 round trips and a 45.9–49.6 ms local floor on all 5 paths** · expiry restores login and restarts the counter at 1, not 11 · success resets to 0 · sequential attempts count exactly 1..10 · outage **throws** (subprocess, cold module graph) · **zero route importers** ([I18] holds) · logs nothing · cleanup leaves 0 credential rows and `auth_identities` at 1.
+  - **Regression:** 2.2 **42/42** · 2.4 **75/75** · 2.5a **37/37** · 2.5b module **54/54 + 72/72** · `npm run build` clean, exit 0, 156 pages · `tsc --noEmit` silent.
+  - ⚠️ **Three assertions in 2.5a's suite were INVERTED, not deleted** — they encoded "2.7 is unbuilt" (`failed_attempts` stays 0) and would now be false. T1's "exactly 2 round trips" became "all paths equal": pinning the literal number turned a security property into a change-detector that a correct future chunk has to edit, which is how a real assertion gets weakened by someone in a hurry.
+  - ⚠️ **STILL OPEN AFTER 2.7 — PASSWORD SPRAYING.** One guess each against 10,000 accounts never trips a per-account counter. Per-IP is deliberately NOT built ([I23]: shared office/carrier NAT IPs make naive per-IP a DoS tool, and there is no shared state store). **2.6 must not merge without a decision here.**
+  - ⚠️ **Open, deliberately unbuilt: no time-decay window.** Ten failures spread over months still lock.
+  - ⚠️ **2.8 must clear the lock on reset** — a recovery path that cannot recover a locked account defeats itself. Not in this chunk's scope.
+  - **Depends on:** 2.5a. **Blocks:** 2.6 (gate satisfied).
+
+- [ ] ~~**CHUNK 2.7 — Rate limiting / lockout on password attempts.**~~ *(original entry, kept for the notes below)* 🟡 MEDIUM. **🛑 GATES CHUNK 2.6 — must ship before or with it (locked 2026-08-08, [I18]).**
   - ⚠️ **This is not optional polish.** OTP is naturally rate-limited by SMS cost and the provider; **a password login form is free to attack and can be hammered indefinitely.** Shipping 2.6 without this leaves an unthrottled online guessing oracle against every account.
   - Per-account and per-IP throttling with backoff; failures must not reveal whether the account exists (same response and timing for unknown phone vs wrong password).
   - **The columns are already there and provably inert** — `failed_attempts` / `last_failed_at` / `locked_until` were built in chunk 2.1 and 2.5a's suite asserts that five consecutive failures still leave `failed_attempts` at **0**. So this chunk starts from a known-zero baseline, not from half-written state.

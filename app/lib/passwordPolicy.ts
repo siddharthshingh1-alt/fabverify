@@ -317,3 +317,48 @@ export function validatePassword(
 
   return { ok: true, normalised };
 }
+
+// ── LOCKOUT POLICY (chunk 2.7) ───────────────────────────────────────────
+//
+// ⚠️ POLICY LIVES HERE, NOT IN db.ts AND NOT IN THE SEAM. The write helper in
+// db.ts is deliberately dumb — it is handed the numbers to store and never
+// decides them. A threshold buried in a query builder is a policy nobody can
+// find and everybody duplicates.
+//
+// ⚠️ THIS FILE IS BROWSER-SAFE and these constants are NOT secret. Publishing
+// "10 attempts, 15 minutes" costs nothing: an attacker discovers the threshold
+// by hitting it once, and hiding it would only stop us reusing the numbers in
+// the 2.6 login UI. Secrecy is not the control; the cooldown is.
+
+/**
+ * Consecutive failed password attempts before the account is locked.
+ *
+ * 10, not 5: OWASP's range is 5–10 and NIST SP 800-63B tolerates far more, so
+ * the top of that range is defensible and forgives an honest run of typos.
+ * The real brake is not this number — every attempt already costs ~45 ms of
+ * argon2id plus two database round trips, so guessing is slow before the
+ * counter does anything at all.
+ *
+ * ⚠️ THE LOCK IS SET *ON* THE 10th FAILURE, so the 10th attempt is the last
+ * one processed normally and the 11th is refused. Nine failures must still
+ * leave a correct password working — that direction of the off-by-one is the
+ * one real users hit, and it is tested explicitly (test F1).
+ */
+export const PASSWORD_LOCKOUT_THRESHOLD = 10;
+
+/**
+ * How long the cooldown lasts. AUTO-EXPIRING BY DESIGN — no admin unlock, no
+ * support ticket, no queue for a team that does not exist yet. The user waits.
+ *
+ * ⚠️ FIXED, NOT ESCALATING — a deliberate policy choice (locked 2026-08-20).
+ * Escalation would have been free to implement (duration as a function of the
+ * counter, no new column) but it needs the counter to SURVIVE expiry, and a
+ * surviving counter means that after one lockout the user gets exactly one
+ * attempt every 15 minutes for ever. Fixed duration + a clean slate on expiry
+ * is the friendlier failure mode, and the cost is stated plainly: a sustained
+ * attacker gets 10 guesses per 15 minutes, ~960/day/account. Against argon2id
+ * and a 12-character floor that is not a threat.
+ */
+export const PASSWORD_LOCKOUT_MINUTES = 15;
+
+export const PASSWORD_LOCKOUT_MS = PASSWORD_LOCKOUT_MINUTES * 60 * 1000;
