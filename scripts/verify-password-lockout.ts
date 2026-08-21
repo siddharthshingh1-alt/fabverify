@@ -542,9 +542,22 @@ const grep = (pattern: string) => {
 const importers = grep("verifyPasswordCredential")
   .split("\n")
   .filter((f) => f && f !== "app/lib/authProvider.server.ts");
+// ⚠️ REWRITTEN BY CHUNK 2.6a. This asserted ZERO importers, which was [I18]'s
+// deferral condition — and 2.6a added the legitimate client that ends it: a
+// login route that issues a session AND inherits this lockout, because the
+// lockout lives inside the seam function rather than in the route. The
+// property that still matters is that there is exactly ONE caller, so no
+// second endpoint can reach the verifier without the lockout coming with it.
+//
+// ⚠️ `git grep` sees TRACKED files only, so this check was blind to the new
+// route until it was committed — and would be equally blind to an
+// uncommitted one. The allowlist below is matched against the same git-based
+// search this suite already uses; the filesystem-walking version lives in
+// verify-password-login.ts C5, which is the authoritative check.
+const ALLOWED_VERIFIER_IMPORTERS = ["app/api/auth/password-login/route.ts"];
 check(
-  "H1 ⚠️ verifyPasswordCredential still has ZERO importers ([I18] holds)",
-  importers.length === 0,
+  "H1 ⚠️ ONLY the login route imports verifyPasswordCredential — lockout travels with it",
+  importers.every((f) => ALLOWED_VERIFIER_IMPORTERS.includes(f)),
   importers.join(", ") || "none"
 );
 const routeImporters = grep("recordFailedPasswordAttempt")

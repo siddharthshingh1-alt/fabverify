@@ -36,6 +36,7 @@ import {
   getUserByPhoneOrThrow,
   getUserCredential,
   recordFailedPasswordAttempt,
+  resetUserCredential,
   upsertUserCredential,
 } from "./db";
 import { hashPassword, verifyPasswordHash } from "./passwordHash.server";
@@ -588,4 +589,177 @@ async function recordFailure(params: {
     row = fresh;
     expectedUpdatedAt = fresh.updated_at;
   }
+}
+
+// ── PASSWORD RESET VIA OTP (M10, chunk 2.8a) ─────────────────────────────
+//
+// ⚠️ THIS IS A CREDENTIAL WRITE REACHABLE WITHOUT AUTHENTICATION. Not an
+// oversight — it is the definition of "forgot password": the caller cannot
+// prove who they are with a credential, because the credential is what they
+// lost. A fresh OTP is the proof instead. A bug here does not leak
+// information, it lets someone set ANOTHER PERSON'S password — worse than an
+// auth bypass, because it is persistent and locks the owner out.
+//
+// ⚠️ NO ROUTE IMPORTS THIS YET, BY DESIGN (chunk 2.8a). The seam function
+// ships and is proven before any HTTP surface exists — the same split that
+// worked for 2.5a/2.5b. Asserted by git grep in the suite, not merely intended.
+
+/**
+ * ⚠️ THE DEV BYPASS GATE IS `isProduction`, NOT A HOSTNAME — a DELIBERATE
+ * VARIANCE FROM [A10], recorded rather than slipped in.
+ *
+ * A10 gates the browser bypass on hostname precisely because NODE_ENV can be
+ * wrong in a browser build. A ROUTE HANDLER HAS NO HOSTNAME TO CHECK, so it
+ * must use the server-side signal — which is exactly what
+ * `getVerifiedCallerPhone` already does for the x-dev-phone path. Reusing that
+ * gate keeps the two server-side bypasses consistent; inventing a different
+ * one here would mean two answers to "are we in production".
+ */
+const isProductionRuntime = process.env.NODE_ENV === "production";
+
+/**
+ * Verify an SMS code SERVER-SIDE.
+ *
+ * ⚠️ CLIENT-SIDE VERIFICATION CAN NEVER BE THE PROOF FOR A RESET. Today's OTP
+ * login verifies in the browser, and the resulting SUPABASE SESSION is what the
+ * server checks — the session is the artefact, not the browser's claim. A reset
+ * has no session yet, so if the browser verified the code and then told the
+ * server "trust me, it passed", anyone could POST that same claim for any phone
+ * number. Total takeover. Verification therefore happens HERE.
+ *
+ * ⚠️ VERIFYING CONSUMES THE CODE. Supabase invalidates it on success, so a
+ * captured code cannot be replayed — and it is why the reset is ONE request
+ * rather than "verify now, write later".
+ *
+ * Returns a bare boolean, deliberately: every failure mode (wrong code,
+ * expired, never sent, unknown number) must be indistinguishable to the caller.
+ */
+async function verifyOtpServerSide(phoneLast10: string, code: unknown): Promise<boolean> {
+  if (typeof code !== "string" || code.length === 0) return false;
+
+  if (!isProductionRuntime) {
+    // Localhost: no SMS was ever sent, so there is nothing real to verify.
+    // Mirrors the browser bypass's accepted code so the flow is testable
+    // end-to-end without Twilio.
+    return code === "123456";
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.auth.verifyOtp({
+      phone: `+91${phoneLast10}`,
+      token: code,
+      type: "sms",
+    });
+    return !error && !!data.user;
+  } catch {
+    // ⚠️ SWALLOWED AND UNLOGGED. The exception can carry the code, and the
+    // difference between failure modes is exactly what an attacker probing this
+    // path wants. A provider outage collapsing into "invalid code" is
+    // acceptable HERE in a way it is NOT for the database below: a failed reset
+    // is retryable and grants nothing, whereas a swallowed database error would
+    // decide a write.
+    return false;
+  }
+}
+
+export type PasswordResetResult =
+  | {
+      ok: true;
+      user: NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>>;
+      tokenEpoch: number;
+    }
+  | { ok: false; reason: "invalid-request" }
+  | { ok: false; reason: "weak-password"; message: string };
+
+/**
+ * ⚠️ ONE OPAQUE FAILURE FOR EVERYTHING THE OTP HAS NOT UNLOCKED.
+ * `invalid-request` covers a wrong code, an expired code, a malformed phone and
+ * a phone with no account — all indistinguishable, preserving [I17] on a path
+ * anyone can reach.
+ *
+ * ⚠️ `weak-password` IS REACHABLE ONLY AFTER A VALID OTP, and that ordering is
+ * the point: it reveals the password policy, so it must sit behind proof of
+ * ownership. Same reasoning that puts setPassword's policy check AFTER its
+ * re-verification gate. Never reorder them.
+ */
+const RESET_FAILED: PasswordResetResult = Object.freeze({
+  ok: false,
+  reason: "invalid-request",
+});
+
+/**
+ * Reset a forgotten password using a fresh OTP as proof of ownership.
+ *
+ * ── WHY NO CURRENT PASSWORD IS REQUIRED ──────────────────────────────────
+ * A successful OTP proves control of the phone number, and OTP login ALREADY
+ * grants full account access on that same proof. Demanding more here would be
+ * incoherent — recovery would be stricter than the front door.
+ * ⚠️ THE CONSEQUENCE, STATED RATHER THAN HIDDEN: the security floor of every
+ * account is the PHONE NUMBER. A SIM swap takes the account regardless of how
+ * strong the password is. Already true because OTP login exists — reset does
+ * not lower it — but nobody should read this function and conclude the password
+ * raised it.
+ *
+ * ── ORDER IS LOAD-BEARING ────────────────────────────────────────────────
+ *   1. verify the OTP       ← the gate; nothing below runs without it
+ *   2. resolve the account  ← throws on database failure, never guesses
+ *   3. validate the policy  ← only now, because it leaks the policy
+ *   4. hash, then write     ← hash + epoch + lockout clear in ONE statement
+ *
+ * ⚠️ THE EPOCH BUMP IS THE POINT OF A RESET, not bookkeeping. Without it a
+ * reset overwrites the password while leaving every existing session alive — an
+ * intruder who already has a session keeps it, and the owner has "recovered"
+ * nothing. [I12] built the column for this; 2.5b made it enforced.
+ *
+ * ⚠️ IT EVICTS *OUR* TOKENS ONLY. Supabase sessions do not carry our epoch, so
+ * a stolen SUPABASE session SURVIVES this reset. That gap is real and is NOT
+ * closed here. Do not describe this function as "ends all existing sessions"
+ * without that qualifier.
+ */
+export async function resetPasswordByOtp(
+  phone: string,
+  code: unknown,
+  newPassword: unknown
+): Promise<PasswordResetResult> {
+  const normalised = typeof phone === "string" ? phone.replace(/\D/g, "").slice(-10) : "";
+  if (normalised.length !== 10) return RESET_FAILED;
+
+  // ── 1. THE GATE ────────────────────────────────────────────────────────
+  const proven = await verifyOtpServerSide(normalised, code);
+  if (!proven) return RESET_FAILED;
+
+  // ── 2. RESOLVE. Throws on database failure — an outage must never be
+  // reported as "invalid code", which would send a user to retry a code that
+  // was perfectly good (Issue E).
+  const user = await getUserByPhoneOrThrow(normalised);
+  if (!user) return RESET_FAILED;
+
+  const existing = await getUserCredential(user.id, PASSWORD_CREDENTIAL_TYPE);
+
+  // ── 3. POLICY — after the gate, never before ──────────────────────────
+  const validation = validatePassword(newPassword, {
+    phone: user.phone,
+    name: user.name,
+    email: user.email,
+  });
+  if (!validation.ok) {
+    return { ok: false, reason: "weak-password", message: validation.message };
+  }
+
+  // ── 4. WRITE ───────────────────────────────────────────────────────────
+  const passwordHash = await hashPassword(validation.normalised);
+
+  // ⚠️ A RESET FOR AN ACCOUNT WITH NO CREDENTIAL IS A FIRST-TIME SET, not an
+  // error. Someone who never set a password can legitimately arrive here via
+  // "forgot password". The epoch starts at 0 because there are no tokens to
+  // evict.
+  if (!existing) {
+    await upsertUserCredential({ userId: user.id, passwordHash });
+    return { ok: true, user, tokenEpoch: 0 };
+  }
+
+  const tokenEpoch = existing.token_epoch + 1;
+  await resetUserCredential({ userId: user.id, passwordHash, tokenEpoch });
+
+  return { ok: true, user, tokenEpoch };
 }

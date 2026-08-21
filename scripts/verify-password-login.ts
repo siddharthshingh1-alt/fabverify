@@ -440,14 +440,43 @@ check(
   "the lockout counter is live; full behaviour in verify-password-lockout.ts"
 );
 
-const grep = await import("node:child_process");
-const routeHits = grep
-  .execSync('git grep -l "verifyPasswordCredential" -- app/ || true', { encoding: "utf8" })
-  .trim();
+// ⚠️ REWRITTEN BY CHUNK 2.6a, AND FOR TWO SEPARATE REASONS.
+//
+// (1) THE CLAIM CHANGED. This asserted "NO route imports it", which was the
+// whole basis of [I18] — an endpoint answering "are these credentials valid?"
+// without issuing a session is a credential oracle. Chunk 2.6a added the
+// LEGITIMATE client [I18] always said would end that deferral: a login route
+// that issues a session, gated by the lockout that 2.7 shipped first. So the
+// property is no longer "zero importers" but "exactly ONE, and it is the
+// login route". An allowlist, not a ban.
+//
+// (2) ⚠️ `git grep` WAS THE WRONG TOOL AND WAS PASSING FOR THE WRONG REASON.
+// It searches TRACKED files only, so while the new route was untracked this
+// check saw nothing and stayed green. A second, uncommitted route importing
+// the verifier would have passed exactly the same way. Walking the filesystem
+// closes that hole.
+const { readdirSync } = await import("node:fs");
+const { join } = await import("node:path");
+function filesImporting(symbol: string, dir = "app"): string[] {
+  const hits: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name).replace(/\\/g, "/");
+    if (entry.isDirectory()) hits.push(...filesImporting(symbol, full));
+    else if (/\.(ts|tsx)$/.test(entry.name) && readFileSync(full, "utf8").includes(symbol)) {
+      hits.push(full);
+    }
+  }
+  return hits;
+}
+const ALLOWED_IMPORTERS = [
+  "app/lib/authProvider.server.ts", // where it is defined
+  "app/api/auth/password-login/route.ts", // the ONE legitimate client (2.6a)
+];
+const verifierHits = filesImporting("verifyPasswordCredential");
 check(
-  "C5 ⚠️ NO route imports it — no brute-force surface exists yet",
-  routeHits === "app/lib/authProvider.server.ts",
-  routeHits || "(no hits)"
+  "C5 ⚠️ ONLY the login route imports it — no second, un-lockout-ed caller",
+  verifierHits.every((f) => ALLOWED_IMPORTERS.includes(f)),
+  verifierHits.join(", ") || "(no hits)"
 );
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -278,6 +278,66 @@ export async function getUserCredential(
 }
 
 /**
+ * THE RESET WRITE (chunk 2.8a) — new hash, epoch bump and lockout clear, in
+ * ONE statement.
+ *
+ * ⚠️ SEPARATE FROM upsertUserCredential ON PURPOSE. That function deliberately
+ * does NOT touch `failed_attempts` / `locked_until`, and its comment says why:
+ * when it was written those columns carried unbuilt lockout semantics, and
+ * inventing behaviour for them inside a write helper would have buried a
+ * policy decision. They are built now — but a RESET and a routine CHANGE are
+ * different operations with different side effects, and giving the proven
+ * change-path a new mode would mean editing a write that 75 assertions were
+ * written against. This is additive instead.
+ *
+ * ⚠️ ALL THREE EFFECTS IN ONE ROUND TRIP, and that is a correctness
+ * requirement rather than an optimisation. Writing the hash and then bumping
+ * the epoch separately leaves a window where the NEW password is live while
+ * OLD tokens still verify — precisely the state a reset exists to eliminate.
+ *
+ * ⚠️ THE LOCKOUT CLEAR IS NOT A CONVENIENCE. Someone locked out by a
+ * brute-force attempt is exactly who reaches for "forgot password". Leaving
+ * `locked_until` set would mean a successful reset still cannot log in, so the
+ * recovery path would not recover (flagged as an open item back in 2.7).
+ *
+ * ⚠️ THROWS on failure. A reset that silently failed would tell the user their
+ * password had changed when it had not, leaving them unable to log in with
+ * either the old one or the new one.
+ */
+export async function resetUserCredential(params: {
+  userId: string;
+  passwordHash: string;
+  tokenEpoch: number;
+  credentialType?: string;
+}) {
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabaseAdmin
+    .from("user_credentials")
+    .update({
+      password_hash: params.passwordHash,
+      // Read-then-write, like upsertUserCredential — PostgREST cannot express
+      // `token_epoch = token_epoch + 1`. The caller passes value+1.
+      token_epoch: params.tokenEpoch,
+      password_changed_at: now,
+      updated_at: now,
+      failed_attempts: 0,
+      last_failed_at: null,
+      locked_until: null,
+      // The user has just chosen their own password, so any admin-provisioned
+      // "must change on first use" flag is satisfied by definition.
+      must_change_password: false,
+    })
+    .eq("user_id", params.userId)
+    .eq("credential_type", params.credentialType ?? PASSWORD_CREDENTIAL_TYPE)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Create or replace a user's credential. First writer to `user_credentials`
  * (chunk 2.4) — the table was schema-only until now.
  *
