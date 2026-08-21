@@ -6,6 +6,29 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-21 · docs-only correction pass] — The docs had drifted from git. Fixed before building anything.
+
+> **No code changed. Three status documents were lying.** Chunk **2.8a** (password reset via OTP — the seam) was committed as `267271c` with **40/40 passing and ZERO markdown changes**. For the rest of that day `TASKS.md`, `CURRENT_SPRINT.md` and `PROJECT_MEMORY.md` all still listed reset as unstarted, and the **2.8a / 2.8b split existed only inside a commit message**. A session trusting the docs would have **rebuilt a proven, security-critical function from scratch** — a Prime Directive #1 violation caused by the docs, not by carelessness. Caught by reading `git log` against the 📍 STATUS line.
+
+### Fixed
+- **`TASKS.md`** — 📍 M10 STATUS now lists **2.8a as DONE**. Chunk 2.8 **split into 2.8a (seam, done, fully written up) and 2.8b (route + UI + production test, not built)**. **2.6a and 2.6b written up as DONE entries** (they had shipped while the list still showed an unchecked "2.6"). **New 2.6c entry** for OTP request hardening. 2.9 gained a **carry-forward open-item register**.
+- **`CURRENT_SPRINT.md`** — removed the paragraph claiming **"nothing can LOG IN"** (true until 2026-08-21, then three chunks stale) and the block calling **2.5b "half-built and uncommitted"** (done and committed as `ad2c66f`, 156/156).
+- **`PROJECT_MEMORY.md`** — new **Password RESET** row; `user_credentials` no longer claims **"0 rows in the real database"** (the founder's account has held a real password since 2026-08-21); the **"`verifyPasswordCredential` has zero route importers"** claim retired — 2.6a legitimately ended it, and the suites now assert an allowlist of one.
+
+### Changed
+- **Ordering correction, and it is a security one: 2.6c is now a HARD PREREQUISITE of 2.8b.** Reset requests an OTP on an **unauthenticated** path, and the OTP **send** is still browser-direct against Supabase — unthrottleable, and willing to SMS a number with no account. Shipping the reset UI first would publish a **free SMS cannon aimed at arbitrary numbers**. ⚠️ **Same class of error as scheduling 2.6 before 2.7, which this file already got backwards once.**
+
+### Recorded rather than left to decay
+- ⚠️ **Password SPRAYING is undefended and the gate meant to stop that was already passed.** The docs said *"2.6 must not merge without a decision"* on per-IP throttling; **2.6a merged and the decision was never made.** Lockout is per-account only; per-IP stays deliberately unbuilt ([I23]).
+- ⚠️ **New-user signup is covered STRUCTURALLY by 2.6b's gate, never observed.** A fresh account is routed to `/onboarding/password` once onboarding creates the `users` row — an inference from the design, **not** an end-to-end run.
+- ⚠️ **A reset does not evict a stolen SUPABASE session** — the epoch bump reaches our tokens only. **Never write "reset ends all your sessions."**
+- ⚠️ `/api/dev-auth/lookup` remains unauthenticated, returning `select("*")` on `users`.
+
+### The rule this bought
+> **Git is the ground truth for what EXISTS; these documents are the ground truth for what it MEANS. When they disagree, git wins and the doc is the bug.** Run `git log --oneline -5` against the 📍 STATUS line as the **first act of every session**. And: **a chunk is not done until its STATUS line moves** — the same failure as the 2.2 and 2.5b traps, where code sat uncommitted; here it was committed, proven, and undocumented.
+
+---
+
 ## [2026-08-21 · Chunks 2.5b + 2.6a + 2.6b] — Password login goes live, and is proven in production.
 
 > **A user can now log in with a phone number and a password.** Proven end to end on the real production path: a real OTP login on the founder's enterprise account, a password set through the real screen, then a password login that reached the dashboard with real data loading. Password login is no longer a backend capability nothing reaches — it is the primary way into FabVerify.
