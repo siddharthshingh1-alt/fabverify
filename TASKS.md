@@ -153,8 +153,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
 
 #### 📍 M10 STATUS — UPDATE EVERY SESSION
-**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.7** (2.0+2.1 on 2026-08-06; 2.2–2.5a on 2026-08-08; **2.7 on 2026-08-20**)
-**NEXT: 2.5b — THE TOKEN SUBSYSTEM. 🔴 THE HIGH-RISK CHUNK. FRESH SESSION, DECISIONS FIRST, NOTHING ELSE THAT DAY.**
+**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.7** (2.0+2.1 on 2026-08-06; 2.2–2.5a on 2026-08-08; 2.7 on 2026-08-20; **2.5b + 2.6a + 2.6b on 2026-08-21**)
+**✅ PASSWORD LOGIN IS LIVE AND PRODUCTION-PROVEN (2026-08-21).** A real password login on the founder’s enterprise account reached the dashboard with real data, on the LAN production build. The mandatory set-password gate was verified separately on localhost: forced redirect, abandon-and-return, no loop, error-then-retry.
+**NEXT: 2.6c — OTP REQUEST HARDENING.** ⚠️ The last piece of the locked login model and the only part not yet true: the OTP send still runs BROWSER-DIRECT against Supabase, so we cannot rate-limit it and it still SMSes unknown numbers. Then 2.8 (reset) and 2.9 (docs sweep).
 
 > ⚠️ **2.7 WAS BUILT OUT OF ORDER, DELIBERATELY.** It depends only on 2.5a, not on 2.5b, and it is a hard gate on 2.6 — so it was taken while 2.5b's fresh session was still pending. Nothing about 2.5b changed.
 >

@@ -315,4 +315,28 @@ PostgREST cannot express `failed_attempts = failed_attempts + 1` (already docume
 
 ---
 
+---
+
+## LOGIN WIRING — DECISIONS (2026-08-21, chunks 2.5b · 2.6a · 2.6b)
+
+**[I27] Every account must hold a password, enforced as PERSISTENT STATE checked on every app entry — never as a one-time post-login redirect.** (2026-08-21)
+*The model:* password is the PRIMARY credential (phone + password); OTP becomes the fallback/recovery path. Accounts predating M10 have no password, so they authenticate by OTP — **which is never gated** — and are routed to a mandatory set-password screen before reaching the app.
+*Persistent, not one-shot:* the condition is re-evaluated on every entry (fresh login, returning session, direct deep URL). Abandoning the screen is therefore harmless — the user is simply sent back next visit. This removes an entire class of trap: there is no "half-completed" state to be stranded in.
+⚠️ **THE LOOP DEFENCE IS STRUCTURAL, NOT A PATH LIST.** The gate lives in `AuthGuard` and is evaluated in **`"profile"` mode only**. `/onboarding/*` runs in `"phone"` mode, so the screen the guard redirects TO cannot be redirected away by the same condition. Max redirect depth is one, and there is no exemption list to maintain or get wrong.
+⚠️ **`/onboarding/profile` MUST stay reachable, and that is a schema constraint, not a preference.** `user_credentials.user_id` is a NOT NULL FK to `users(id)`, and the `users` row is created during onboarding — so a brand-new account CANNOT have a password written for it. Sending them to the password screen first would be a guaranteed foreign-key violation on a screen they cannot leave.
+⚠️ **THREE STATES, NOT TWO.** `has` → proceed · `missing` → redirect · **`unknown` → do NOT redirect.** Unknown covers sessions predating this chunk and any 503 from the status endpoint. Treating unknown as "missing" would force every user onto a set-password screen during a database outage — a screen that cannot write. Fail visible, never fail-stuck.
+⚠️ **IT IS A PRODUCT REQUIREMENT, NOT A SECURITY BOUNDARY.** The gate is client-side and its mirror is client-writable, so devtools can bypass it for a flash before the background check corrects. That is acceptable because NOTHING IS PROTECTED BY IT — every API route still enforces real authorisation server-side. Building it server-side would require an exemption list (this screen, logout, the password endpoint…), and getting that list wrong locks every user out of everything. Same doctrine as AuthGuard itself.
+
+**[I28] The login route is a thin adapter and must not re-open enumeration at the HTTP layer.** (2026-08-21)
+`POST /api/auth/password-login` contains **no auth logic**: no hashing, no comparison, no lockout arithmetic, no token verification. It calls `verifyPasswordCredential` (2.5a + 2.7) and `issueSessionToken` (2.5b) and maps three outcomes onto three status codes. **If it ever grows a security decision of its own, that decision is in the wrong place.**
+⚠️ **A ROUTE CAN LEAK WHAT THE FUNCTION DOES NOT** — via status code, body shape, or timing. So `invalid-credentials` and `account-locked` BOTH answer **401**, and the generic body is byte-identical for wrong password, unknown phone, and account-with-no-password. Only the locked case carries extra detail, and that reason is unreachable without a correct password ([I24]).
+⚠️ **400 IS FOR A SHAPELESS BODY, NEVER FOR A BAD CREDENTIAL.** Empty strings are valid strings and are judged as credentials (401). A 400 reachable by an empty password would make the status code itself an oracle. *The first version of the test asserted the opposite and the code was right* — recorded because the mistake is easy to repeat.
+⚠️ **The response is a PROJECTION, never the `users` row.** Returning `select("*")` is exactly how `/api/dev-auth/lookup` became a PII disclosure; only `id`, `phone`, `name`, `user_type` cross the wire.
+*One extra read on the SUCCESS path only*, to fetch `token_epoch` for minting. Deliberate: it keeps `verifyPasswordCredential` byte-identical to the version 88 assertions were written against. A successful login is already distinguishable from a failure, so this cannot leak.
+
+**[I29] Our session token is checked BEFORE Supabase on both sides of the seam.** (2026-08-21)
+*Server* (`getIdentityFromToken`): attempt our verifier, fall back to Supabase. ⚠️ **Never peek at a claim to choose a verifier** (D9) — that hands the attacker the steering wheel. Ours first is a performance choice (local HMAC vs a network round trip); cross-acceptance is impossible by construction.
+*Client* (`getSession`): read our token from localStorage first. ⚠️ **If Supabase were checked first, a password session would return "none"** — apiClient would send no Authorization header at all and every request would 401 while the user looked perfectly logged in.
+*`signOut` clears ours FIRST and unconditionally* — a signed, stateless token has no server-side record to revoke, so forgetting it locally IS the logout. Clearing it after a hanging Supabase call would leave a "signed out" user still authenticated.
+
 *Append new decisions below this line with the next ID and a date.*

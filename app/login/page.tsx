@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { storeLocalSessionToken } from "../lib/authProvider";
+import { authFetch } from "../lib/apiClient";
+import { markHasPassword } from "../lib/passwordGate";
 import {
   consumePendingChatRedirect,
   peekPendingChatRedirect,
@@ -46,6 +49,9 @@ export default function LogIn() {
   const { applyIdentity } = useUser();
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
+  // Chunk 2.6a. Never persisted, never logged, cleared on navigation away.
+  const [password, setPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -173,6 +179,108 @@ export default function LogIn() {
     setIsJoiningWaitlist(false);
   };
 
+  /**
+   * Ask the server whether this freshly-authenticated account still needs a
+   * password, and return where to send them. `null` means "carry on normally".
+   *
+   * ⚠️ IT NEVER THROWS AND NEVER BLOCKS THE LOGIN. Every failure — network,
+   * 503, 401, malformed body — returns null, i.e. route normally. A mandatory
+   * gate that can refuse to let someone finish logging in is the trap this
+   * whole design exists to avoid, and enforcement does not depend on this
+   * function anyway: AuthGuard re-checks on every app entry.
+   */
+  const passwordGateDestination = async (): Promise<string | null> => {
+    try {
+      const res = await authFetch("/api/account/password-status");
+      if (!res.ok) return null;
+      const { hasPassword } = await res.json();
+      markHasPassword(hasPassword);
+      return hasPassword ? null : "/onboarding/password";
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * PASSWORD LOGIN (chunk 2.6a) — the primary path.
+   *
+   * ⚠️ IT REUSES verifyOtp's SUCCESS TAIL EXACTLY. Everything after "the
+   * credential checked out" — the localStorage mirror, applyIdentity, the
+   * routing decision — is the same code path OTP already uses and that chunk
+   * 1.6 proved in production. Writing a second, parallel landing sequence is
+   * how two logins drift into behaving differently, which is precisely the
+   * class of bug that produced the enterprise-identity and content-bleeding
+   * problems this project has already paid for.
+   *
+   * ⚠️ ONE GENERIC ERROR FOR EVERY FAILURE. The route answers 401 with an
+   * identical body for wrong password, unknown phone, and
+   * account-with-no-password. This handler must not add a distinction the
+   * server refused to make — no "no account found", no "you have no password
+   * set, use OTP". The only enriched case is a LOCKED account, which the
+   * server returns solely to a caller who supplied the CORRECT password
+   * ([I24]) and therefore cannot be provoked by a prober.
+   */
+  const passwordLogin = async () => {
+    setIsLoggingIn(true);
+    setErrorMessage("");
+
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/password-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, password }),
+      });
+    } catch {
+      // Network failure is NOT a credential failure — never tell someone with
+      // a good password that it is wrong (Issue E, at the UI layer).
+      setErrorMessage("Could not reach FabVerify. Check your connection and try again.");
+      setIsLoggingIn(false);
+      return;
+    }
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      // 503 keeps its own message for the same Issue E reason.
+      setErrorMessage(
+        response.status === 503
+          ? "Service temporarily unavailable. Please try again."
+          : body?.error ?? "Invalid phone number or password."
+      );
+      setIsLoggingIn(false);
+      return;
+    }
+
+    const { token, user } = await response.json();
+
+    // ⚠️ STORED BEFORE ANY NAVIGATION. apiClient reads this to build the
+    // Authorization header; navigating first would race the first authenticated
+    // request against the token being written and 401 it intermittently — the
+    // kind of failure that reproduces once in ten tries and looks like a fluke.
+    storeLocalSessionToken(token);
+    // No status round trip needed: authenticating WITH a password proves one
+    // exists. Saves a call on the primary login path.
+    markHasPassword(true);
+
+    // Same mirror OTP writes. `devMode: false` — a password login is a real
+    // credential check on every host, so it is never the A10 bypass.
+    localStorage.setItem(
+      "fabverify_auth",
+      JSON.stringify({
+        userId: user.id,
+        phone,
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+        devMode: false,
+      })
+    );
+
+    setPassword("");
+    applyIdentity(user);
+    router.push(consumePendingChatRedirect() ?? getLandingRoute(user.user_type));
+    setIsLoggingIn(false);
+  };
+
   const handleSendOtp = () => {
     if (!isPhoneValid || isSendingOtp) return;
     void sendOtp();
@@ -242,6 +350,21 @@ export default function LogIn() {
       // identity would decide routing and guards until a hard refresh.
       if (dbUser && dbUser.user_type) {
         applyIdentity(dbUser);
+
+        // ⚠️ THE GATE IS CHECKED HERE ONLY TO AVOID A FLASH, NOT TO ENFORCE.
+        // AuthGuard enforces it on every app entry regardless; without this
+        // pre-check the user would see their dashboard for an instant before
+        // being bounced. If this call fails for any reason we fall through to
+        // normal routing and the guard catches it a moment later — so a flaky
+        // network degrades to a flash, never to a bypass and never to a
+        // blocked login.
+        const destination = await passwordGateDestination();
+        if (destination) {
+          router.push(destination);
+          setIsVerifying(false);
+          return;
+        }
+
         router.push(
           consumePendingChatRedirect() ?? getLandingRoute(dbUser.user_type)
         );
@@ -386,6 +509,39 @@ export default function LogIn() {
               />
             </div>
 
+            {/*
+              PASSWORD IS THE PRIMARY CREDENTIAL (chunk 2.6a). OTP moves to the
+              fallback link below.
+
+              ⚠️ THE FIELD IS ALWAYS RENDERED, never revealed after a check on
+              the phone number. Showing it only for registered numbers — or
+              only once a lookup says a password exists — would turn the FORM
+              ITSELF into the enumeration oracle that every layer beneath it is
+              built to close. It costs nothing to render for a number that has
+              no account: submitting simply produces the same generic failure
+              as a wrong password.
+            */}
+            <label htmlFor="password" className="mb-2 mt-4 block text-sm text-text-primary">
+              Password
+            </label>
+            <div className="flex items-center rounded-lg border border-border-dark bg-navy px-4 py-3 transition-colors focus-within:border-gold">
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && isPhoneValid && password) {
+                    void passwordLogin();
+                  }
+                }}
+                disabled={isLoggingIn}
+                className="flex-1 bg-transparent text-text-primary placeholder-text-secondary outline-none disabled:opacity-60"
+              />
+            </div>
+
             {chatRedirectPending && (
               <p className="mt-2 text-center text-[12px] italic text-gray-400">
                 Sign in to access your FabVerify messages
@@ -397,11 +553,26 @@ export default function LogIn() {
             )}
 
             <button
-              onClick={handleSendOtp}
-              disabled={!isPhoneValid || isSendingOtp}
+              onClick={() => void passwordLogin()}
+              disabled={!isPhoneValid || !password || isLoggingIn}
               className="mt-6 w-full rounded-lg bg-gold py-3.5 font-bold text-navy transition-colors hover:bg-[#dc9420] disabled:cursor-not-allowed disabled:bg-gold/40"
             >
-              {isSendingOtp ? "Sending..." : "Send OTP"}
+              {isLoggingIn ? "Logging in..." : "Log in"}
+            </button>
+
+            {/*
+              ⚠️ THE FALLBACK MUST STAY VISIBLE AND UNCONDITIONAL. Every
+              account that predates M10 has no password, and the ONLY way in
+              for them is this link. Hiding it behind "forgot password?", or
+              showing it only when a lookup says the account has no credential,
+              would both lock out existing users and re-open enumeration.
+            */}
+            <button
+              onClick={handleSendOtp}
+              disabled={!isPhoneValid || isSendingOtp}
+              className="mt-4 block w-full text-center text-sm text-text-secondary underline transition-colors hover:text-gold disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isSendingOtp ? "Sending..." : "Log in with OTP instead"}
             </button>
           </>
         ) : (

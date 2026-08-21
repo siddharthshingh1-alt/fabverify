@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { getSession } from "../lib/authProvider";
+import { authFetch } from "../lib/apiClient";
+import { markHasPassword, readPasswordGate } from "../lib/passwordGate";
 
 /**
  * Gates every PLATFORM route tree (/brand, /manufacturer, /enterprise, …).
@@ -136,6 +138,53 @@ export default function AuthGuard({
 
       // Stage 1 passed — render immediately, no spinner flash.
       setAuthorised(true);
+
+      // ── STAGE 1b: THE MANDATORY PASSWORD GATE (chunk 2.6b, [I27]) ──────
+      //
+      // ⚠️ "profile" MODE ONLY, AND THAT IS THE ENTIRE LOOP DEFENCE.
+      // /onboarding/* runs in "phone" mode, so the screen this redirects TO
+      // is structurally incapable of being redirected away by this same
+      // condition. No path exemption list exists to be got wrong, and the
+      // redirect graph has a maximum depth of one.
+      //
+      // ⚠️ It also means /onboarding/profile stays reachable, which is
+      // REQUIRED, not incidental: `user_credentials.user_id` is a NOT NULL FK
+      // to `users(id)`, so a brand-new account with no `users` row CANNOT
+      // have a password written for it. Sending them here first would be a
+      // guaranteed foreign-key violation on a screen they cannot leave.
+      //
+      // ⚠️ THREE STATES. Only an explicit "missing" redirects. "unknown" —
+      // a session predating this chunk, or a 503 from the status endpoint —
+      // deliberately does NOT, because forcing every user onto a
+      // set-password screen during a database outage traps them on a page
+      // that cannot write. Fail visible, never fail-stuck.
+      if (mode === "profile") {
+        if (readPasswordGate() === "missing") {
+          setAuthorised(false);
+          router.replace("/onboarding/password");
+          return;
+        }
+
+        // Confirm against the server and correct the mirror. Runs in the
+        // background exactly like the session check below, for the same
+        // reason: the fast path must not block first paint, and the client
+        // signal is a mirror rather than the truth.
+        authFetch("/api/account/password-status")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((body) => {
+            if (cancelled || !body) return;
+            markHasPassword(body.hasPassword);
+            if (!body.hasPassword) {
+              setAuthorised(false);
+              router.replace("/onboarding/password");
+            }
+          })
+          .catch(() => {
+            // Unanswerable — same doctrine as the session check: a network
+            // failure is not proof of anything, and the API is the real
+            // boundary. Never bounce on it.
+          });
+      }
 
       // Stage 2: confirm a REAL session. Production only, per A10 above.
       if (isDevHost()) return;

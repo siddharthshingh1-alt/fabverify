@@ -10,7 +10,7 @@ All 10 chunks done. **Zero application files import Supabase** (consumer importe
 
 **➡️ NEXT: Launch-Ready item 2 — Password login (M10).** The migration safety net. ⚠️ **Never store passwords in Supabase Auth** — the single most expensive mistake available here.
 
-📍 **M10 progress: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.7 ALL DONE. NEXT IS 2.5b — the token subsystem.**
+📍 **M10: PASSWORD LOGIN IS LIVE (2026-08-21).** 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.7 ALL DONE and production-proven — a real phone+password login reached the enterprise dashboard with real data. **NEXT: 2.6c (OTP request hardening), then 2.8 (reset), 2.9 (docs sweep).**
 
 > ✅ **2.7 (LOCKOUT) LANDED 2026-08-20, ahead of 2.6 — the gate below is satisfied.** 10 failures → a 15-minute auto-expiring cooldown, per-account, zero DDL, 51/51. Decisions [I23]–[I26].
 > 🛑 **2.5b IS HALF-BUILT AND UNCOMMITTED.** The standalone token module (issue + verify) is on disk untracked and its suites pass (54/54, 72/72) — but the integration half does NOT exist: [I21]'s type widening, the ladder branch, the `token_epoch` join. Zero app files import it. See the 📍 M10 STATUS block in `TASKS.md` before touching it.

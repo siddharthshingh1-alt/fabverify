@@ -6,6 +6,39 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-21 · Chunks 2.5b + 2.6a + 2.6b] — Password login goes live, and is proven in production.
+
+> **A user can now log in with a phone number and a password.** Proven end to end on the real production path: a real OTP login on the founder's enterprise account, a password set through the real screen, then a password login that reached the dashboard with real data loading. Password login is no longer a backend capability nothing reaches — it is the primary way into FabVerify.
+
+### Added
+- **`POST /api/auth/password-login`** — the first HTTP surface on the credential path, and what ends [I18]'s deferral. A thin adapter: no hashing, no comparison, no lockout arithmetic, no token verification. All of that was already proven upstream.
+- **Password field on `/login`**, primary, with **"Log in with OTP instead"** as an unconditional fallback link.
+- **`app/onboarding/password/page.tsx`** — the mandatory set-password screen.
+- **`app/api/account/password-status`** — `{ hasPassword }` about the CALLER only. Deliberately a separate endpoint rather than a field on `/api/dev-auth/lookup`, which is unauthenticated and takes a phone — bolting it there would have built an enumeration oracle with a helpful face.
+- **`app/lib/passwordGate.ts`** — the three-state client mirror (`has` / `missing` / **`unknown`**).
+- **`scripts/verify-login-wiring.ts`** — 38 assertions over real HTTP and the real served HTML.
+- **DECISIONS [I27] [I28] [I29]**.
+
+### Changed
+- **`AuthGuard` gained ONE condition, in `"profile"` mode only** — the mandatory-password gate. Onboarding runs in `"phone"` mode, so the screen the guard redirects TO is structurally incapable of being redirected away by it. No path exemption list exists to be got wrong.
+- **`login/page.tsx`'s OTP handler is unmodified.** Password login reuses OTP's proven success tail — the localStorage mirror, `applyIdentity`, the routing decision — rather than growing a second landing sequence that could drift.
+
+### The test that would have caught a whole wasted session
+⚠️ Every backend suite can be green while the login page ships **without a password field** — and for one session, that is exactly what happened: 286 assertions passing against seam functions that no page reached. `verify-login-wiring.ts` fetches the page the browser actually receives and asserts the field is in it. **"The function is correct" and "a user can log in" are different claims**, and only the second one is a feature.
+
+### Proven, and how
+- **PRODUCTION (real build, real Twilio, LAN):** OTP login → set password → dashboard → log out → **phone + password → dashboard with real data**. Landing was not accepted as proof; the dashboard had to load real rows, because a token that mints but fails the ladder looks identical for half a second.
+- **THE GATE (localhost, dev account):** OTP login on a password-less account → **forced to `/onboarding/password`** · navigating directly to a dashboard URL → **bounced back** · reloading the screen → **no loop** · a too-short password → **clear error, form still usable**, then a valid phrase → dashboard.
+- **HTTP layer:** 5 prober paths → **one distinct status+body** · lockout live on the wired path (9 fails still admit the correct password, the 10th locks, the correct password is then refused) · a prober during lockout gets the generic failure, byte-identical to an unknown phone.
+
+### ⚠️ One discrepancy, recorded not smoothed over
+The browser gate test's final step reported a successful password set, but **no credential row for that account existed when checked minutes later** — only the enterprise row. The write path was then proven working directly (`{"success":true,"created":true}`, row created immediately). So the gate's *routing* behaviour is confirmed by observation, and the *write* is confirmed by the HTTP suite and by the production enterprise set — but the browser step-4 write itself was never corroborated by a row. Cause unknown. Not treated as proven.
+
+### Known and unchanged
+- **OTP request hardening is NOT in this chunk.** The send still runs browser-direct against Supabase, so it cannot be rate-limited by us and still SMSes unknown numbers. Same posture as before — no regression, but not yet the enumeration/spam-safe model.
+- **`/api/dev-auth/lookup` is still unauthenticated** and returns `select("*")`.
+- **Password spraying is still unhandled** — per-account lockout never trips on one guess each against many accounts.
+
 ## [2026-08-20 · Chunk 2.7] — Lockout. Ten tries, fifteen minutes, and nothing a prober can read.
 
 > Built AHEAD of 2.6, which is the point: password verification has no HTTP surface yet, and 2.6 is what opens one. Shipping the login UI first would have left an unthrottled guessing oracle against every account on the platform ([I18]).
