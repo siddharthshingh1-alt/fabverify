@@ -50,6 +50,12 @@ const envVar = (key: string): string => {
 // working value, making the outage test silently verify nothing.
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= envVar("NEXT_PUBLIC_SUPABASE_URL");
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= envVar("SUPABASE_SERVICE_ROLE_KEY");
+// ⚠️ REQUIRED SINCE CHUNK 2.5b, even though this suite issues no tokens.
+// authProvider.server now imports sessionToken.server, which THROWS at module
+// load when the signing secret is absent (D12 — a published default signing
+// key is total forgery, not a degraded client). So every consumer of the auth
+// seam now needs it present, including tests that never mint a token.
+process.env.SESSION_TOKEN_SECRET ||= envVar("SESSION_TOKEN_SECRET");
 
 const SUPABASE_URL = envVar("NEXT_PUBLIC_SUPABASE_URL");
 const SERVICE_KEY = envVar("SUPABASE_SERVICE_ROLE_KEY");

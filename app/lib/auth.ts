@@ -24,6 +24,7 @@ import {
   getUserByPhone,
   getUserByPhoneOrThrow,
   getUserByProviderUid,
+  getUserWithTokenEpoch,
 } from "./db";
 // Token verification comes from the AUTH seam, not the data layer. It used to
 // live in db.ts as getPhoneFromAccessToken — auth logic inside the database
@@ -52,6 +53,8 @@ export type AuthFailure = {
   reason: "unauthenticated" | "unavailable";
 };
 
+type UserRow = NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>>;
+
 export type PhoneAuthResult =
   | {
       ok: true;
@@ -68,10 +71,23 @@ export type PhoneAuthResult =
        * `auth_identities` MUST guard on this being non-null.
        */
       providerUid: string | null;
+      /**
+       * ⚠️ THE ALREADY-RESOLVED ACCOUNT — populated ONLY by chunk 2.5b's local
+       * (password) branch, and undefined everywhere else.
+       *
+       * Our token carries `sub = users.id`, so verifying it already required
+       * loading the row to check `token_epoch`. Carrying it forward is what
+       * makes this the CHEAPEST branch of the ladder ([I21]): without it,
+       * getVerifiedUser would re-resolve the same row by phone and every
+       * authenticated password request would pay two round trips where one
+       * did the work — the exact double-query this chunk's design forbids.
+       *
+       * ⚠️ NOT A CALLER-SUPPLIED SHORTCUT. It is only ever set from a
+       * signature-verified `sub`, inside this file. No route can populate it.
+       */
+      resolvedUser?: UserRow;
     }
   | AuthFailure;
-
-type UserRow = NonNullable<Awaited<ReturnType<typeof getUserByPhoneOrThrow>>>;
 
 export type UserAuthResult =
   | {
@@ -83,8 +99,15 @@ export type UserAuthResult =
        * assert that the identity path actually ran rather than silently
        * falling back to phone every time (a fallback that always fires looks
        * identical to a working identity path from the outside).
+       *
+       * ⚠️ `"local"` ADDED BY CHUNK 2.5b, for exactly the reason the field
+       * exists. A password token resolves to a phone, so if the local branch
+       * silently broke, the phone fallback would answer and every functional
+       * test would still pass — the failure would be invisible except as a
+       * doubled query count. This value is how the suite asserts the local
+       * branch actually ran.
        */
-      via: "identity" | "phone";
+      via: "identity" | "phone" | "local";
     }
   | AuthFailure;
 
@@ -137,9 +160,63 @@ export async function getVerifiedCallerPhone(request: Request): Promise<PhoneAut
     // for every account without an identity row, which in this environment is
     // most of them.
     const identity = await getIdentityFromToken(token);
-    return identity
-      ? { ok: true, phone: identity.phone, providerUid: identity.providerUid }
-      : UNAUTHENTICATED;
+    if (!identity) return UNAUTHENTICATED;
+
+    // ── CHUNK 2.5b: OUR OWN TOKEN ([I21]) ──────────────────────────────
+    //
+    // ⚠️ THIS FUNCTION HAD NO DATABASE ACCESS AT ALL BEFORE THIS BRANCH, AND
+    // THAT CHANGES ITS ERROR CONTRACT. A password token carries no phone by
+    // design ([I19]: no PII in the token), so the phone must be looked up —
+    // and `save-profile` calls this function directly, so the new failure mode
+    // reaches a real route.
+    //
+    // ⚠️ AN OUTAGE HERE MUST BE 503, NEVER 401 (Issue E). Returning
+    // UNAUTHENTICATED on a database blip would tell a user with a perfectly
+    // valid session to log in again — and with password login that means
+    // re-entering a password that was never wrong. getUserWithTokenEpoch
+    // throws rather than returning null precisely so this distinction is
+    // possible here.
+    if (identity.kind === "local") {
+      try {
+        const resolved = await getUserWithTokenEpoch(identity.userId);
+
+        // No row: the account was deleted under a live token. Genuinely
+        // unauthenticated, not an outage.
+        if (!resolved) return UNAUTHENTICATED;
+
+        // ⚠️ THE EPOCH CHECK — THIS IS WHERE token_epoch STOPS BEING INERT.
+        // It has incremented since chunk 2.4 and revoked nothing, because
+        // nothing read it. A token minted under an older epoch is refused,
+        // which is what makes "changing your password ends other sessions"
+        // real ([I12], and the whole basis of 2.8's reset).
+        //
+        // ⚠️ FAILS CLOSED ON A MISSING CREDENTIAL. `null` means the row is
+        // gone — a credential deleted beneath a live session — so the token
+        // it authorised must stop working. Treating null as "no epoch to
+        // check, allow" would make deleting a credential a way to become
+        // unrevocable.
+        if (resolved.tokenEpoch === null) return UNAUTHENTICATED;
+        if (resolved.tokenEpoch !== identity.epoch) return UNAUTHENTICATED;
+
+        return {
+          ok: true,
+          phone: normalisePhone(resolved.user.phone),
+          // The row we already loaded to check the epoch. See resolvedUser's
+          // contract above — this is what keeps the local branch at ONE query.
+          resolvedUser: resolved.user,
+          // ⚠️ NULL, exactly like the dev path — and for the same structural
+          // reason. A password session has NO provider identity ([I11]), so
+          // chunk 1.8 must not fabricate an auth_identities row for it. The
+          // guard that stops it doing so for dev-bypass accounts protects
+          // this branch unchanged.
+          providerUid: null,
+        };
+      } catch {
+        return UNAVAILABLE;
+      }
+    }
+
+    return { ok: true, phone: identity.phone, providerUid: identity.providerUid };
   }
 
   // Dev path: no token exists, so there is no provider identity. providerUid
@@ -193,6 +270,29 @@ export async function getVerifiedUser(request: Request): Promise<UserAuthResult>
   if (!caller.ok) return caller;
 
   try {
+    // ── 0. OUR OWN TOKEN — THE NEW TOP OF THE LADDER (chunk 2.5b, [I21]) ──
+    //
+    // Cheapest branch by construction: `sub = users.id`, so the account is
+    // known from the token itself with NO lookup. getVerifiedCallerPhone has
+    // already loaded and epoch-checked the row, so this costs zero further
+    // round trips — the whole point of carrying `resolvedUser` forward.
+    //
+    // ⚠️ ABOVE the identity branch, not beside it. A password session has no
+    // auth_identities row ([I11]), so falling into the identity branch would
+    // always miss and drop to the phone fallback, quietly doubling the query
+    // count on every authenticated password request while still returning the
+    // right answer. Correct-but-slow is exactly the failure that never gets
+    // noticed.
+    //
+    // ⚠️ NO recordIdentityOnce HERE, deliberately. providerUid is null for a
+    // password session, so writing one would fabricate a
+    // ('supabase', <userId>) row — the self-referential noise [I11] rejects,
+    // and the same trap chunk 1.8's null-guard exists to prevent.
+    if (caller.resolvedUser) {
+      logResolution("local", caller.resolvedUser.id);
+      return { ok: true, user: caller.resolvedUser, via: "local" };
+    }
+
     // ── 1. IDENTITY FIRST ────────────────────────────────────────────────
     // Skipped entirely when providerUid is null, which is ALWAYS the case on
     // the dev path (x-dev-phone carries no token). Localhost therefore cannot
@@ -286,7 +386,10 @@ async function auditAgainstPhone(
  */
 const loggedResolutions = new Set<string>();
 
-function logResolution(via: "identity" | "phone" | "identity-only", userId: string): void {
+function logResolution(
+  via: "identity" | "phone" | "identity-only" | "local",
+  userId: string
+): void {
   const key = `${via}:${userId}`;
   if (loggedResolutions.has(key)) return;
   loggedResolutions.add(key);
@@ -294,7 +397,9 @@ function logResolution(via: "identity" | "phone" | "identity-only", userId: stri
   // Phone numbers are deliberately NOT logged; the users.id is enough to
   // confirm which account resolved and is not personal data on its own.
   const detail =
-    via === "identity"
+    via === "local"
+      ? "via OUR OWN TOKEN (sub=users.id) — no lookup needed"
+      : via === "identity"
       ? "via IDENTITY (auth_identities) — phone lookup agrees"
       : via === "identity-only"
         ? "via IDENTITY (auth_identities) — phone lookup found NO match; identity resolved an account phone could not"

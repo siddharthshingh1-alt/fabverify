@@ -340,6 +340,59 @@ export async function upsertUserCredential(params: {
 }
 
 /**
+ * Resolve a `users` row AND its credential's `token_epoch` in ONE round trip
+ * (chunk 2.5b, [I12] + [I22]).
+ *
+ * ⚠️ ONE EMBEDDED JOIN, NOT TWO QUERIES — and this is a real cost decision,
+ * not tidiness. The epoch check runs on EVERY authenticated request made with
+ * one of our tokens, so a second round trip here is a permanent tax on the
+ * whole password-login path, paid against Supabase Singapore where a round
+ * trip is tens of milliseconds. This is the 17th embedded join in this file;
+ * keep MIGRATION.md §1.2's count in step.
+ *
+ * ⚠️ THROWS on database failure — deliberately, and it is a security
+ * requirement rather than a style choice. The caller uses this to decide
+ * whether a token is still valid, so a swallowed outage returning `null`
+ * would read as "no such user" and answer **401**, telling a perfectly
+ * authenticated user to log in again over a transient blip (Issue E). Worse,
+ * an epoch that cannot be read must never be treated as "epoch matches".
+ * Absent is concluded ONLY from a successful read that returned no row.
+ *
+ * ⚠️ RETURNS THE EPOCH AS `null` WHEN THE USER HAS NO CREDENTIAL, which is a
+ * genuine state, not an error: an OTP-only account has no `user_credentials`
+ * row at all. The caller decides what that means — and for a token WE issued
+ * it means the credential was deleted underneath a live session, which must
+ * fail closed.
+ */
+export async function getUserWithTokenEpoch(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("*, user_credentials(credential_type, token_epoch)")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  // PostgREST returns embedded rows as an array. Pick the password credential
+  // explicitly rather than [0] — a future credential type (passkey, TOTP)
+  // would otherwise silently become "the" epoch depending on row order.
+  const credentials = (data.user_credentials ?? []) as Array<{
+    credential_type: string;
+    token_epoch: number;
+  }>;
+  const password = credentials.find(
+    (c) => c.credential_type === PASSWORD_CREDENTIAL_TYPE
+  );
+
+  // Strip the embedded array off the user row so callers see the same shape
+  // getUserById returns — 13 route call sites consume this object.
+  const { user_credentials: _embedded, ...user } = data;
+
+  return { user, tokenEpoch: password ? password.token_epoch : null };
+}
+
+/**
  * ── THE LOCKOUT WRITES (chunk 2.7) ──────────────────────────────────────
  *
  * Two guarded, single-round-trip updates. Both are DUMB ON PURPOSE: they are

@@ -159,11 +159,47 @@ export type AuthenticationResult =
 
 /** A provider identity resolved from a token. Consumed by chunks 1.5 / 1.9. */
 export type ProviderIdentity = {
+  /** Discriminant. Chunk 2.5b — see VerifiedIdentity below. */
+  kind: "provider";
   /** Looked up against `auth_identities.provider_uid` in chunk 1.9. */
   providerUid: string;
   /** Normalised to the last 10 digits. The fallback key when no identity row exists. */
   phone: string;
 };
+
+/**
+ * An identity resolved from a token WE issued (chunk 2.5b, DECISIONS [I21]).
+ *
+ * ⚠️ IT HAS NEITHER A providerUid NOR A PHONE, AND THAT IS WHY THE TYPE HAD TO
+ * WIDEN. A password credential writes no `auth_identities` row ([I11]) so
+ * there is no provider id, and the token deliberately carries no PII ([I19])
+ * so there is no phone. `ProviderIdentity` requires BOTH, so it simply cannot
+ * represent a password session — this is not a stylistic split.
+ *
+ * `userId` IS the account: `sub = users.id`, so this branch of the resolution
+ * ladder needs no lookup at all to know who is calling. That makes it the
+ * cheapest branch, ahead of both `auth_identities` and phone.
+ */
+export type LocalIdentity = {
+  kind: "local";
+  /** `users.id`, taken from the verified `sub` claim. */
+  userId: string;
+  /** The `token_epoch` this token was minted under ([I12]). Checked against the credential row. */
+  epoch: number;
+};
+
+/**
+ * ⚠️ THE TRUST ROOT'S RETURN TYPE. A DISCRIMINATED UNION, NOT AN OPTIONAL
+ * FIELD ([I21]).
+ *
+ * Modelling this as `{ providerUid?: string; phone?: string; userId?: string }`
+ * would compile and would be a bug generator: every consumer would have to
+ * remember which combination is legal, and "provider token with a missing
+ * phone" would be representable. `kind` makes the illegal states unrepresentable
+ * and forces every consumer to handle both branches — the compiler becomes the
+ * thing that finds the call sites, instead of a grep.
+ */
+export type VerifiedIdentity = ProviderIdentity | LocalIdentity;
 
 /** A live session as the browser sees it. */
 export type ProviderSession = {
@@ -345,8 +381,77 @@ export async function verifyOtp(
  * session at all. That is exactly why AuthGuard skips its session check on
  * localhost, and why apiClient sends `x-dev-phone` there instead.
  */
+/**
+ * ⚠️ WHERE OUR OWN SESSION TOKEN LIVES (chunk 2.5b, [I19]).
+ *
+ * localStorage, by decision — not a cookie. A cookie would need CSRF handling
+ * this app has none of, and the token is already sent as an explicit
+ * `Authorization` header by apiClient rather than travelling ambiently on
+ * every request. The XSS exposure that localStorage carries is real and
+ * accepted: an attacker who can run script in this origin can read the
+ * Supabase token out of storage today by exactly the same means, so this
+ * changes nothing about the threat model.
+ *
+ * ⚠️ NOT A `NEXT_PUBLIC_` VALUE AND NOT A SECRET WE MINT CLIENT-SIDE. The
+ * browser only ever RECEIVES this from the login route; the signing key is
+ * server-only and throws at module load if absent (A4).
+ */
+const LOCAL_TOKEN_KEY = "fabverify_session_token";
+
+/** Store the token the password-login route issued. Browser only. */
+export function storeLocalSessionToken(token: string): void {
+  try {
+    localStorage.setItem(LOCAL_TOKEN_KEY, token);
+  } catch {
+    // Storage can be unavailable (private mode, quota). The caller must treat
+    // a failure here as a failed login rather than proceeding half-signed-in.
+    throw new Error("Could not start a session on this device.");
+  }
+}
+
+/** Forget our token. Safe to call when there is none. */
+export function clearLocalSessionToken(): void {
+  try {
+    localStorage.removeItem(LOCAL_TOKEN_KEY);
+  } catch {
+    // Best effort — signOut's local teardown must never throw.
+  }
+}
+
+function readLocalSessionToken(): string | null {
+  try {
+    return localStorage.getItem(LOCAL_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export async function getSession(): Promise<SessionResult> {
   try {
+    // ── OURS FIRST (chunk 2.5b) ──────────────────────────────────────────
+    //
+    // ⚠️ CHECKED BEFORE SUPABASE, mirroring the server's verifier order. A
+    // password login creates NO Supabase session, so if this were checked
+    // second, `supabase.auth.getSession()` would return nothing, this function
+    // would answer "none", and apiClient would send NO Authorization header at
+    // all — every request 401ing while the user looks perfectly logged in.
+    //
+    // ⚠️ `providerUid: null` — a password session has no provider identity
+    // ([I11]), the same signal the dev path uses. Nothing may write
+    // auth_identities from it.
+    //
+    // Expiry is NOT checked here: this is the browser, and a client-side
+    // clock is not a security input. The server rejects an expired token (D4),
+    // which is the only judgement that counts. Answering "session" for a
+    // stale token costs one 401, which apiClient already handles.
+    const localToken = readLocalSessionToken();
+    if (localToken) {
+      return {
+        status: "session",
+        session: { accessToken: localToken, providerUid: null },
+      };
+    }
+
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return { status: "none" };
@@ -378,6 +483,14 @@ export async function getSession(): Promise<SessionResult> {
  * its own token entry to find the refresh token it is revoking.
  */
 export async function signOut(): Promise<void> {
+  // ⚠️ OURS IS CLEARED FIRST AND UNCONDITIONALLY (chunk 2.5b). It is a
+  // SIGNED, STATELESS token — there is no server-side record to revoke, so
+  // forgetting it locally is the entire logout for a password session. If
+  // this ran after the Supabase call and that call hung or threw, the token
+  // would survive and the "signed out" user would still be authenticated on
+  // the next request.
+  clearLocalSessionToken();
+
   try {
     await supabase.auth.signOut();
   } catch {

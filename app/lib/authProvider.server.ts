@@ -27,7 +27,8 @@
  */
 
 import { supabaseAdmin } from "./supabaseAdmin";
-import type { ProviderIdentity } from "./authProvider";
+import type { ProviderIdentity, VerifiedIdentity } from "./authProvider";
+import { verifySessionToken } from "./sessionToken.server";
 import { randomBytes } from "node:crypto";
 import {
   PASSWORD_CREDENTIAL_TYPE,
@@ -78,12 +79,38 @@ import {
  */
 export async function getIdentityFromToken(
   accessToken: string
-): Promise<ProviderIdentity | null> {
+): Promise<VerifiedIdentity | null> {
+  // ── OURS FIRST (chunk 2.5b, [I22]) ────────────────────────────────────
+  //
+  // ⚠️ *ATTEMPT* OUR VERIFIER — NEVER PEEK AT THE TOKEN TO DECIDE WHICH ONE
+  // TO USE. Reading `iss` from the unparsed payload to "route" the token is
+  // the classic anti-pattern (D9): it hands an attacker the steering wheel,
+  // because the claim they control decides which verifier judges them. So we
+  // simply try ours; if it fails for ANY reason we try Supabase. A Supabase
+  // token failing our HMAC check is cheap, expected, and silent.
+  //
+  // Ours goes first because it is a local HMAC check — microseconds, no
+  // network — while the Supabase call is a round trip. Order is a performance
+  // choice here, not a security one: cross-acceptance is impossible by
+  // construction (different secrets, and iss/aud are pinned both ways).
+  const local = await verifySessionToken(accessToken);
+  if (local.ok) {
+    return { kind: "local", userId: local.userId, epoch: local.epoch };
+  }
+
+  // ── SUPABASE FALLBACK — MUST SURVIVE INTACT ([I22]) ───────────────────
+  //
+  // ⚠️ EVERY CURRENTLY-LIVE SESSION IS A SUPABASE JWT. Breaking this branch
+  // logs out every existing user at once, on a platform holding their orders.
+  // It is the single highest-consequence regression available in this chunk,
+  // which is why the branch below is byte-for-byte what it was before 2.5b
+  // and why the suite asserts it independently.
   const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
 
   if (error || !data.user?.phone) return null;
 
   return {
+    kind: "provider",
     providerUid: data.user.id,
     // Same canonical key as everywhere else: strip non-digits, keep last 10.
     // Supabase stores `91`+10 while `users.phone` is bare 10-digit, so this

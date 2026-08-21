@@ -28,6 +28,15 @@ export async function resolve(specifier, context, next) {
         }
       }
     }
+
+    // Chunk 2.5b: `auth.ts` imports NextResponse from "next/server", which
+    // Next resolves through its own exports map and Node does not. Only the
+    // subpath needs the extension — this is the same class of rule as the
+    // relative case above, not a behaviour change.
+    if (specifier === "next/server") {
+      return await next("next/server.js", context);
+    }
+
     throw error;
   }
 }
