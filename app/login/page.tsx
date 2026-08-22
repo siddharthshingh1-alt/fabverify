@@ -24,6 +24,9 @@ import {
 // rather than a copy; it deliberately lives outside the seam, since it is
 // insurance against the seam's own heuristic changing.
 import { looksLikeProviderProblem } from "../lib/providerFallback";
+// The resend countdown, shared with the server-side OTP throttle so the two
+// cannot disagree — see the note at RESEND_SECONDS below.
+import { OTP_RESEND_SECONDS } from "../lib/otpPolicy";
 import { useUser } from "../context/UserContext";
 import { getLandingRoute } from "../lib/routing";
 
@@ -31,7 +34,12 @@ const WHATSAPP_NUMBER_DISPLAY = "+91 97739 33279";
 const WHATSAPP_LINK = "https://wa.me/919773933279";
 
 const OTP_LENGTH = 6;
-const RESEND_SECONDS = 45;
+// ⚠️ RESEND_SECONDS is no longer defined here. It was a local `= 45` in BOTH
+// this file and its counterpart, and chunk 2.6c gave the server a matching
+// cooldown — so the two must agree or the UI enables "Resend OTP" at 45s and
+// the server answers 429, a login screen that looks broken. One definition
+// now, in the policy module (decision D6, 2026-08-22).
+const RESEND_SECONDS = OTP_RESEND_SECONDS;
 // DEV_OTP_BYPASS moved into the seam (app/lib/authProvider.ts) in chunk 1.4 —
 // the seam compares the code and owns the A10 hostname gate, so login and
 // signup can no longer drift on what the bypass accepts.

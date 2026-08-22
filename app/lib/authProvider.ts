@@ -61,6 +61,7 @@
  */
 
 import { supabase } from "./supabase";
+import type { OtpPurpose } from "./otpPolicy";
 
 /** DECISIONS A10: the fixed dev code. Accepted on localhost ONLY. */
 export const DEV_OTP_BYPASS = "123456";
@@ -247,7 +248,10 @@ export type SessionResult =
  * On the dev bypass NO message is sent and this resolves ok — the caller
  * still advances to the code screen, where `verifyOtp` accepts 123456.
  */
-export async function sendOtp(phone: string): Promise<SendOtpResult> {
+export async function sendOtp(
+  phone: string,
+  purpose: OtpPurpose = "login"
+): Promise<SendOtpResult> {
   const last10 = toLast10(phone);
 
   if (last10.length !== 10) {
@@ -267,32 +271,67 @@ export async function sendOtp(phone: string): Promise<SendOtpResult> {
 
   if (isDevBypassHost()) return { ok: true, devBypass: true };
 
+  // ⚠️ CHUNK 2.6c: THE SEND NO LONGER TALKS TO THE PROVIDER FROM HERE.
+  //
+  // This used to call `supabase.auth.signInWithOtp` directly. In the browser
+  // there is no server in the path, so the send could not be counted, could
+  // not be throttled, and would SMS a number with no account — an unmetered
+  // cost vector on an unauthenticated surface. It now posts to our own route,
+  // which throttles, records, and asks the seam's server half to send.
+  //
+  // ⚠️ THE RETURN TYPE IS DELIBERATELY UNCHANGED. Every failure the route can
+  // produce is mapped back onto the EXISTING SendOtpResult union, so
+  // login/page.tsx and signup/page.tsx need no new branches and the
+  // WhatsApp/waitlist fallback keeps working exactly as it did. A throttle
+  // rejection arrives as `reason: "error"` carrying a human message, NOT as a
+  // new variant — adding one would force every caller to grow a case, and the
+  // pages are proven code on the login path.
+  //
+  // ⚠️ THE PROVIDER-ERROR HEURISTIC MOVED, IT DID NOT DISAPPEAR. The same
+  // three-substring test now runs server-side in sendOtpServerSide and comes
+  // back as the structured `provider_unavailable` below. providerFallback.ts
+  // remains the backup, still unreachable by construction, still deliberate.
+  //
+  // ⚠️ NOTE WHAT DOES *NOT* GO OVER THIS WIRE: no session, no token, no
+  // identity. An unauthenticated caller asking for a code is exactly what this
+  // is, and the route is written for that.
   try {
-    const { error } = await supabase.auth.signInWithOtp({
-      phone: toE164(last10),
-      options: { channel: "sms" },
+    const res = await fetch("/api/auth/otp/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: last10, purpose }),
     });
 
-    if (!error) return { ok: true, devBypass: false };
+    // A body may be absent or unparseable on an infrastructure error; that is
+    // not a reason to throw away the status we already have.
+    type SendPayload = { reason?: string; message?: string; error?: string };
+    let payload: SendPayload | null = null;
+    try {
+      payload = (await res.json()) as SendPayload;
+    } catch {
+      payload = null;
+    }
 
-    // HEURISTIC BY NECESSITY — the same shape as isDatabaseUnavailable() in
-    // apiError.ts. Supabase exposes no error code meaning "SMS provider not
-    // configured for this number", so this matches on message text. It is
-    // deliberately not exhaustive: anything unrecognised falls through to
-    // `error`, which shows the message and lets the user retry — the safe
-    // direction. Provider-specific knowledge belongs behind the seam, which
-    // is precisely why this sniffing moved in here out of the login page.
-    const m = error.message.toLowerCase();
-    if (
-      m.includes("not configured") ||
-      m.includes("provider") ||
-      m.includes("sms")
-    ) {
+    if (res.ok) return { ok: true, devBypass: false };
+
+    if (payload?.reason === "provider_unavailable") {
       return { ok: false, reason: "provider_unavailable" };
     }
 
-    return { ok: false, reason: "error", message: error.message };
+    // `message` is what our route sends (invalid phone, throttled, provider
+    // error); `error` is what dbErrorResponse sends on a 503/500. Both are
+    // already user-safe strings — dbErrorResponse specifically refuses to put
+    // raw exception text in a 5xx body, which is the bug that once rendered
+    // "TypeError: fetch failed" on the onboarding screen.
+    const message = payload?.message ?? payload?.error;
+    if (typeof message === "string" && message.length > 0) {
+      return { ok: false, reason: "error", message };
+    }
+
+    return { ok: false, reason: "unknown" };
   } catch {
+    // The request never completed — offline, DNS, aborted. Distinct from a
+    // provider problem, and the pages show a generic retry message.
     return { ok: false, reason: "unknown" };
   }
 }

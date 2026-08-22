@@ -18,6 +18,9 @@ import {
 // The SAME definition login uses, not a copy: it was extracted to its own file
 // in chunk 1.7 precisely so the two pages cannot drift on it.
 import { looksLikeProviderProblem } from "../lib/providerFallback";
+// The resend countdown, shared with the server-side OTP throttle so the two
+// cannot disagree — see the note at RESEND_SECONDS below.
+import { OTP_RESEND_SECONDS } from "../lib/otpPolicy";
 import { useUser } from "../context/UserContext";
 import { getLandingRoute } from "../lib/routing";
 
@@ -34,7 +37,12 @@ const postVerifyRoute = () =>
   localStorage.getItem("fabverify_profile") ? consumePendingChatRedirect() : null;
 
 const OTP_LENGTH = 6;
-const RESEND_SECONDS = 45;
+// ⚠️ RESEND_SECONDS is no longer defined here. It was a local `= 45` in BOTH
+// this file and its counterpart, and chunk 2.6c gave the server a matching
+// cooldown — so the two must agree or the UI enables "Resend OTP" at 45s and
+// the server answers 429, a login screen that looks broken. One definition
+// now, in the policy module (decision D6, 2026-08-22).
+const RESEND_SECONDS = OTP_RESEND_SECONDS;
 // DEV_OTP_BYPASS moved into the seam (app/lib/authProvider.ts) in chunk 1.4 —
 // the seam compares the code and owns the A10 hostname gate, so login and
 // signup can no longer drift on what the bypass accepts.
@@ -112,7 +120,11 @@ export default function SignUp() {
     setErrorMessage("");
     setSmsUnavailable(false);
 
-    const result = await providerSendOtp(phone);
+    // "signup" only affects what the throttle RECORDS — the provider call is
+    // identical to login's (shouldCreateUser stays true, which is what lets a
+    // brand-new number receive a code at all; chunk 1.7's production signup
+    // was proven by the provider setting phone_confirmed_at on a fresh user).
+    const result = await providerSendOtp(phone, "signup");
 
     if (!result.ok) {
       // FALLBACK DECISION — deliberately belt-and-suspenders, identical to

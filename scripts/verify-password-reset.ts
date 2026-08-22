@@ -13,11 +13,14 @@
  * ⚠️ NO ROUTE EXISTS YET (2.8a). Proven as a seam function first, exactly as
  * 2.5a was, so a bug at this stage is a wrong answer nothing acts on.
  *
- * ⚠️ WHAT THIS SUITE DELIBERATELY DOES NOT TEST, because it is NOT BUILT:
- * rate limiting and enumeration-safety of the OTP *REQUEST*. The send still
- * runs browser-direct against Supabase (chunk 2.6c), so it cannot be throttled
- * or made uniform from here. Section [G] asserts that gap EXISTS rather than
- * pretending it is closed.
+ * ⚠️ THE OTP *REQUEST* IS NO LONGER THIS SUITE'S GAP — chunk 2.6c moved the
+ * send server-side and throttled it (2026-08-22), and section [G]'s assertions
+ * were INVERTED IN PLACE to say so. Rate limiting, enumeration uniformity and
+ * fail-closed behaviour are proven by scripts/verify-otp-send.ts, not here.
+ * What [G] still asserts as OPEN is narrower and precise: the provider's own
+ * send-vs-refuse timing on the reset path has never been measured, because
+ * localhost never reaches the provider. That measurement belongs to 2.8b's
+ * production run.
  */
 
 import { readFileSync } from "node:fs";
@@ -289,22 +292,69 @@ check(
 check("F3 …starting at epoch 0 (no tokens existed to evict)", (await credential(MAKER.id))?.token_epoch === 0);
 
 // ─────────────────────────────────────────────────────────────────────────
-section("[G] ⚠️ THE GAP THIS CHUNK DOES NOT CLOSE — asserted, not assumed");
+section("[G] ⚠️ THE GAP 2.6c CLOSED — and the one that is still open");
 
-// The OTP SEND still runs browser-direct against Supabase, so it cannot be
-// rate-limited or made enumeration-uniform from the server. Asserting the gap
-// keeps it visible until 2.6c closes it — a TODO in a comment gets forgotten,
-// a failing-when-fixed assertion does not.
-const clientSeam = readFileSync("app/lib/authProvider.ts", "utf8");
+/**
+ * ⚠️ THESE ASSERTIONS WERE INVERTED IN PLACE BY CHUNK 2.6c, NOT DELETED.
+ *
+ * They were written to FAIL the day the OTP send moved server-side — "a TODO
+ * in a comment gets forgotten, an assertion that fails when you fix the thing
+ * does not". That day was 2026-08-22. The section keeps its identity and its
+ * history; what changed is which direction each claim points. Deleting them
+ * would have thrown away the record of why they existed, and 2.7 already
+ * established the rule: stale assertions get inverted, never removed.
+ *
+ * ⚠️ ASSERTED AGAINST COMMENT-STRIPPED SOURCE. The seam now DESCRIBES the call
+ * it removed ("this used to call supabase.auth.signInWithOtp directly"), so a
+ * raw-text search would report the send is still browser-direct and this
+ * section would lie in the most confusing possible way. Assert on what
+ * executes, never on what is written near it — the same lesson as C5/H1 below,
+ * where `git grep` searched tracked files only and stayed green.
+ */
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+const clientSeam = stripComments(readFileSync("app/lib/authProvider.ts", "utf8"));
 check(
-  "G1 ⚠️ OTP SEND IS STILL BROWSER-DIRECT — rate limiting is NOT built (2.6c)",
-  clientSeam.includes("supabase.auth.signInWithOtp"),
-  "when this assertion FAILS, the send has moved server-side and 2.6c is done"
+  "G1 ✅ THE OTP SEND IS NO LONGER BROWSER-DIRECT — it goes through our route (2.6c)",
+  !clientSeam.includes("signInWithOtp") && clientSeam.includes("/api/auth/otp/send"),
+  "was: 'rate limiting is NOT built'. Inverted 2026-08-22 when 2.6c landed."
+);
+
+const sendRoute = stripComments(readFileSync("app/api/auth/otp/send/route.ts", "utf8"));
+check(
+  "G2 ✅ …so reset-OTP requests ARE throttled and enumeration-uniform",
+  sendRoute.includes("checkOtpThrottle") && sendRoute.includes("recordOtpAttempt"),
+  "was: 'unthrottled and not enumeration-uniform'"
 );
 check(
-  "G2 ⚠️ …so reset-OTP REQUESTS are unthrottled and not enumeration-uniform",
-  true,
-  "recorded limitation, not a passing security property"
+  "G3 ⚠️ a RESET send may never create an account for an unknown number",
+  sendRoute.includes('purpose !== "reset"'),
+  "shouldCreateUser=false on reset — no phantom users, no SMS to strangers"
+);
+
+/**
+ * ⚠️ THE GAP THAT REPLACES THE OLD ONE — recorded in the same fails-when-fixed
+ * style rather than left to decay into silence.
+ *
+ * 2.6c calls the provider on EVERY reset request, so no round trip is skipped
+ * for an unknown number, and holds the response to OTP_RESET_FLOOR_MS so both
+ * outcomes are bounded below by the same wall. What is NOT yet known is the
+ * provider's own send-vs-refuse duration: localhost never calls it (the A10
+ * bypass and the NODE_ENV gate both short-circuit), so the floor's value was
+ * chosen BEFORE it could be measured. If the real send leg is slower than the
+ * floor, the excess is still observable.
+ *
+ * This asserts the "not yet measured" marker is still in otpPolicy.ts. Measure
+ * the two legs during the 2.8b production run, set the floor from evidence,
+ * update that comment — and this assertion goes red, which is the signal that
+ * the gap is closed.
+ */
+const otpPolicySource = readFileSync("app/lib/otpPolicy.ts", "utf8");
+check(
+  "G4 ⚠️ THE PROVIDER-LEG TIMING RESIDUAL IS STILL UNMEASURED (2.8b production run)",
+  otpPolicySource.includes("BEFORE the provider leg could be measured"),
+  "the floor BOUNDS the residual; only a production measurement CLOSES it"
 );
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@
  * belonged.
  */
 
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "./supabaseAdmin";
 import type { ProviderIdentity, VerifiedIdentity } from "./authProvider";
 import { verifySessionToken } from "./sessionToken.server";
@@ -762,4 +763,102 @@ export async function resetPasswordByOtp(
   await resetUserCredential({ userId: user.id, passwordHash, tokenEpoch });
 
   return { ok: true, user, tokenEpoch };
+}
+
+// ── OTP SEND, SERVER-SIDE (chunk 2.6c) ───────────────────────────────────
+
+/**
+ * SEND a one-time code, from OUR server rather than from the browser.
+ *
+ * ⚠️ THIS IS THE MOVE THE WHOLE CHUNK EXISTS FOR. Until now `sendOtp` in
+ * authProvider.ts called `supabase.auth.signInWithOtp` DIRECTLY FROM THE
+ * BROWSER, which meant the send was (a) unthrottleable by us — there is no
+ * server in the path to count anything, (b) willing to SMS a number with no
+ * account, and (c) invisible to every counter we own. Moving it here is what
+ * makes the throttle possible at all; the throttle itself lives in the route.
+ *
+ * ⚠️ THE ANON KEY, NOT THE SERVICE ROLE, AND THAT IS DELIBERATE. This is
+ * byte-for-byte the same call the browser has been making successfully since
+ * chunk 1.6 — same endpoint, same key class, same options — just issued from
+ * our server. Using the service role here would change the request in a way
+ * that has never been exercised on the login path, on the one path where a
+ * behaviour change locks every OTP-only user out of the platform. A like-for-
+ * like move is the low-risk move.
+ * ⚠️ NOTE THE INCONSISTENCY RATHER THAN COPYING IT: verifyOtpServerSide above
+ * uses supabaseAdmin. That is 2.8a's code, its production branch has never
+ * executed, and it is not this chunk's to change.
+ *
+ * ⚠️ NO SESSION IS PRODUCED OR PERSISTED HERE. `persistSession: false` on a
+ * fresh client, so nothing is written to any store. This is also a real
+ * BEHAVIOUR CHANGE worth knowing about: with phone confirmations off,
+ * signInWithOtp creates a Supabase session immediately, BEFORE the code is
+ * verified — login/page.tsx has a comment about detecting and clearing exactly
+ * that stray session. Sending from the server means that pre-verification
+ * session is never created in the browser at all. The browser's verifyOtp does
+ * not need it (it posts phone + token and receives a session in return), so
+ * this is a strict improvement — but it is a change, and it is on the
+ * production test list rather than assumed.
+ */
+
+const otpSendClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key",
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+export type ServerSendResult =
+  | { ok: true; sent: boolean }
+  | { ok: false; reason: "provider_unavailable" }
+  | { ok: false; reason: "error"; message: string };
+
+/**
+ * @param phoneLast10 normalised 10-digit number; the caller validates format.
+ * @param allowCreate whether the provider may create an account for an unknown
+ *   number. TRUE for login/signup — chunk 1.7's production signup was proven
+ *   by the provider setting `phone_confirmed_at` on a brand-new auth user, so
+ *   flipping it breaks every new signup. FALSE for reset, where creating a
+ *   phantom user and SMSing a stranger is exactly the abuse being closed.
+ */
+export async function sendOtpServerSide(
+  phoneLast10: string,
+  allowCreate: boolean
+): Promise<ServerSendResult> {
+  // ⚠️ NON-PRODUCTION SHORT-CIRCUITS BEFORE THE PROVIDER — no SMS is ever sent
+  // from a dev machine, and every line of throttle logic above still runs, so
+  // the route is fully testable on localhost. Mirrors verifyOtpServerSide's
+  // gate exactly (and the browser's own A10 bypass), including that it keys on
+  // NODE_ENV rather than on a header or a flag a caller could set.
+  if (!isProductionRuntime) return { ok: true, sent: false };
+
+  try {
+    const { error } = await otpSendClient.auth.signInWithOtp({
+      phone: `+91${phoneLast10}`,
+      options: { channel: "sms", shouldCreateUser: allowCreate },
+    });
+
+    if (!error) return { ok: true, sent: true };
+
+    // ⚠️ AN UNKNOWN NUMBER ON THE RESET PATH LANDS HERE, AND IT MUST NOT LOOK
+    // DIFFERENT TO THE CALLER. With shouldCreateUser=false the provider
+    // refuses a number it has never seen; that refusal is an ACCOUNT-EXISTENCE
+    // FACT and reporting it upward would rebuild the enumeration oracle the
+    // uniform response exists to close. The route maps ok:true and this branch
+    // onto the same body — see the route's GENERIC_ACCEPTED.
+    if (!allowCreate) return { ok: true, sent: false };
+
+    // HEURISTIC BY NECESSITY, and deliberately IDENTICAL to the browser seam's
+    // three-substring test it replaces. Supabase exposes no error code meaning
+    // "SMS provider not configured for this number", so this matches on message
+    // text. Keeping the exact same test keeps the WhatsApp/waitlist fallback
+    // behaving exactly as it did before the send moved — that fallback is the
+    // path most real users hit while Twilio is on a trial.
+    const m = error.message.toLowerCase();
+    if (m.includes("not configured") || m.includes("provider") || m.includes("sms")) {
+      return { ok: false, reason: "provider_unavailable" };
+    }
+
+    return { ok: false, reason: "error", message: error.message };
+  } catch {
+    return { ok: false, reason: "error", message: "Something went wrong. Please try again." };
+  }
 }

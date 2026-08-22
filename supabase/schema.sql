@@ -343,3 +343,51 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 -- access (which bypasses RLS) does the work. An anon SELECT returning 0 rows
 -- on an empty table proves nothing — the proof is an anon INSERT → 42501.
 ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;
+
+-- ── otp_requests (chunk 2.6c) ──────────────────────────────────────────
+-- The OTP SEND throttle. Before 2.6c the send ran browser-direct against
+-- Supabase, so it could not be rate-limited, counted or made
+-- enumeration-uniform by us. Postgres is the counter because there is no
+-- shared state store: Vercel lambdas share no memory, so an in-process Map
+-- throttles one warm instance and nothing else (the same constraint [I23]
+-- recorded for per-IP lockout).
+--
+-- ⚠️ THE PHONE IS HASHED, NEVER RAW. This table takes a row for every number
+-- that asks for a code, including numbers with no account, so raw storage
+-- would build the largest pile of non-user PII on the platform — one
+-- select("*") away from disclosure, exactly the shape [I10] designed out for
+-- password hashes. HMAC-SHA256 under a server-only key derived from
+-- SESSION_TOKEN_SECRET (app/lib/otpThrottle.server.ts); HMAC rather than a
+-- bare digest because a plain hash of a 10-digit mobile is brute-forceable in
+-- seconds and would be a reversible encoding, not a protection.
+--
+-- ⚠️ NO FK to users, deliberately — counting requests for numbers that have
+-- no account is the entire point. Rows purge after 48h; this is a throttle
+-- counter, NOT an audit log, and must not grow into one.
+CREATE TABLE IF NOT EXISTS otp_requests (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone_hash  TEXT NOT NULL,
+  -- Nullable: "no IP observed" is genuinely absent (localhost, stripped
+  -- headers). A sentinel would make every IP-less caller share one bucket.
+  ip_hash     TEXT,
+  -- 'login' | 'signup' | 'reset'. No CHECK, matching every other status-like
+  -- column here, so a new purpose needs no DDL.
+  purpose     TEXT NOT NULL DEFAULT 'login',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Both keyed reads are "rows for KEY newer than CUTOFF", so the indexes are
+-- composite and lead with the key.
+CREATE INDEX IF NOT EXISTS idx_otp_requests_phone_time
+  ON otp_requests (phone_hash, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_otp_requests_ip_time
+  ON otp_requests (ip_hash, created_at DESC);
+-- Global daily count (the spend circuit-breaker) and the purge, neither of
+-- which has a key to lead with.
+CREATE INDEX IF NOT EXISTS idx_otp_requests_time
+  ON otp_requests (created_at);
+
+-- RLS on with NO policy = deny all, same as auth_identities and
+-- user_credentials. Proof is an anon INSERT returning 42501, asserted from
+-- outside by scripts/verify-otp-send.ts.
+ALTER TABLE otp_requests ENABLE ROW LEVEL SECURITY;

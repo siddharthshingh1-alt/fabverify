@@ -1303,3 +1303,150 @@ export async function checkDatabaseConnection(): Promise<void> {
 
   if (error) throw error;
 }
+
+// ── OTP REQUEST THROTTLE (chunk 2.6c) ──────────────────────────────────
+
+/**
+ * THE OTP SEND COUNTER. Backs the throttle in otpThrottle.server.ts.
+ *
+ * ⚠️ THIS FILE STORES HASHES AND NEVER SEES A PHONE NUMBER. Callers pass
+ * `phoneHash` / `ipHash` already computed under the server-only key in
+ * otpThrottle.server.ts. Keeping the hashing OUT of db.ts is deliberate: it
+ * keeps the key out of the data layer, and it means an accidental
+ * `select("*")` on otp_requests discloses nothing reversible.
+ *
+ * ⚠️ EVERY READ AND THE WRITE THROW ON FAILURE — decision D3, 2026-08-22,
+ * signed off explicitly. This is the FAIL-CLOSED half of the chunk: if the
+ * counter cannot be read, the route answers 503 and sends NO SMS. The
+ * alternative (swallow the error and allow the send, like db.ts's ~14 legacy
+ * `if (error) return []` sites) would mean any database blip turns the
+ * platform into an unthrottled SMS cannon — an attacker would not even need
+ * to cause the outage, only to wait for one. Same reasoning as
+ * getUserCredential, applied to a spend and abuse control instead of an
+ * authorisation decision.
+ * ⚠️ THE ACCEPTED COST, STATED PLAINLY: during a database outage nobody can
+ * request an OTP, and for accounts with no password OTP is the only way in.
+ * That outage already 503s the rest of the app, and 503 "retry" is honest.
+ */
+
+/**
+ * Timestamps of recent requests for ONE key — a phone hash or an IP hash.
+ *
+ * Returns the raw `created_at` strings rather than a count because the caller
+ * needs THREE different windows (cooldown, hourly, daily) from one read.
+ * Counting server-side would cost three round trips to answer one question.
+ *
+ * ⚠️ EXACTLY ONE OF phoneHash / ipHash MUST BE SET. Both would silently AND
+ * the filters together and count almost nothing — a throttle that never
+ * throttles, passing every test written with a single key.
+ */
+export async function getOtpRequestTimes(
+  filter: { phoneHash: string; ipHash?: never } | { ipHash: string; phoneHash?: never },
+  sinceIso: string
+): Promise<string[]> {
+  let query = supabaseAdmin
+    .from("otp_requests")
+    .select("created_at")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    // A bound, not a limit on correctness: every window cap is far below this,
+    // so the arithmetic is unaffected, but a hot key cannot pull an unbounded
+    // row set into a lambda.
+    .limit(200);
+
+  query =
+    filter.phoneHash !== undefined
+      ? query.eq("phone_hash", filter.phoneHash)
+      : query.eq("ip_hash", filter.ipHash as string);
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+  return (data ?? []).map((row) => row.created_at as string);
+}
+
+/**
+ * How many codes the whole platform has sent since `sinceIso` — the global
+ * spend circuit-breaker.
+ *
+ * `head: true` with an exact count so no rows cross the wire; this is the one
+ * query with no key to narrow it and it must not scale with volume.
+ */
+export async function countOtpRequestsSince(sinceIso: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("otp_requests")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", sinceIso);
+
+  if (error) throw error;
+  // ⚠️ `?? 0` is NOT a swallowed failure — `error` is already handled above.
+  // PostgREST can return a null count for a successful head request, and
+  // treating that as "unknown" would fail the request; treating it as 0 is
+  // correct because the error branch owns every real fault.
+  return count ?? 0;
+}
+
+/**
+ * Record one accepted request.
+ *
+ * ⚠️ AWAITED AND WRITTEN *BEFORE* THE PROVIDER IS CALLED. Two reasons, both
+ * learned elsewhere in this project:
+ *   · Vercel may freeze the function once the response is sent, so a
+ *     fire-and-forget write sometimes vanishes — [I25] recorded exactly this
+ *     for the lockout counter, and a counter that silently drops writes is a
+ *     throttle that never throttles. `waitUntil` would fix it and is
+ *     platform-specific, which CORE T2 rules out.
+ *   · Writing first means an SMS is never sent UNRECORDED. The cost is that a
+ *     provider failure still consumes quota, which is the safe direction: the
+ *     opposite ordering lets a caller burn sends for free whenever the
+ *     provider is flaky.
+ */
+export async function recordOtpRequest(params: {
+  phoneHash: string;
+  ipHash: string | null;
+  purpose: string;
+}): Promise<void> {
+  const { error } = await supabaseAdmin.from("otp_requests").insert({
+    phone_hash: params.phoneHash,
+    ip_hash: params.ipHash,
+    purpose: params.purpose,
+  });
+
+  if (error) throw error;
+}
+
+/**
+ * Opportunistic retention sweep, run alongside a write.
+ *
+ * ⚠️ THE ONE FUNCTION HERE THAT MUST NEVER THROW, and the asymmetry is the
+ * point. Reading the counter is a security decision, so it fails closed;
+ * DELETING OLD ROWS IS HOUSEKEEPING, and letting it fail closed would mean a
+ * permissions or timeout problem on a cleanup query blocks logins for every
+ * user. It logs and returns.
+ *
+ * No cron and no background job: there is no scheduler that survives the
+ * [A12] move, and vendor scheduling carrying behaviour is ruled out by
+ * MIGRATION.md §5 / CORE T2. The sweep rides on traffic instead — which is
+ * sufficient because the table only grows when there IS traffic.
+ */
+export async function purgeOldOtpRequests(cutoffIso: string): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("otp_requests")
+      .delete()
+      .lt("created_at", cutoffIso);
+
+    if (error) console.error("[otp] retention sweep failed (non-fatal):", error.message);
+  } catch (error) {
+    console.error("[otp] retention sweep threw (non-fatal):", getErrorMessageLocal(error));
+  }
+}
+
+/** Local, tiny: apiError.ts imports NextResponse and must not be pulled in here. */
+function getErrorMessageLocal(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "Unknown error";
+}
