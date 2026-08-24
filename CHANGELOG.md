@@ -6,6 +6,30 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-24 · chunk 2.6c] — OTP request hardening: the send moves server-side, gets throttled, and the timing floor turns out to have been inert
+
+> **PRODUCTION-PROVEN, not merely built.** The chunk's code was written 2026-08-22 and parked in a WIP safety commit (`b6ca242`) that explicitly disclaimed being done. This entry is the real landing: the table exists, the suites are green, and the whole path was exercised on a real LAN production build against a real Twilio send.
+
+### Added
+- `app/api/auth/otp/send/route.ts` — the OTP send now runs on our server instead of browser-direct against Supabase. Shape rejections are 400 and happen before the provider is ever called.
+- `app/lib/otpThrottle.server.ts` — HMAC-keyed phone/IP hashing plus the throttle decision. The key is **derived** from `SESSION_TOKEN_SECRET` (`fabverify/otp-throttle-hash/v1`), so there is no second secret to deploy or lose, and the module refuses to load without it.
+- `app/lib/otpPolicy.ts` — browser-safe constants: 45 s cooldown, 5/hr + 10/day per number, 20/hr + 60/day per IP, 500/day global, 48 h retention, the reset timing floor.
+- `otp_requests` table (`supabase/migrations/004_otp_requests.sql`), created by hand in the Supabase SQL Editor. **RLS deny-all proven from outside** — an anon `INSERT` returns `42501`. No FK to `users` by design: counting requests for numbers with no account is the entire point.
+- `scripts/verify-otp-send.ts` — 56 assertions, including a section [0] safety guard that **refuses to run against a production build**, where the same requests would send real SMS.
+
+### Changed
+- **`OTP_RESET_FLOOR_MS`: 2000 → 6000.** See Fixed below — this is the substantive finding of the chunk.
+- The reset suite's **G4 was inverted, not deleted** (matching how G1/G2 were inverted when 2.6c landed). It now asserts the floor clears the recorded ceiling, so *lowering the constant* goes red — which a comment-only marker would not have caught.
+- Verification suites no longer wipe the whole `user_credentials` table; both are scoped to their own accounts. A routine run on 2026-08-22 had destroyed the founder's real enterprise password and it went unnoticed for two days.
+
+### Fixed
+- ⚠️ **THE D4 TIMING FLOOR WAS INERT, AND HAD BEEN SINCE IT WAS WRITTEN.** The value 2000 was chosen before the provider leg could be measured — localhost never calls it, because the A10 browser bypass and the server's `isProductionRuntime` gate both short-circuit first. Measured in production: a registered reset runs **4722 ms** end to end (throttle check 2981 ms / record + send 1741 ms), unknown-number refusals run 2011–2928 ms, the raw provider refusal leg is 352 ms median. **At 2000 the sleep never fired at all** on the send path — `remaining` went negative — so the floor masked nothing and left roughly **1800–3200 ms of existence-dependent signal exposed.** Now 6000, re-proven to bind: the fastest reset path measures 6008 ms, pinned to the floor rather than to the work. Section [G]'s registered/unknown delta fell to **1.2 ms against a 39.3 ms jitter bar** (was 3.4 ms against 997.8 ms). Decisions **[I30]**, **[I31]**.
+- Two status documents that had gone stale in the *opposite* direction from the 2.8a incident below: TASKS.md's ⏸️ PAUSED block and CURRENT_SPRINT.md's pause block both predicted a `git status` that the WIP commit had already absorbed, and PROJECT_MEMORY.md still said `otp_requests` did not exist. **A pause record must be updated by the act that ends the pause.**
+
+### Known-open (recorded, not fixed)
+- **Chunk 2.6d — OTP send-path latency, a HARD PREREQUISITE of 2.8b.** 63% of what the floor now pads around is our own latency: `checkOtpThrottle` makes three sequential awaited round trips to Supabase Singapore. A 6 s reset is acceptable for a founder measuring it and not for a real user meeting it in the reset UI, and 2.8b is the chunk that puts this path in front of real users. ⚠️ Parallelise only the IP read and the global count — the phone read must stay first and keep its early return, or a hammered request costs three queries instead of one.
+- Repo-wide eslint is red (29 errors, all pre-existing `react-hooks` violations lit up by a plugin bump). Zero are in this chunk's files.
+
 ## [2026-08-21 · docs-only correction pass] — The docs had drifted from git. Fixed before building anything.
 
 > **No code changed. Three status documents were lying.** Chunk **2.8a** (password reset via OTP — the seam) was committed as `267271c` with **40/40 passing and ZERO markdown changes**. For the rest of that day `TASKS.md`, `CURRENT_SPRINT.md` and `PROJECT_MEMORY.md` all still listed reset as unstarted, and the **2.8a / 2.8b split existed only inside a commit message**. A session trusting the docs would have **rebuilt a proven, security-critical function from scratch** — a Prime Directive #1 violation caused by the docs, not by carelessness. Caught by reading `git log` against the 📍 STATUS line.

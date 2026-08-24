@@ -94,6 +94,10 @@ const HASH_KEY = createHmac("sha256", TOKEN_SECRET)
 const phoneHash = (last10: string) =>
   createHmac("sha256", HASH_KEY).update(`phone:${last10}`).digest("hex");
 
+/** Same independent re-derivation for the IP, mirroring hashIp's `ip:` label. */
+const ipHash = (ip: string) =>
+  createHmac("sha256", HASH_KEY).update(`ip:${ip}`).digest("hex");
+
 // ── HARNESS ──────────────────────────────────────────────────────────────
 
 let passed = 0;
@@ -136,6 +140,13 @@ async function rowsFor(last10: string): Promise<Array<Record<string, unknown>>> 
 async function deleteRowsFor(last10: string) {
   await rest(`otp_requests?phone_hash=eq.${phoneHash(last10)}`, { method: "DELETE" });
 }
+
+/** Exact row count for a table, via PostgREST's count=exact. */
+const countOf = async (table: string) => {
+  const res = await rest(`${table}?select=id`, { headers: { Prefer: "count=exact" } });
+  const range = res.headers.get("content-range");
+  return range ? Number(range.split("/")[1]) : -1;
+};
 
 type SendResponse = { status: number; body: string; retryAfter: string | null; ms: number };
 
@@ -195,7 +206,16 @@ section("[0] SAFETY GUARD — refuse to run where a real SMS could be sent");
  * here proves the server is `next dev`; anything else means it may be a
  * production build, where every send below would be real.
  */
-const devProbe = await fetch(`${BASE}/api/orders`, {
+/**
+ * ⚠️ THE `?phone=` PARAM IS LOAD-BEARING, NOT DECORATION. GET /api/orders
+ * returns 400 "phone is required" BEFORE it ever calls getVerifiedUser
+ * (app/api/orders/route.ts:18-20), so a probe without it answers 400 on a dev
+ * server and a production build alike — the guard would abort every run and
+ * discriminate nothing. With the param the route reaches the auth check, which
+ * is the only place the header is honoured: dev + header → 200, and a
+ * production build ignores the header entirely → 401.
+ */
+const devProbe = await fetch(`${BASE}/api/orders?phone=${REGISTERED}`, {
   headers: { "x-dev-phone": REGISTERED },
 });
 
@@ -218,6 +238,27 @@ if (!isDevServer) {
 // Start from a clean slate so a previous run's rows cannot satisfy or break a
 // limit here.
 for (const phone of ALL_TEST_PHONES) await deleteRowsFor(phone);
+
+/**
+ * ⚠️ BLAST RADIUS IS MEASURED AS A DELTA, NOT AGAINST A PINNED NUMBER.
+ *
+ * Section [H] used to assert `user_credentials === 1 (the founder's password)`.
+ * That literal was already false when this chunk was verified: a sibling suite
+ * had deleted the row two days earlier with an unfiltered wipe, so [H] failed
+ * while reporting nothing about THIS chunk — which is the only thing it exists
+ * to check. Same class of mistake as F6's NULL and G3's latency budget.
+ *
+ * The property is "2.6c touches neither table", and a before/after comparison
+ * states exactly that — at any row count, including zero.
+ */
+const BASELINE = {
+  auth_identities: await countOf("auth_identities"),
+  user_credentials: await countOf("user_credentials"),
+};
+console.log(
+  `        baseline — auth_identities: ${BASELINE.auth_identities}, ` +
+    `user_credentials: ${BASELINE.user_credentials}`
+);
 
 // ─────────────────────────────────────────────────────────────────────────
 section("[A] THE TABLE AND ITS RLS — proven from OUTSIDE the SQL editor");
@@ -607,10 +648,59 @@ check(
   phoneHash(HASH_TARGET) !== phoneHash(TIMING_TARGET)
 );
 check("F5 the purpose is recorded", stored[0]?.purpose === "login", String(stored[0]?.purpose));
+/**
+ * ⚠️ THE SECURITY PROPERTY, NOT A LITERAL ABOUT ONE ENVIRONMENT.
+ *
+ * This assertion used to read "no IP header on localhost → ip_hash is NULL".
+ * That premise was stale rather than wrong-headed: Next.js 16's dev server
+ * DOES populate `x-forwarded-for` (with `::1`), so the route correctly hashed
+ * an IP it genuinely observed and the check failed on working code. Pinning a
+ * literal about the environment into a security assertion is the same mistake
+ * [I26] recorded for timing numbers — the environment moves and the assertion
+ * turns into a false-failure generator.
+ *
+ * What actually matters is the property the NULL branch exists to protect:
+ * a stored ip_hash is either genuinely absent, or the keyed hash of the IP
+ * that was really observed — NEVER a constant that every IP-less caller shares
+ * and throttles each other through.
+ */
+const observedIpHash = stored[0]?.ip_hash;
 check(
-  "F6 no IP header on localhost → ip_hash is NULL, not a shared sentinel bucket",
-  stored[0]?.ip_hash === null,
-  String(stored[0]?.ip_hash)
+  "F6 ip_hash is NULL, or the keyed hash of an OBSERVED ip — never a shared sentinel",
+  observedIpHash === null ||
+    (typeof observedIpHash === "string" && /^[0-9a-f]{64}$/.test(observedIpHash)),
+  observedIpHash === null ? "null (no IP observed)" : String(observedIpHash).slice(0, 16) + "…"
+);
+
+/**
+ * The positive half: feed the route an IP we choose and prove the stored value
+ * is the keyed hash OF THAT IP. A sentinel bucket cannot pass this — it would
+ * be the same string whatever we sent — and neither could a raw or unkeyed
+ * value.
+ */
+const IP_A = "203.0.113.7";
+const IP_B = "203.0.113.8";
+await deleteRowsFor(HASH_TARGET);
+await send(HASH_TARGET, "login", { "x-forwarded-for": IP_A });
+const ipRowA = (await rowsFor(HASH_TARGET))[0];
+
+check(
+  "F7 the stored ip_hash is the KEYED hash of the observed IP — re-derived independently",
+  ipRowA?.ip_hash === ipHash(IP_A),
+  "matches HMAC(key, `ip:` + the IP we sent)"
+);
+check(
+  "F8 ⚠️ the RAW IP appears nowhere in the row (hashed, like the phone)",
+  !JSON.stringify(ipRowA).includes(IP_A)
+);
+
+await deleteRowsFor(HASH_TARGET);
+await send(HASH_TARGET, "login", { "x-forwarded-for": IP_B });
+const ipRowB = (await rowsFor(HASH_TARGET))[0];
+
+check(
+  "F9 ⚠️ a DIFFERENT IP lands in a DIFFERENT bucket — no shared sentinel",
+  ipRowB?.ip_hash === ipHash(IP_B) && ipRowB?.ip_hash !== ipRowA?.ip_hash
 );
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -628,7 +718,13 @@ section("[G] ⚠️ D4 TIMING — measured, not assumed");
  * and is the production run's job. Recorded as outstanding rather than
  * implied: see the reset suite's [G] section.
  */
-const SAMPLES = 5;
+/**
+ * ⚠️ NINE, NOT FIVE. A five-sample median sits one unlucky outlier away from
+ * jumping a whole round trip, which is how G2 and G4 both produced deltas that
+ * looked like signal and were not. Nine costs about a minute and makes the
+ * medians stable enough that the jitter bar below means something.
+ */
+const SAMPLES = 9;
 
 async function timeSeries(phone: string, purpose: string): Promise<number[]> {
   const times: number[] = [];
@@ -661,35 +757,95 @@ check(
   Math.min(...resetKnownTimes, ...resetUnknownTimes) >= OTP_RESET_FLOOR_MS,
   `fastest reset: ${Math.min(...resetKnownTimes, ...resetUnknownTimes).toFixed(1)} ms`
 );
+/**
+ * ⚠️ THE THRESHOLD IS MEASURED, NOT PINNED — [I26]'s lesson applied to timing.
+ *
+ * This read `< 100` and failed on a delta of ~208 ms. That 208 ms is NOT an
+ * existence signal: the control run (two numbers that BOTH have no account)
+ * produced the same ~208 ms, and the sign flips between runs. It is a bimodal
+ * Supabase round trip — the link to Singapore delivers ~2.5 s or ~2.7 s, and
+ * with a handful of samples the median lands on either mode.
+ *
+ * A hardcoded millisecond budget in a security assertion is a false-failure
+ * generator: it encodes one machine's network on one day. So the bar is the
+ * run's OWN observed jitter. A between-group difference smaller than the
+ * within-group spread carries no information about which group you are in —
+ * which is exactly the property being claimed.
+ *
+ * ⚠️ THIS CAN ONLY EVER BE A SMOKE TEST, and G4 in the reset suite says so.
+ * Localhost never calls the provider, so the leg that could actually differ by
+ * account existence does not run here at all.
+ */
+const spread = (v: number[]) => Math.max(...v) - Math.min(...v);
+const resetJitter = Math.max(spread(resetKnownTimes), spread(resetUnknownTimes));
+const resetDelta = Math.abs(mResetKnown - mResetUnknown);
+
+console.log(`        within-group jitter (the bar): ${resetJitter.toFixed(1)} ms`);
+
 check(
-  "G2 ⚠️ registered and unknown resets are indistinguishable by time (locally)",
-  Math.abs(mResetKnown - mResetUnknown) < 100,
-  `delta ${Math.abs(mResetKnown - mResetUnknown).toFixed(1)} ms`
+  "G2 ⚠️ registered/unknown reset delta is within this run's own jitter (no signal)",
+  resetDelta <= resetJitter,
+  `delta ${resetDelta.toFixed(1)} ms vs jitter ${resetJitter.toFixed(1)} ms`
 );
+
+/**
+ * ⚠️ ASSERTS THE CODE PATH, NOT A LATENCY NUMBER.
+ *
+ * This read `mLoginKnown < OTP_RESET_FLOOR_MS` and failed at 2717 ms — not
+ * because login was floored, but because the real work (up to five sequential
+ * Supabase round trips) is SLOWER than the 2000 ms floor on this machine. The
+ * floor is currently inert locally; a latency comparison therefore tests the
+ * network, not the branch.
+ *
+ * The claim worth defending is structural: the floor is applied to `reset` and
+ * to nothing else. That is true or false in the source, at any latency.
+ */
 check(
-  "G3 login/signup are NOT floored — a proven path is not slowed down",
-  mLoginKnown < OTP_RESET_FLOOR_MS,
-  `${mLoginKnown.toFixed(1)} ms`
+  "G3 login/signup are NOT floored — the floor early-returns for every non-reset purpose",
+  /purpose\s*!==\s*["']reset["']\s*\)\s*return\s+response/.test(routeCode),
+  "asserted on comment-stripped source, not on a latency number"
 );
+/**
+ * ⚠️ SAME SELF-CALIBRATING BAR AS G2, AND FOR A SHARPER REASON.
+ *
+ * G4 measures the UNFLOORED path, so unlike the reset cells it has no floor
+ * absorbing round-trip variance — it is exposed to the full jitter of the link
+ * and is the assertion most likely to false-fail on a fixed budget. It did:
+ * `< 100` failed on a 228 ms delta the day the network happened to be fast
+ * enough for the floor to start binding.
+ *
+ * A control run settles what that 228 ms was: on the login path, registered vs
+ * unknown differed by 15 ms while two numbers that BOTH have no account
+ * differed by 22 ms, against a within-group spread of 485 ms. The delta is a
+ * five-sample median moving inside the noise, not an account fact — and it
+ * cannot be one, because nothing on this path reads `users`:
+ * sendOtpServerSide returns at the isProductionRuntime gate before the
+ * provider, for registered and unknown numbers alike.
+ */
+const loginJitter = Math.max(spread(loginKnownTimes), spread(loginUnknownTimes));
+const loginDelta = Math.abs(mLoginKnown - mLoginUnknown);
+
 check(
-  "G4 login: registered vs unknown are also indistinguishable by time",
-  Math.abs(mLoginKnown - mLoginUnknown) < 100,
-  `delta ${Math.abs(mLoginKnown - mLoginUnknown).toFixed(1)} ms`
+  "G4 login: registered/unknown delta is within this run's own jitter (no signal)",
+  loginDelta <= loginJitter,
+  `delta ${loginDelta.toFixed(1)} ms vs jitter ${loginJitter.toFixed(1)} ms`
 );
 
 // ─────────────────────────────────────────────────────────────────────────
 section("[H] BLAST RADIUS — the tables this chunk must not touch");
 
-const countOf = async (table: string) => {
-  const res = await rest(`${table}?select=id`, { headers: { Prefer: "count=exact" } });
-  const range = res.headers.get("content-range");
-  return range ? Number(range.split("/")[1]) : -1;
-};
+const authIdentitiesAfter = await countOf("auth_identities");
+const userCredentialsAfter = await countOf("user_credentials");
 
-check("H1 auth_identities is untouched (still 1)", (await countOf("auth_identities")) === 1);
 check(
-  "H2 user_credentials is untouched (still 1 — the founder's password)",
-  (await countOf("user_credentials")) === 1
+  "H1 auth_identities is untouched by this chunk",
+  authIdentitiesAfter === BASELINE.auth_identities,
+  `${BASELINE.auth_identities} → ${authIdentitiesAfter}`
+);
+check(
+  "H2 user_credentials is untouched by this chunk",
+  userCredentialsAfter === BASELINE.user_credentials,
+  `${BASELINE.user_credentials} → ${userCredentialsAfter}`
 );
 
 // ─────────────────────────────────────────────────────────────────────────

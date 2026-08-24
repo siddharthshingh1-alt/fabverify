@@ -156,51 +156,39 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 **DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.7 · 2.8a** (2.0+2.1 on 2026-08-06; 2.2–2.5a on 2026-08-08; 2.7 on 2026-08-20; **2.5b + 2.6a + 2.6b on 2026-08-21**; **2.8a on 2026-08-21, commit `267271c`**)
 **✅ PASSWORD LOGIN IS LIVE AND PRODUCTION-PROVEN (2026-08-21).** A real password login on the founder’s enterprise account reached the dashboard with real data, on the LAN production build. The mandatory set-password gate was verified separately on localhost: forced redirect, abandon-and-return, no loop, error-then-retry.
 **✅ RESET LOGIC EXISTS TOO — 2.8 WAS SPLIT INTO 2.8a (seam, DONE) + 2.8b (route + UI, NOT BUILT).** See the 2.8a / 2.8b entries below.
-**NEXT: 2.6c — OTP REQUEST HARDENING. 🟡 IN PROGRESS, PAUSED MID-CHUNK 2026-08-22.** Then 2.8b (reset route + UI + production test), then 2.9 (docs sweep).
+**✅ 2.6c IS DONE AND PRODUCTION-PROVEN (2026-08-24).** OTP request hardening: the send is server-side, throttled, enumeration-uniform, and the D4 timing floor is now MEASURED (4722 ms ceiling) and BINDING (6000 ms). Suites 56/56 · 42/42 · 38/38. Proven on the real LAN production build: SMS arrives · `verifyOtp` still succeeds after the server-side send change · set-password gate · password login · OTP fallback · throttle refuses the repeat.
+**NEXT: 2.6d — OTP SEND-PATH LATENCY. 🔴 NOT STARTED, and it is a HARD PREREQUISITE OF 2.8b** (a 6 s reset must not reach real users). Then 2.8b (reset route + UI + production test), then 2.9 (docs sweep).
 
-> ## ⏸️ PAUSED HERE — READ THIS FIRST, THEN `git status`
+> ## ✅ 2.6c IS DONE AND PRODUCTION-PROVEN (2026-08-24) — this block was the PAUSE record, kept inverted
 >
-> **⚠️ THE 2.6c CODE IS WRITTEN AND IS *UNCOMMITTED WORKING-TREE STATE*. `git log` SHOWS NOTHING FOR IT, AND THAT IS CORRECT — it is not committed because it is not yet proven.** This is the *inverse* of the 2.8a doc-drift below: there, git had code the docs denied; here, the docs describe code git does not have. Both are only safe while the discrepancy is stated, which is what this block is for.
+> **⚠️ THIS BLOCK USED TO SAY "PAUSED HERE" AND TO PREDICT A `git status` OF 7 MODIFIED + 3 DOCS + 5 UNTRACKED. THAT PREDICTION WENT STALE THE MOMENT THE WIP COMMIT LANDED, AND A SESSION ON 2026-08-24 WAS BRIEFLY ALARMED BY THE MISMATCH.** The files it listed are not missing — they are **inside `b6ca242`**. Inverted rather than deleted, in the same style as the reset suite's G1/G2/G4 cells: a deleted warning leaves no trace that the trap existed.
 >
-> **⚠️ DO NOT REBUILD IT. `git status` is the check that takes one second — expect exactly this:**
-> - **7 modified, code:** `authProvider.ts` · `authProvider.server.ts` · `db.ts` · `login/page.tsx` · `signup/page.tsx` · `verify-password-reset.ts` · `supabase/schema.sql`
-> - **3 modified, docs (this pause record itself):** `TASKS.md` · `CURRENT_SPRINT.md` · `PROJECT_MEMORY.md`
-> - **5 untracked:** `app/api/auth/otp/send/route.ts` · `app/lib/otpPolicy.ts` · `app/lib/otpThrottle.server.ts` · `scripts/verify-otp-send.ts` · `supabase/migrations/004_otp_requests.sql`
+> ⚠️ **THE LESSON, WHICH IS A NEW ONE:** a resume block that describes an expected `git status` is only true until the next commit. **A pause record must be updated by the act that ends the pause** — otherwise it becomes a second source of drift pointing the opposite way from the 2.8a incident below. There, git had code the docs denied; here, the docs described a working tree git had already absorbed.
 >
-> **If those are gone, the work is gone** — nothing was stashed and nothing was committed.
+> ### WHAT WAS ACTUALLY DONE, IN ORDER
+> - ✅ **STEP 1 — the `otp_requests` table was created by hand** in the Supabase SQL Editor (founder, 2026-08-23/24). Confirmed live: an anon `SELECT` returns `200`, an anon `INSERT` returns **`42501`** — RLS deny-all, proven from outside against PostgREST with the anon key, not from the SQL Editor (which bypasses RLS and can never prove it).
+> - ✅ **STEP (b) — the throttle suite runs and passes: `scripts/verify-otp-send.ts` 56/56.**
+> - ✅ **STEP (c)+(d) — THE PRODUCTION OTP TEST WAS RUN ON THE REAL LAN PRODUCTION BUILD** on the founder's Twilio-verified number. Proven end to end: the real server→Supabase send works · the SMS arrives · **`verifyOtp` still succeeds even though the send no longer creates a pre-verification session in the browser** (the one genuinely risky behaviour change in this chunk — `login/page.tsx:68-76` was written around that stray session existing) · the [I27] set-password gate fired · a new password was set · the dashboard loaded with real data · password login works · OTP fallback works · **the throttle refused the repeat request**.
+> - ✅ **STEP (c) — THE D4 TIMING RESIDUAL IS MEASURED AND CLOSED.** See the block below; it is the one place this chunk's plan turned out to be wrong.
+> - ✅ **STEP (e) — committed.** That is this chunk's real commit, not `b6ca242`.
 >
-> **ALREADY GREEN (2026-08-22):** `npm run build` clean exit 0 with `/api/auth/otp/send` in the route manifest · `tsc --noEmit` silent · eslint 0 errors (2 warnings, both pre-existing — confirmed by stashing) · **2.8a reset 42/42 with section [G] INVERTED, not deleted** (G1/G2 now assert the send is server-side and throttled; G3 asserts reset can never create an account; G4 is the new fails-when-fixed gap) · regressions 2.2 **42/42** · 2.5a **37/37** · 2.7 **51/51** · 2.5b **54/54 + 72/72**.
+> ### 🔴 THE D4 FINDING — THE FLOOR WAS INERT, AND THE PLAN'S VALUE WAS WRONG
+> The plan assumed 2000 ms was "a conservative starting point". **Measured against production on 2026-08-24 it was not conservative — it was inert.**
 >
-> ### 🛑 STEP 1 — CREATE THE TABLE (founder does this by hand; it is the blocker)
-> There is **no direct Postgres connection in `.env.local`** and PostgREST cannot run DDL, so this is a Supabase SQL Editor paste, exactly as chunks 1.2 and 2.1 were. Full file with commentary, STEP 2 verify queries and STEP 3 rollback proofs: **`supabase/migrations/004_otp_requests.sql`**. The statements:
+> | leg | measured |
+> |---|---|
+> | registered reset, end to end (real Twilio send) | **4722 ms** ← the ceiling |
+> | · throttle check — 3 sequential DB round trips | 2981 ms (**63%**) |
+> | · record write + provider send | 1741 ms (37%) |
+> | unknown-number refusal, end to end (n=10) | 2011–2928 ms |
+> | raw provider refusal leg (n=12) | 352 ms median, 1562 ms max |
 >
-> ```sql
-> CREATE TABLE IF NOT EXISTS otp_requests (
->   id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
->   phone_hash  TEXT NOT NULL,
->   ip_hash     TEXT,
->   purpose     TEXT NOT NULL DEFAULT 'login',
->   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-> );
+> At 2000 ms the sleep **never fired at all** on the send path — the work already exceeded the floor, `remaining` went negative — so it masked nothing and left roughly **1800–3200 ms of existence-dependent signal exposed**. 4 of 10 refusals also ran over.
+> **`OTP_RESET_FLOOR_MS` is now 6000**, set from that evidence and re-proven to BIND: the fastest reset path now measures 6008 ms, i.e. pinned to the floor rather than to the work. Suite section [G] tightened accordingly — the registered/unknown reset delta fell to **1.2 ms against a 39.3 ms jitter bar** (was 3.4 ms against 997.8 ms).
+> ⚠️ **The reset suite's G4 was INVERTED, not deleted** — it was authored as a fails-when-fixed tripwire and it fired exactly as designed. It now asserts the constant clears the measured ceiling, so *lowering the number* goes red, which a comment-only marker would not catch.
 >
-> CREATE INDEX IF NOT EXISTS idx_otp_requests_phone_time
->   ON otp_requests (phone_hash, created_at DESC);
-> CREATE INDEX IF NOT EXISTS idx_otp_requests_ip_time
->   ON otp_requests (ip_hash, created_at DESC);
-> CREATE INDEX IF NOT EXISTS idx_otp_requests_time
->   ON otp_requests (created_at);
->
-> ALTER TABLE otp_requests ENABLE ROW LEVEL SECURITY;
->
-> NOTIFY pgrst, 'reload schema';
-> ```
-> ⚠️ **ONE STATEMENT PER BLOCK if you want to read the STEP 2 verify output** — the SQL Editor returns only the LAST result set, which is what made a correct `policy_count = 0` look like RLS being off in chunk 2.1.
->
-> ### THEN, IN ORDER
-> **(b) Run the throttle suite.** `npm run dev` in one terminal, then `node --conditions=react-server --import ./scripts/register-ts-resolve.mjs scripts/verify-otp-send.ts`. ⚠️ Its section [0] **refuses to run against a production build** — under `next dev` the provider is short-circuited so no SMS is possible; against `next start` the same requests would send REAL SMS to real numbers. Sections: [A] RLS proven by an anon INSERT → 42501 · [W] wiring, asserted on **comment-stripped source** (the seam describes the call it removed, so raw text lies) · [B] shape · [C] enumeration uniformity · [D] throttle · [E] fail-closed, subprocess with a cold module graph · [F] no raw phone stored · [G] the D4 timing measurement · [H] blast radius · [Z] cleanup.
-> **(c) The D4 timing measurement.** Section [G] measures what localhost CAN measure — that our own work is uniform and the reset floor is applied. ⚠️ **The provider leg cannot be measured locally at all** (the A10 bypass and the NODE_ENV gate both return before it), so the send-vs-refuse residual is the production run's job, and G4 in the reset suite asserts it is still outstanding.
-> **(d) The production OTP test — founder runs this hands-on.** `npm run build && npm start` + the LAN IP (**re-confirm with `Get-NetIPAddress`; it is DHCP and has changed twice**), on the founder's number, the only Twilio-verified caller ID. Proves: the real server→Supabase send works · the SMS still arrives · **browser `verifyOtp` still succeeds even though the send no longer creates a pre-verification session in the browser** (a real behaviour change — `login/page.tsx:68-76` was written around that stray session existing) · the throttle behaves against the real provider.
-> **(e) THEN commit.** Not before. Build + all suites + the production run.
+> ### ⚠️ WHAT THIS BOUGHT AND WHAT IT COST — READ BEFORE 2.8b
+> **63% of what the floor now pads around is OUR OWN LATENCY, not the provider.** `checkOtpThrottle` makes three SEQUENTIAL awaited round trips to Singapore on the accepted path (`otpThrottle.server.ts:184, 208, 228`). The security property is closed; the speed is not. **A 6 s reset is acceptable for a founder testing it and NOT acceptable for real users** — which is why the latency chunk below is a HARD PREREQUISITE of 2.8b rather than a nice-to-have. Deliberately kept OUT of this chunk: mixing a performance refactor of security-critical code into the commit that proves a security property is scope creep in the most expensive place.
 >
 > ### ⚠️ THREE DECISIONS TAKEN INSIDE THE APPROVED PLAN — re-read before extending the code
 > 1. **The HMAC key is DERIVED from `SESSION_TOKEN_SECRET`** (`fabverify/otp-throttle-hash/v1`), not a new env var — no second secret to deploy or lose, cryptographically independent, fails closed at module load. Rotating that secret resets the counters (harmless: 48h retention).
@@ -408,8 +396,8 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - ⚠️ **DISCREPANCY RECORDED, NOT SMOOTHED OVER:** the browser gate test's final step reported a successful password set, but **no credential row for that account existed when checked minutes later.** The write path was then proven working directly. So the gate's ROUTING is confirmed by observation and the WRITE by the HTTP suite plus the production enterprise set — **but that particular browser write was never corroborated by a row. Cause unknown.** Do not let this quietly become "verified" without a row.
   - ⚠️ **THIS IS ALSO WHAT COVERS NEW-USER SIGNUP** — see the note under 2.9. Covered structurally; **not separately production-verified.**
 
-- [~] **CHUNK 2.6c — OTP request hardening: move the SEND server-side, then throttle it.** 🟡 MEDIUM. **🛑 NOW A HARD PREREQUISITE OF 2.8b, not only of 2.6.**
-  - ⏸️ **CODE WRITTEN 2026-08-22 AND *UNCOMMITTED*. NOT DONE, NOT PROVEN, NOT COMMITTED — see the ⏸️ PAUSED HERE block under the 📍 M10 STATUS line above for the resume checklist and the STEP 1 SQL.** Decisions D1–D6 locked with the founder before any code was written.
+- [x] **CHUNK 2.6c — OTP request hardening: move the SEND server-side, then throttle it. ✅ DONE AND PRODUCTION-PROVEN 2026-08-24.** 🟡 MEDIUM. **🛑 WAS A HARD PREREQUISITE OF 2.8b — now satisfied.**
+  - ✅ **CODE WRITTEN 2026-08-22 (`b6ca242`, a WIP safety commit that explicitly disclaimed being done), TABLE CREATED BY HAND 2026-08-23/24, PROVEN AND COMMITTED 2026-08-24.** Decisions D1–D6 locked with the founder before any code was written. **The `otp_requests` table EXISTS and its RLS is deny-all, proven by an anon `INSERT` returning `42501`.** Full record in the ✅ block under the 📍 M10 STATUS line above — including the D4 finding, which is the one place the plan was wrong.
   - **WHAT EXISTS IN THE WORKING TREE (12 files).** *New:* `supabase/migrations/004_otp_requests.sql` (the throttle counter — hashed phone, no FK to `users`, RLS deny-all) · `app/lib/otpPolicy.ts` (browser-safe constants: 45s cooldown, 5/hr + 10/day per number, 20/hr + 60/day per IP, 500/day global, 48h retention, the reset floor) · `app/lib/otpThrottle.server.ts` (HMAC hashing + the decision, `import "server-only"`) · `app/api/auth/otp/send/route.ts` · `scripts/verify-otp-send.ts`. *Modified:* `db.ts` (+4 functions) · `authProvider.server.ts` (+`sendOtpServerSide`) · `authProvider.ts` (`sendOtp` posts to the route) · `login/page.tsx` + `signup/page.tsx` (D6: `RESEND_SECONDS` hoisted) · `verify-password-reset.ts` (section [G] inverted) · `supabase/schema.sql`.
   - ⚠️ **THE SEND'S RETURN TYPE IS UNCHANGED, AND THAT IS THE SAFETY PROPERTY.** Every failure the route can produce maps back onto the existing `SendOtpResult` union, so neither page grew a branch and the WhatsApp/waitlist fallback is untouched. `verifyOtp` was not touched at all — the proven verify path is disjoint from this chunk.
   - ⚠️ **ONE REAL BEHAVIOUR CHANGE, ON THE PRODUCTION TEST LIST RATHER THAN ASSUMED:** with phone confirmations off, `signInWithOtp` creates a Supabase session *before* the code is verified, and `login/page.tsx:68-76` was written to detect and clear exactly that stray session. Sending from the server means it is never created in the browser at all. Almost certainly an improvement; browser `verifyOtp` does not need it. **Confirm it in the production run.**
@@ -470,7 +458,19 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   - ⚠️ **NOT CLOSED — the epoch bump evicts *OUR* tokens ONLY.** Supabase sessions do not carry our epoch, so **a stolen Supabase session SURVIVES a reset** — and every OTP login still mints one. **Never describe reset as "ends all existing sessions" without that qualifier.**
   - **Depends on:** 2.5b, 2.7. **Blocks:** 2.8b.
 
-- [ ] **CHUNK 2.8b — The reset route + UI, then a PRODUCTION test.** 🟡 MEDIUM. **🛑 DO NOT START BEFORE 2.6c.**
+
+- [ ] **CHUNK 2.6d — OTP send-path latency: parallelise the sequential Supabase round trips.** 🟡 MEDIUM. **🛑 HARD PREREQUISITE OF 2.8b — do not ship the reset UI before this.**
+  - **WHY THIS EXISTS, AND WHY IT IS A SEPARATE CHUNK.** 2.6c closed the D4 timing leak by raising `OTP_RESET_FLOOR_MS` from 2000 → **6000**, set from a real production measurement of a **4722 ms** ceiling. That is the correct *security* answer and it BINDS (proven: fastest reset path 6008 ms). But **63% of the padded time is our own latency, not the provider's** — measured at **2981 ms of 4722 ms**. The floor is currently paying for our slowness with the user's time.
+  - ⚠️ **THE SECURITY PROPERTY IS ALREADY CLOSED. THIS CHUNK IS PURELY PERFORMANCE**, and it was deliberately kept out of 2.6c: folding a refactor of security-critical code into the commit that *proves* a security property is scope creep in the most expensive possible place.
+  - ⚠️ **WHY IT GATES 2.8b RATHER THAN BEING OPTIONAL.** A 6-second wait after tapping "send reset code" is acceptable for a founder measuring it and **not** acceptable for a real user meeting it in the reset UI — and 2.8b is precisely the chunk that puts this path in front of real users. Fix the speed BEFORE they can reach it, not after.
+  - **THE ACTUAL COST.** `checkOtpThrottle` (`otpThrottle.server.ts:184, 208, 228`) makes **three SEQUENTIAL awaited round trips** to Supabase Singapore on the accepted path: the phone read, the IP read, then the global count. `recordOtpAttempt` adds a fourth. Each is ~1 s from here.
+  - ⚠️ **THE PHONE READ MUST STAY FIRST AND MUST KEEP ITS EARLY RETURN.** It is the query the cooldown rejects on, and `checkOtpThrottle`'s comment already records why: it is *"the limit an attacker actually meets and the cheapest to reject on."* Parallelising all three would make every hammered request cost three queries instead of one — turning a throttle into an amplifier. **Parallelise only the IP read and the global count**, after the phone read has passed.
+  - ⚠️ **DO NOT WEAKEN FAIL-CLOSED (D3).** `checkOtpThrottle` throws on any DB failure and that throw becomes a 503 with no SMS sent. A `Promise.all` rejects on the first failure, which preserves this — but `Promise.allSettled` would NOT, and would quietly convert an outage into an allow. Use `Promise.all`.
+  - **THEN RE-MEASURE AND LOWER THE FLOOR.** Expect the ceiling near ~3500 ms and the floor to land ~4000. ⚠️ **The reset suite's G4 asserts the floor clears the recorded ceiling — update `MEASURED_CEILING_MS` in the same commit as the new measurement, or it goes red.**
+  - **Verify:** `verify-otp-send.ts` 56/56 (section [D] proves the limits still bind, [E] proves still fail-closed) · `verify-password-reset.ts` 42/42 · a fresh production measurement of the registered send leg · the fastest reset path still ≥ the new floor.
+  - **Depends on:** 2.6c. **Blocks:** 2.8b.
+
+- [ ] **CHUNK 2.8b — The reset route + UI, then a PRODUCTION test.** 🟡 MEDIUM. **🛑 DO NOT START BEFORE 2.6d** (2.6c is now done; 2.6d is the new gate — see below).
   - **All the logic already exists and is proven** (2.8a). What is missing is the HTTP surface and the screen: a `POST` route that is a **thin adapter in the [I28] mould — no auth logic of its own** — plus a "Forgot password?" entry point from `/login` and a request-code → enter-code+new-password flow.
   - 🛑 **2.6c IS A HARD PREREQUISITE.** This chunk publishes an unauthenticated **SMS trigger**. Without server-side, throttled, enumeration-uniform OTP sending, shipping it hands the internet a free SMS cannon pointed at arbitrary numbers. **Build 2.6c first, or build both and merge them together — do not merge 2.8b and "do 2.6c next."**
   - ⚠️ **The route must not re-open at the HTTP layer what the seam closed** ([I28] applies verbatim): `invalid-request` is one opaque failure for a wrong code, an expired code, a malformed phone and a phone with no account. `weak-password` is reachable **only after a valid OTP**. Status codes, body shapes and timing must not distinguish them.
@@ -493,6 +493,13 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
     - ⚠️ **A RESET DOES NOT EVICT A STOLEN SUPABASE SESSION.** The epoch bump evicts **our** tokens only; Supabase sessions carry no epoch, and **every OTP login still mints one**. The recovery story is therefore incomplete, and the gap is in the *docs' claims* as much as in the code. Closing it properly means retiring Supabase sessions (A12 Phase 3/4) — until then, **never write "reset ends all your sessions."**
     - ⚠️ **THE SECURITY FLOOR OF EVERY ACCOUNT IS THE PHONE NUMBER.** A SIM swap takes the account regardless of password strength, because OTP login and OTP reset both stand on it. **Already true before M10 — the password did not raise it, and nobody reading this should conclude otherwise.**
     - ⚠️ **NEW-USER SIGNUP IS COVERED STRUCTURALLY, BUT NOT PROVEN.** [I27]'s gate re-checks on every app entry in `"profile"` mode, so a fresh signup is routed to `/onboarding/password` **once onboarding has created the `users` row** (it cannot happen sooner — `user_credentials.user_id` is a NOT NULL FK, so an earlier write is a guaranteed FK violation). ⚠️ **This path has never been run end-to-end on a genuinely new account.** It is an *inference from the gate's design*, not an observation. Verify it against a real new signup before recording signup-with-password as done.
+    - ⚠️ **REPO-WIDE ESLINT IS RED: 29 ERRORS, AND NONE OF THEM ARE 2.6c.** (found 2026-08-24) `npx eslint` across the repo reports **29 errors + 11 warnings** in 28 files. **27 of the 29 are `react-hooks/set-state-in-effect`** and 2 are `react-hooks/use-memo` — rules that ship with **eslint-plugin-react-hooks v7.1.1**, the React Compiler ruleset. A dependency bump lit up pre-existing violations; **no code change caused them.**
+      - **PROVEN NOT A 2.6c REGRESSION, not assumed:** all 23 error-carrying files are **byte-identical between `f916699` (the commit before 2.6c) and `b6ca242`** — zero of them are in the chunk's changeset. Scoped to the 2.6c files, eslint gives **0 errors and exactly 2 warnings** (`authProvider.server.ts` unused `ProviderIdentity`, `db.ts` unused `_embedded`), which is what the WIP commit's "0 errors, 2 warnings" claim actually measured.
+      - ⚠️ **THE STANDARD IN `CLAUDE.md` §3 IS "BUILD PASSES CLEAN", AND REPO-WIDE LINT NO LONGER DOES.** Decide deliberately: fix the 29 (they are real React correctness smells — `set-state-in-effect` is the render-loop family), or pin the plugin, or record the ruleset as accepted-and-deferred. **Do not let "it was green before" stand in for a decision** — it was green under a different plugin version.
+      - **Not a merge blocker for 2.6c**, whose own files are clean. Sized as its own repo-hygiene chunk.
+    - ⚠️ **TWO VERIFICATION SUITES USED TO DELETE THE ENTIRE `user_credentials` TABLE, AND ONE OF THEM DESTROYED REAL DATA.** (found and fixed 2026-08-24) `verify-password-reset.ts` and `verify-login-wiring.ts` both wiped with `user_credentials?id=not.is.null`. A routine 2.8a run on **2026-08-22 deleted the founder's enterprise password** — the one set through the real screen and used for the production-proven login of 2026-08-21 — and **nobody noticed for two days**, because no assertion looks for a row the suite did not create. Discovered only because 2.6c's blast-radius check H2 expected `user_credentials = 1` and found 0.
+      - **FIXED:** both wipes are now scoped to `user_id=in.(BUYER, MAKER)`, and the three assertions that assumed whole-table ownership (`Z1` in each, `E3` in the reset suite) count only those accounts. **Proven by a bystander test:** a credential on an unrelated account survived a full run of both suites, where before it would have been deleted.
+      - ⚠️ **THE RULE THIS BUYS: a verification suite must never be able to damage a row it did not create.** `user_credentials` is the live credential store, not a scratch table, and [I27] is actively converting every account onto a password — so the blast radius of an unfiltered `DELETE` here **grows with adoption**. Audit any new suite against this before it is first run.
     - ⚠️ **2.6b's UNCORROBORATED BROWSER WRITE** — see that chunk. Routing confirmed, that particular write never matched to a row, cause unknown.
     - ⚠️ **ITEM 1 STILL OWES ONE PRODUCTION SESSION** (chunk 1.10) — closes 1.8's first execution and 1.9's miss-then-fallback branch. **Do it before merging to `main`.**
 

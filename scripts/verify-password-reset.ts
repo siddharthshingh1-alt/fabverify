@@ -80,7 +80,26 @@ async function sql(path: string, init: RequestInit = {}) {
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
-const wipe = () => sql("user_credentials?id=not.is.null", { method: "DELETE" });
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS. THIS USED TO DELETE THE WHOLE TABLE
+ * (`user_credentials?id=not.is.null`) AND IT DESTROYED REAL DATA — the
+ * founder's enterprise password, set through the real screen and used for the
+ * production-proven login of 2026-08-21, was silently wiped by a routine run
+ * of this suite on 2026-08-22. It was not noticed for two days.
+ *
+ * A verification suite must never be able to damage a row it did not create.
+ * `user_credentials` is not a scratch table: it is the live credential store,
+ * and it now holds real passwords ([I27] converts every account onto one), so
+ * an unfiltered DELETE here scales from "one founder re-sets a password" to
+ * "every user is locked out of password login".
+ *
+ * ⚠️ THE FILTER IS THE SAFETY PROPERTY — do not widen it back for convenience.
+ */
+const TEST_USER_IDS = [BUYER.id, MAKER.id];
+const TEST_ID_FILTER = `user_id=in.(${TEST_USER_IDS.join(",")})`;
+const wipe = () => sql(`user_credentials?${TEST_ID_FILTER}`, { method: "DELETE" });
+/** Rows belonging to THIS suite only — never a whole-table count. */
+const testCredentialRows = () => sql(`user_credentials?${TEST_ID_FILTER}&select=user_id`);
 const credential = async (userId: string) =>
   (await sql(
     `user_credentials?user_id=eq.${userId}&select=password_hash,token_epoch,failed_attempts,locked_until`
@@ -256,8 +275,10 @@ check(
   [...shapes][0] === JSON.stringify({ ok: false, reason: "invalid-request" })
 );
 check(
+  // Scoped to this suite's accounts: a whole-table count would be perturbed by
+  // any real credential that exists alongside the test data.
   "E3 ⚠️ an unknown phone created NO credential row",
-  (await sql("user_credentials?select=user_id")).length === 1
+  (await testCredentialRows()).length === 1
 );
 
 // ⚠️ THE POLICY MESSAGE IS BEHIND THE GATE. A weak-password reason reveals the
@@ -334,27 +355,34 @@ check(
 );
 
 /**
- * ⚠️ THE GAP THAT REPLACES THE OLD ONE — recorded in the same fails-when-fixed
- * style rather than left to decay into silence.
+ * ✅ INVERTED 2026-08-24, THE SAME WAY G1/G2 WERE INVERTED WHEN 2.6c LANDED —
+ * the gap this cell tracked is now CLOSED, so the cell asserts the closure
+ * instead of being deleted. A deleted assertion leaves no trace that the gap
+ * ever existed; an inverted one records what shut it.
  *
- * 2.6c calls the provider on EVERY reset request, so no round trip is skipped
- * for an unknown number, and holds the response to OTP_RESET_FLOOR_MS so both
- * outcomes are bounded below by the same wall. What is NOT yet known is the
- * provider's own send-vs-refuse duration: localhost never calls it (the A10
- * bypass and the NODE_ENV gate both short-circuit), so the floor's value was
- * chosen BEFORE it could be measured. If the real send leg is slower than the
- * floor, the excess is still observable.
+ * It used to assert the "not yet measured" marker was still in otpPolicy.ts,
+ * and it was written to go red the day a production measurement replaced it.
+ * It did, on 2026-08-24, against a real Twilio send on the founder's number:
  *
- * This asserts the "not yet measured" marker is still in otpPolicy.ts. Measure
- * the two legs during the 2.8b production run, set the floor from evidence,
- * update that comment — and this assertion goes red, which is the signal that
- * the gap is closed.
+ *   registered reset, end to end ... 4722 ms   ← the ceiling
+ *   unknown-number refusal ......... 2011–2928 ms (n=10)
+ *
+ * At the old floor of 2000 the sleep never fired at all on the send path —
+ * the work already exceeded it — so the floor was INERT and the send-vs-refuse
+ * residual was fully exposed. The floor is now set from that evidence.
+ *
+ * ⚠️ THE ASSERTION IS ON THE CONSTANT, NOT ONLY THE COMMENT. A doc marker
+ * alone would stay green if someone lowered the number, which is precisely the
+ * regression worth catching.
  */
+const { OTP_RESET_FLOOR_MS } = await import("../app/lib/otpPolicy.ts");
+const MEASURED_CEILING_MS = 4722;
 const otpPolicySource = readFileSync("app/lib/otpPolicy.ts", "utf8");
 check(
-  "G4 ⚠️ THE PROVIDER-LEG TIMING RESIDUAL IS STILL UNMEASURED (2.8b production run)",
-  otpPolicySource.includes("BEFORE the provider leg could be measured"),
-  "the floor BOUNDS the residual; only a production measurement CLOSES it"
+  "G4 ✅ THE PROVIDER-LEG TIMING RESIDUAL IS MEASURED, AND THE FLOOR CLEARS IT",
+  otpPolicySource.includes("PRODUCTION MEASUREMENT") &&
+    OTP_RESET_FLOOR_MS > MEASURED_CEILING_MS,
+  `floor ${OTP_RESET_FLOOR_MS}ms vs measured ceiling ${MEASURED_CEILING_MS}ms — was: 'still unmeasured, floor BOUNDS but does not CLOSE'`
 );
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -407,7 +435,10 @@ check("H3 …and never reports a successful reset during one", !childReturned.in
 
 // ── CLEANUP ──────────────────────────────────────────────────────────────
 await wipe();
-check("Z1 cleanup: no credentials left behind", (await sql("user_credentials?select=id")).length === 0);
+check(
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (await testCredentialRows()).length === 0
+);
 check("Z2 auth_identities untouched", (await sql("auth_identities?select=id")).length === 1);
 
 console.log("\n" + "=".repeat(74));

@@ -76,8 +76,26 @@ async function sql(path: string, init: RequestInit = {}) {
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS. THIS USED TO DELETE THE WHOLE TABLE
+ * (`user_credentials?id=not.is.null`). Its sibling in verify-password-reset.ts
+ * destroyed the founder's real enterprise password that way on 2026-08-22 —
+ * unnoticed for two days, because nothing asserts the absence of a row nobody
+ * is looking for.
+ *
+ * A verification suite must never be able to damage a row it did not create.
+ * `user_credentials` is the live credential store, not a scratch table, and
+ * [I27] is actively converting every account onto a password — so the blast
+ * radius of an unfiltered DELETE here grows with adoption.
+ *
+ * ⚠️ THE FILTER IS THE SAFETY PROPERTY — do not widen it back for convenience.
+ */
+const TEST_USER_IDS = [BUYER.id, MAKER.id];
+const TEST_ID_FILTER = `user_id=in.(${TEST_USER_IDS.join(",")})`;
 const wipeCredentials = () =>
-  sql("user_credentials?id=not.is.null", { method: "DELETE" });
+  sql(`user_credentials?${TEST_ID_FILTER}`, { method: "DELETE" });
+/** Rows belonging to THIS suite only — never a whole-table count. */
+const testCredentialRows = () => sql(`user_credentials?${TEST_ID_FILTER}&select=id`);
 const credentialRow = async (userId: string) =>
   (await sql(`user_credentials?user_id=eq.${userId}&select=failed_attempts,locked_until`))?.[0] ??
   null;
@@ -308,7 +326,10 @@ check(
 
 // ── CLEANUP ──────────────────────────────────────────────────────────────
 await wipeCredentials();
-check("Z1 cleanup: no credentials left behind", (await sql("user_credentials?select=id")).length === 0);
+check(
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (await testCredentialRows()).length === 0
+);
 check(
   "Z2 auth_identities untouched",
   (await sql("auth_identities?select=id")).length === 1

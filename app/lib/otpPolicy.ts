@@ -130,16 +130,33 @@ export const OTP_REQUEST_RETENTION_HOURS = 48;
  * So a reset response never returns before this many milliseconds have
  * elapsed. Both outcomes are then bounded below by the same number.
  *
- * ⚠️ HONEST LIMIT, RECORDED RATHER THAN GLOSSED: a floor only masks a
- * difference it EXCEEDS. If the real send leg is slower than this, the excess
- * is still observable. The value below is a conservative starting point chosen
- * BEFORE the provider leg could be measured — localhost never calls the
- * provider at all (both the browser dev bypass and the server's
- * isProductionRuntime gate short-circuit), so the real numbers can only come
- * from the production run. Section [G] of the reset suite asserts this is
- * still unmeasured, and that assertion is meant to fail the day it is.
+ * ⚠️ A floor only masks a difference it EXCEEDS. This value is now MEASURED
+ * against production rather than estimated — the original 2000 was chosen
+ * before the provider leg could be observed at all, and it was WRONG.
+ *
+ * PRODUCTION MEASUREMENT, 2026-08-24 (real Twilio send, founder's number, LAN
+ * production build):
+ *   registered reset, end to end ....... 4722 ms   ← the ceiling to clear
+ *     · throttle check (3 sequential DB round trips) .. 2981 ms  (63%)
+ *     · record write + provider send ................. 1741 ms  (37%)
+ *   unknown-number refusal, end to end . 2011–2928 ms (n=10)
+ *   raw provider refusal leg ........... 352 ms median, 1562 ms max (n=12)
+ *
+ * At 2000 the floor contributed ZERO on the send path — the work already
+ * exceeded it, `remaining` went negative, and no sleep happened. It was inert
+ * on BOTH legs (4 of 10 refusals also ran over), leaving roughly 1800–3200 ms
+ * of existence-dependent signal fully exposed. 6000 clears the measured
+ * ceiling with margin for the tail, and stays under Vercel's 10 s limit.
+ *
+ * ⚠️ 63% OF WHAT THIS FLOOR PADS AROUND IS OUR OWN LATENCY, NOT THE PROVIDER.
+ * checkOtpThrottle makes three SEQUENTIAL awaited round trips to Singapore on
+ * the accepted path. Making the IP read and the global count concurrent (the
+ * phone read must stay first, or the cooldown early-return that makes hammering
+ * cheap to reject is lost) should let this drop to ~4000. That is a scheduled
+ * follow-up chunk and a HARD PREREQUISITE OF 2.8b — a 6 s reset is acceptable
+ * for a founder testing it, not for real users meeting it in the reset UI.
  */
-export const OTP_RESET_FLOOR_MS = 2000;
+export const OTP_RESET_FLOOR_MS = 6000;
 
 /** Seconds → milliseconds, so window arithmetic reads the same everywhere. */
 export const HOUR_MS = 60 * 60 * 1000;
