@@ -345,9 +345,25 @@ check(
 // ── CLEANUP ──────────────────────────────────────────────────────────────
 await deleteCredentials(BUYER.id);
 await deleteCredentials(MAKER.id);
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS — this cell used to count the WHOLE
+ * TABLE and started failing the moment a real credential existed that this
+ * suite did not create (the founder's enterprise password, set during the
+ * 2.6c production test).
+ *
+ * Same class as the 2026-08-22 incident that destroyed that password: a suite
+ * must never assert — or act on — ownership of rows it did not create. The
+ * DELETEs above were already correctly scoped by `user_id`, so nothing was at
+ * risk here; this assertion was simply describing a world where the platform
+ * has no real users, and `user_credentials` stops being that world with every
+ * account [I27]'s gate converts. Caught 2026-08-27 while building 2.8b; the
+ * sibling suites were fixed on 2026-08-24 and this one was missed.
+ */
 check(
-  "Z1 cleanup: no credentials left behind",
-  (await sql("user_credentials?select=id")).length === 0
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (
+    await sql(`user_credentials?user_id=in.(${BUYER.id},${MAKER.id})&select=id`)
+  ).length === 0
 );
 check(
   "Z2 auth_identities untouched (1 row, the chunk 1.3 backfill)",

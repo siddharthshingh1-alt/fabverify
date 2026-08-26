@@ -82,7 +82,7 @@ const wipe = async (p: string) => {
 
 const { checkOtpThrottle, checkOtpVerifyThrottle, recordOtpVerifyAttempt, recordOtpAttempt } =
   await import("../app/lib/otpThrottle.server.ts");
-const { OTP_VERIFY_PER_PHONE_HOURLY, OTP_PER_PHONE_HOURLY, OTP_VERIFY_PURPOSE } = await import(
+const { OTP_VERIFY_PER_PHONE, OTP_PER_PHONE_HOURLY, OTP_VERIFY_PURPOSE } = await import(
   "../app/lib/otpPolicy.ts"
 );
 
@@ -100,15 +100,15 @@ await wipe(BYSTANDER);
 section("[A] THE CAP BINDS — N wrong guesses and the gate closes");
 
 let allowedCount = 0;
-for (let i = 0; i < OTP_VERIFY_PER_PHONE_HOURLY; i++) {
+for (let i = 0; i < OTP_VERIFY_PER_PHONE; i++) {
   const d = await checkOtpVerifyThrottle({ phoneHash: phoneHash(TARGET), ipHash: TEST_IP });
   if (d.allowed) allowedCount++;
   await recordOtpVerifyAttempt({ phoneHash: phoneHash(TARGET), ipHash: TEST_IP });
 }
 check(
-  `A1 the first ${OTP_VERIFY_PER_PHONE_HOURLY} guesses are allowed`,
-  allowedCount === OTP_VERIFY_PER_PHONE_HOURLY,
-  `${allowedCount}/${OTP_VERIFY_PER_PHONE_HOURLY}`
+  `A1 the first ${OTP_VERIFY_PER_PHONE} guesses are allowed`,
+  allowedCount === OTP_VERIFY_PER_PHONE,
+  `${allowedCount}/${OTP_VERIFY_PER_PHONE}`
 );
 
 const blocked = await checkOtpVerifyThrottle({ phoneHash: phoneHash(TARGET), ipHash: TEST_IP });
@@ -140,7 +140,7 @@ check(
 const stored = await rowsFor(TARGET);
 check(
   "B2 every stored row is a verify row, none is a send",
-  stored.length === OTP_VERIFY_PER_PHONE_HOURLY &&
+  stored.length === OTP_VERIFY_PER_PHONE &&
     stored.every((r) => r.purpose === OTP_VERIFY_PURPOSE),
   `${stored.length} rows, purposes: ${[...new Set(stored.map((r) => r.purpose))].join(",")}`
 );

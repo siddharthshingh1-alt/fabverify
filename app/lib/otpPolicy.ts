@@ -153,11 +153,35 @@ export const OTP_VERIFY_PURPOSE = "reset-verify";
  *
  * ⚠️ NO COOLDOWN between attempts, unlike the send. A send costs money and an
  * SMS; a verify costs nothing, and making someone wait 45 s after a typo would
- * punish the honest user far more than the attacker, who is bounded by the
- * hourly cap either way.
+ * punish the honest user far more than the attacker, who is bounded by the cap
+ * either way.
+ *
+ * ⚠️ A 15-MINUTE ROLLING WINDOW, NOT AN HOURLY-PLUS-DAILY PAIR — AND THE
+ * REASON IS RECOVERY DENIAL OF SERVICE, NOT BRUTE FORCE.
+ *
+ * Any per-number verify limit hands an attacker a way to burn a stranger's
+ * budget: they cannot read the SMS, but they can spend the guesses, and the
+ * real owner is then unable to COMPLETE a reset even though they can still
+ * request a code. The limit's window is therefore the length of the outage an
+ * attacker can impose at will, on the one path that only matters once someone
+ * has already lost access.
+ *
+ * The first draft used 5/hour plus 10/day. Both numbers were wrong for this:
+ * the hourly window meant a 1-hour lockout, and the DAILY cap was far worse —
+ * an attacker spending 10 guesses could deny recovery for 24 HOURS.
+ *
+ * 15 minutes matches the cooldown [I23] already chose for password lockout, so
+ * the platform imposes one recovery-outage length rather than three. And it
+ * costs almost nothing defensively: 5 per 15 minutes is 480/day, so covering
+ * the 10^6 keyspace still takes ~2000 days. What actually bounds the attacker
+ * is the CODE'S OWN LIFETIME — a code lives on the order of an hour, giving
+ * roughly 20 guesses against any live code, i.e. a 1-in-50,000 chance.
+ *
+ * ⚠️ SO THERE IS NO DAILY CAP HERE ON PURPOSE. Do not add one back without
+ * pricing the recovery outage it creates.
  */
-export const OTP_VERIFY_PER_PHONE_HOURLY = 5;
-export const OTP_VERIFY_PER_PHONE_DAILY = 10;
+export const OTP_VERIFY_PER_PHONE = 5;
+export const OTP_VERIFY_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Per-IP verify ceiling — the same cost circuit-breaker reasoning as

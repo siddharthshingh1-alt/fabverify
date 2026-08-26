@@ -529,9 +529,25 @@ export default function LogIn() {
               no account: submitting simply produces the same generic failure
               as a wrong password.
             */}
-            <label htmlFor="password" className="mb-2 mt-4 block text-sm text-text-primary">
-              Password
-            </label>
+            <div className="mb-2 mt-4 flex items-baseline justify-between">
+              <label htmlFor="password" className="block text-sm text-text-primary">
+                Password
+              </label>
+              {/*
+                ⚠️ RENDERED UNCONDITIONALLY, exactly like the password field
+                above it and for the same reason: showing it only for numbers
+                that HAVE an account would rebuild the enumeration oracle this
+                whole path is built to close. It costs nothing for a number
+                with no account — /reset-password answers every phone with the
+                same "if that number has an account, a code is on its way".
+              */}
+              <Link
+                href="/reset-password"
+                className="text-xs text-text-secondary underline hover:text-gold"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <div className="flex items-center rounded-lg border border-border-dark bg-navy px-4 py-3 transition-colors focus-within:border-gold">
               <input
                 id="password"

@@ -25,9 +25,9 @@ import {
   OTP_GLOBAL_DAILY,
   OTP_SEND_PURPOSES,
   OTP_VERIFY_PER_IP_HOURLY,
-  OTP_VERIFY_PER_PHONE_DAILY,
-  OTP_VERIFY_PER_PHONE_HOURLY,
+  OTP_VERIFY_PER_PHONE,
   OTP_VERIFY_PURPOSE,
+  OTP_VERIFY_WINDOW_MS,
   OTP_PER_IP_DAILY,
   OTP_PER_IP_HOURLY,
   OTP_PER_PHONE_DAILY,
@@ -331,14 +331,12 @@ export async function checkOtpVerifyThrottle(params: {
     await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo, VERIFY)
   );
 
-  const phoneHourly = windowWait(phoneTimes, OTP_VERIFY_PER_PHONE_HOURLY, HOUR_MS, now);
-  if (phoneHourly !== null) {
-    return { allowed: false, retryAfterSeconds: phoneHourly, scope: "phone-hourly" };
-  }
-
-  const phoneDaily = windowWait(phoneTimes, OTP_VERIFY_PER_PHONE_DAILY, DAY_MS, now);
-  if (phoneDaily !== null) {
-    return { allowed: false, retryAfterSeconds: phoneDaily, scope: "phone-daily" };
+  // ⚠️ ONE WINDOW, 15 MINUTES. That number is the length of the recovery outage
+  // an attacker can impose by burning a stranger's guesses — see the policy
+  // comment. It is deliberately NOT an hourly-plus-daily pair.
+  const phoneWait = windowWait(phoneTimes, OTP_VERIFY_PER_PHONE, OTP_VERIFY_WINDOW_MS, now);
+  if (phoneWait !== null) {
+    return { allowed: false, retryAfterSeconds: phoneWait, scope: "phone-hourly" };
   }
 
   if (params.ipHash) {
