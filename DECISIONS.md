@@ -377,4 +377,29 @@ Measured against production on 2026-08-24 (real Twilio send, founder's number, L
 
 ⚠️ **AND WHAT IS STILL NOT FIXED: the jitter is entirely ours.** The provider leg is stable to within **15 ms** across sends (955/965/970); the throttle check swings by nearly a full second (1795–2757 ms). The floor is now sized by OUR variance, not the provider's. Squeezing it further means attacking `checkOtpThrottle`'s two remaining sequential round trips — the single-query rewrite — not more parallelism. [I31] and this decision have taken what concurrency can take.
 
+---
+
+## PASSWORD RESET — ROUTE + UI DECISIONS (2026-08-27, chunk 2.8b)
+
+**[I33] The OTP throttle counts SENDS and VERIFY ATTEMPTS separately, filtered by `purpose` — and keeping them separate is what stops the recovery path locking itself.** (2026-08-27) — 2.6c throttles the OTP *send*. 2.8b adds a second unauthenticated endpoint — the reset *submit* — whose only gate is a 6-digit code and whose success **writes a credential and bumps `token_epoch`**, i.e. account takeover that simultaneously evicts the real owner. Nothing counted verify attempts: `otp_requests` records sends, and 2.7's `failed_attempts` counts *password* attempts on `user_credentials`. So the submit path had **zero attempt-limiting of ours**, and 10⁶ is brute-forceable inside a code's validity window.
+
+⚠️ **THE LOAD-BEARING PROPERTY: VERIFY ATTEMPTS MUST NOT INFLATE THE SEND COUNTERS.** `getOtpRequestTimes` counted *every* row for a `phone_hash` with no `purpose` filter. Writing verify attempts into the same table unfiltered would make failed guesses consume the victim's 5/hour **send** budget — so an attacker could stop a real owner from even *requesting* a recovery code, and a user fat-fingering their own code twice could lock themselves out of their own reset. **A self-inflicted denial of service on the recovery path is the worst possible place for one**, because it fires exactly when someone has already lost access. The reads are therefore `purpose`-filtered, and send limits and verify limits never see each other's rows.
+
+**Rejected: a separate counter table.** It leaves 2.6c untouched, which is worth something, but it duplicates the hashing, the windowing, the fail-closed rule and the retention sweep — four things that must stay identical and would now have two homes. The `purpose` column already exists and is already recorded on every row; filtering by it is one predicate. **Migration cost: none** — no DDL, no new table.
+
+⚠️ **FAIL-CLOSED IS UNCHANGED AND NON-NEGOTIABLE (D3).** An unreadable counter must throw, never return "allowed". A verify path that fails open on a database blip is strictly worse than a send path that does, because a send costs an SMS and a verify costs an account.
+
+**[I34] The OTP VERIFY must never run on the shared `supabaseAdmin` client — it POISONS it.** (2026-08-27) — **This is not a style preference and it is not defensive coding. It is a bug that was live in 2.8a and would have fired on the first production reset.**
+
+Verified against the installed supabase-js, not assumed:
+1. `auth.verifyOtp()` calls `_saveSession(session)` on success.
+2. `_saveSession` writes to `this.storage`; under `persistSession: false` that is `memoryLocalStorageAdapter` — **in memory, retained**, not discarded.
+3. `SupabaseClient._getAccessToken()` returns `(await this._getSessionToken()) ?? this.supabaseKey` — **a session, once present, outranks the service role key.**
+
+`supabaseAdmin` is a module-level singleton behind every `db.ts` call. So one successful `verifyOtp` on it silently **downgrades the entire data layer from service role to that user, for the rest of the process lifetime.** `resetPasswordByOtp` breaks itself immediately — its very next reads and writes hit `user_credentials`, a deny-all RLS table, now as a user, *after* the OTP has been consumed. Everything else in the app degrades too, and because `db.ts` still has ~14 `if (error) return []` swallow sites, much of it degrades into **misleading empty results rather than errors**.
+
+**The fix is the pattern 2.6c already chose:** a dedicated, isolated client for the provider call, never the shared one. 2.6c built `otpSendClient` for exactly this reason; 2.8a used `supabaseAdmin` instead, and the inconsistency was noted in TASKS.md without the consequence being understood. ⚠️ **THE GENERAL RULE: never call an `auth.*` method that can establish a session on a client whose privileges anything else depends on.** A client that authenticates and a client that authorises must not be the same object.
+
+⚠️ **WHY NOTHING CAUGHT IT: `verifyOtpServerSide` short-circuits on `!isProductionRuntime`**, so all 42 of 2.8a's assertions pass without the call ever executing. The branch has genuinely never run. A suite cannot test what a gate prevents it from reaching — which is why the production reset test is still owed, and why it is now expected to *pass* rather than to discover this.
+
 *Append new decisions below this line with the next ID and a date.*
