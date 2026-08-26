@@ -646,11 +646,25 @@ async function verifyOtpServerSide(phoneLast10: string, code: unknown): Promise<
   }
 
   try {
-    const { data, error } = await supabaseAdmin.auth.verifyOtp({
+    // ⚠️ otpVerifyClient, NOT supabaseAdmin — see [I34]. This is a BUG FIX, not
+    // a style choice: verifyOtp SAVES A SESSION on whatever client it is called
+    // on, and supabase-js prefers a session token over the client's own key
+    // (`_getAccessToken` returns `sessionToken ?? supabaseKey`). Calling this on
+    // the shared admin singleton downgraded EVERY db.ts call in the process
+    // from service role to that user, breaking this very function two lines
+    // later against deny-all RLS — after the OTP had already been consumed.
+    const { data, error } = await otpVerifyClient.auth.verifyOtp({
       phone: `+91${phoneLast10}`,
       token: code,
       type: "sms",
     });
+
+    // Belt and braces: the client is per-module, so drop the session it just
+    // established rather than trusting the next caller to be unaffected.
+    // ⚠️ NOT the safety property — isolation is. This only bounds the blast
+    // radius if that isolation is ever weakened.
+    await otpVerifyClient.auth.signOut({ scope: "local" }).catch(() => {});
+
     return !error && !!data.user;
   } catch {
     // ⚠️ SWALLOWED AND UNLOGGED. The exception can carry the code, and the
@@ -799,6 +813,30 @@ export async function resetPasswordByOtp(
  * this is a strict improvement — but it is a change, and it is on the
  * production test list rather than assumed.
  */
+
+/**
+ * ⚠️ A SECOND ISOLATED CLIENT, AND IT MUST STAY SEPARATE FROM BOTH
+ * `supabaseAdmin` AND `otpSendClient` — decision [I34].
+ *
+ * `auth.verifyOtp` establishes a session on the client it is called on, and
+ * supabase-js then prefers that session token over the client's own key for
+ * every subsequent request. On the shared admin singleton that silently
+ * converts the whole data layer from service role to one user.
+ *
+ * ⚠️ THE SERVICE ROLE KEY, unlike otpSendClient's anon key: verifying is an
+ * administrative act on behalf of a user who is by definition not logged in
+ * yet, and the reset path has no session to borrow. The isolation above is
+ * what makes holding the privileged key here safe — this client is never used
+ * for a database call.
+ *
+ * ⚠️ NEVER add a `.from()` call to this client. It exists to authenticate,
+ * not to authorise; that separation is the entire point.
+ */
+const otpVerifyClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-role-key",
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 const otpSendClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",

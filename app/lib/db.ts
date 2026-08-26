@@ -1342,11 +1342,21 @@ export async function checkDatabaseConnection(): Promise<void> {
  */
 export async function getOtpRequestTimes(
   filter: { phoneHash: string; ipHash?: never } | { ipHash: string; phoneHash?: never },
-  sinceIso: string
+  sinceIso: string,
+  purposes: readonly string[]
 ): Promise<string[]> {
+  // ⚠️ THE PURPOSE FILTER IS A SAFETY PROPERTY, NOT AN OPTIMISATION ([I33]).
+  // This table now holds two different kinds of row: SENDS (each cost an SMS)
+  // and reset-code VERIFY ATTEMPTS (each is a guess at a 6-digit code). They
+  // are counted against different limits and MUST NOT see each other's rows.
+  // Unfiltered, a failed guess would consume the victim's send budget — so an
+  // attacker could stop a real owner requesting a recovery code at all, and a
+  // user mistyping their own code twice could lock themselves out of their own
+  // reset. Required, not defaulted: a caller that forgets it should not compile.
   let query = supabaseAdmin
     .from("otp_requests")
     .select("created_at")
+    .in("purpose", purposes as string[])
     .gte("created_at", sinceIso)
     .order("created_at", { ascending: false })
     // A bound, not a limit on correctness: every window cap is far below this,
@@ -1372,10 +1382,16 @@ export async function getOtpRequestTimes(
  * `head: true` with an exact count so no rows cross the wire; this is the one
  * query with no key to narrow it and it must not scale with volume.
  */
-export async function countOtpRequestsSince(sinceIso: string): Promise<number> {
+export async function countOtpRequestsSince(
+  sinceIso: string,
+  purposes: readonly string[]
+): Promise<number> {
+  // Purpose-filtered for the same reason as getOtpRequestTimes ([I33]): this is
+  // the SMS spend ceiling, and a verify attempt spends nothing.
   const { count, error } = await supabaseAdmin
     .from("otp_requests")
     .select("id", { count: "exact", head: true })
+    .in("purpose", purposes as string[])
     .gte("created_at", sinceIso);
 
   if (error) throw error;

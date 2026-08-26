@@ -23,6 +23,11 @@ import {
   DAY_MS,
   HOUR_MS,
   OTP_GLOBAL_DAILY,
+  OTP_SEND_PURPOSES,
+  OTP_VERIFY_PER_IP_HOURLY,
+  OTP_VERIFY_PER_PHONE_DAILY,
+  OTP_VERIFY_PER_PHONE_HOURLY,
+  OTP_VERIFY_PURPOSE,
   OTP_PER_IP_DAILY,
   OTP_PER_IP_HOURLY,
   OTP_PER_PHONE_DAILY,
@@ -197,7 +202,7 @@ export async function checkOtpThrottle(params: {
 
   // ONE read serves all three phone windows — see getOtpRequestTimes.
   const phoneTimes = toDescendingTimes(
-    await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo)
+    await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo, OTP_SEND_PURPOSES)
   );
 
   // ── PER-NUMBER: the real control, checked first because it is the limit
@@ -249,9 +254,11 @@ export async function checkOtpThrottle(params: {
     // Only when an IP was actually observed. `null` (not an empty array) so
     // "no IP to check" stays distinguishable from "an IP with no history".
     params.ipHash
-      ? getOtpRequestTimes({ ipHash: params.ipHash }, dayAgo).then(toDescendingTimes)
+      ? getOtpRequestTimes({ ipHash: params.ipHash }, dayAgo, OTP_SEND_PURPOSES).then(
+          toDescendingTimes
+        )
       : Promise.resolve(null),
-    countOtpRequestsSince(dayAgo),
+    countOtpRequestsSince(dayAgo, OTP_SEND_PURPOSES),
   ]);
 
   // ── PER-IP: generous, and only when an IP was actually observed.
@@ -281,6 +288,95 @@ export async function checkOtpThrottle(params: {
   }
 
   return { allowed: true };
+}
+
+/**
+ * MAY THIS CALLER SUBMIT ANOTHER RESET CODE GUESS? (chunk 2.8b, decision [I33])
+ *
+ * ⚠️ THIS IS THE ANTI-BRUTE-FORCE CONTROL ON ACCOUNT TAKEOVER, and it is the
+ * whole reason 2.8b could not ship without it. The reset SUBMIT endpoint is
+ * unauthenticated and its only gate is a 6-digit code; a success writes a
+ * password AND bumps `token_epoch`, evicting the real owner's sessions. Before
+ * this existed, nothing anywhere counted verify attempts — `otp_requests`
+ * recorded sends, and 2.7's counter is for PASSWORD attempts on a different
+ * table. The keyspace is 10^6; at 5/hour it takes ~200,000 hours to cover.
+ *
+ * ⚠️ IT READS ONLY `reset-verify` ROWS AND WRITES ONLY `reset-verify` ROWS.
+ * Sends and guesses never see each other's counters. If they did, a failed
+ * guess would burn the victim's send budget and an attacker could block the
+ * real owner from requesting a recovery code at all.
+ *
+ * ⚠️ THROWS ON ANY DATABASE FAILURE — same fail-closed rule as the send (D3),
+ * and it matters MORE here: a send that wrongly proceeds costs an SMS, a
+ * verify that wrongly proceeds costs an account. Do not add a catch that
+ * returns `{allowed: true}`.
+ *
+ * ⚠️ NOTHING HERE READS ACCOUNT STATE, so it cannot leak whether the number is
+ * registered — a refusal is a pure function of this caller's own recent
+ * attempts, identical for a real account and a number that has never existed.
+ */
+export async function checkOtpVerifyThrottle(params: {
+  phoneHash: string;
+  ipHash: string | null;
+  now?: number;
+}): Promise<ThrottleDecision> {
+  const now = params.now ?? Date.now();
+  const dayAgo = new Date(now - DAY_MS).toISOString();
+  const VERIFY = [OTP_VERIFY_PURPOSE];
+
+  // Phone first, alone, with an early return — the same shape and the same
+  // reason as checkOtpThrottle ([I31]): this is the limit an attacker actually
+  // meets, so hammering must cost ONE query, not three.
+  const phoneTimes = toDescendingTimes(
+    await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo, VERIFY)
+  );
+
+  const phoneHourly = windowWait(phoneTimes, OTP_VERIFY_PER_PHONE_HOURLY, HOUR_MS, now);
+  if (phoneHourly !== null) {
+    return { allowed: false, retryAfterSeconds: phoneHourly, scope: "phone-hourly" };
+  }
+
+  const phoneDaily = windowWait(phoneTimes, OTP_VERIFY_PER_PHONE_DAILY, DAY_MS, now);
+  if (phoneDaily !== null) {
+    return { allowed: false, retryAfterSeconds: phoneDaily, scope: "phone-daily" };
+  }
+
+  if (params.ipHash) {
+    const ipTimes = toDescendingTimes(
+      await getOtpRequestTimes({ ipHash: params.ipHash }, dayAgo, VERIFY)
+    );
+    const ipHourly = windowWait(ipTimes, OTP_VERIFY_PER_IP_HOURLY, HOUR_MS, now);
+    if (ipHourly !== null) {
+      return { allowed: false, retryAfterSeconds: ipHourly, scope: "ip-hourly" };
+    }
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Record a reset-code guess. Called BEFORE the code is checked.
+ *
+ * ⚠️ BEFORE, NOT AFTER, AND NOT ONLY ON FAILURE. Recording after the verify
+ * would let an attacker who kills the connection mid-request guess for free;
+ * recording only failures would mean a crash between "wrong" and "record"
+ * costs the attacker nothing. Counting every attempt up front is the only
+ * ordering where an abandoned request still costs its slot.
+ *
+ * ⚠️ Reuses recordOtpAttempt so hashing, insertion and the retention sweep have
+ * exactly ONE implementation — the purpose is what separates the counters.
+ */
+export async function recordOtpVerifyAttempt(params: {
+  phoneHash: string;
+  ipHash: string | null;
+  now?: number;
+}): Promise<void> {
+  await recordOtpAttempt({
+    phoneHash: params.phoneHash,
+    ipHash: params.ipHash,
+    purpose: OTP_VERIFY_PURPOSE,
+    now: params.now,
+  });
 }
 
 /**

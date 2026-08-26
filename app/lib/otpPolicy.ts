@@ -116,6 +116,58 @@ export const OTP_GLOBAL_DAILY = 500;
 export const OTP_REQUEST_RETENTION_HOURS = 48;
 
 /**
+ * ⚠️ WHICH PURPOSES ARE *SENDS*. Everything here costs an SMS and is counted
+ * against the send limits above. `reset-verify` is deliberately NOT a member —
+ * see OTP_VERIFY_* below, and [I33].
+ */
+export const OTP_SEND_PURPOSES: readonly string[] = ["login", "signup", "reset"];
+
+/**
+ * The purpose recorded for a reset-code VERIFY ATTEMPT (chunk 2.8b, [I33]).
+ *
+ * ⚠️ NOT AN OtpPurpose, AND THAT IS DELIBERATE. `OtpPurpose` answers "what is
+ * this code being SENT for" and decides `shouldCreateUser`. This value never
+ * reaches the provider; it exists only to keep verify rows out of the send
+ * counters.
+ */
+export const OTP_VERIFY_PURPOSE = "reset-verify";
+
+/**
+ * ⚠️ THE LIMIT THAT STOPS A 6-DIGIT CODE BEING BRUTE-FORCED (chunk 2.8b).
+ *
+ * The reset SUBMIT endpoint is unauthenticated and its only gate is the code.
+ * A success WRITES A PASSWORD and bumps `token_epoch` — an account takeover
+ * that simultaneously evicts the real owner. Before 2.8b nothing counted
+ * verify attempts at all: `otp_requests` recorded sends, and 2.7's
+ * `failed_attempts` counts PASSWORD attempts on `user_credentials`.
+ *
+ * At 5/hour, covering the 10^6 keyspace takes ~200,000 hours. Five is also
+ * generous for a human copying six digits off a lock screen.
+ *
+ * ⚠️ THESE ARE COUNTED SEPARATELY FROM SENDS AND MUST STAY THAT WAY. If a
+ * failed guess consumed the send budget, an attacker could stop the real owner
+ * from even REQUESTING a recovery code, and a user mistyping their own code
+ * twice could lock themselves out of their own reset — a self-inflicted denial
+ * of service on the one path that only matters when someone has already lost
+ * access. That separation is [I33]'s load-bearing property.
+ *
+ * ⚠️ NO COOLDOWN between attempts, unlike the send. A send costs money and an
+ * SMS; a verify costs nothing, and making someone wait 45 s after a typo would
+ * punish the honest user far more than the attacker, who is bounded by the
+ * hourly cap either way.
+ */
+export const OTP_VERIFY_PER_PHONE_HOURLY = 5;
+export const OTP_VERIFY_PER_PHONE_DAILY = 10;
+
+/**
+ * Per-IP verify ceiling — the same cost circuit-breaker reasoning as
+ * OTP_PER_IP_HOURLY, and the same caveat: the IP is client-supplied and
+ * forgeable, so this stops floods, not adversaries. The per-number cap above
+ * is what actually binds.
+ */
+export const OTP_VERIFY_PER_IP_HOURLY = 30;
+
+/**
  * ⚠️ THE RESET-PATH TIMING FLOOR (decision D4, 2026-08-22) — the defence
  * against an existence oracle made of latency.
  *
