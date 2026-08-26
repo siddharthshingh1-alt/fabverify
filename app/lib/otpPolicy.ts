@@ -130,33 +130,42 @@ export const OTP_REQUEST_RETENTION_HOURS = 48;
  * So a reset response never returns before this many milliseconds have
  * elapsed. Both outcomes are then bounded below by the same number.
  *
- * ⚠️ A floor only masks a difference it EXCEEDS. This value is now MEASURED
- * against production rather than estimated — the original 2000 was chosen
- * before the provider leg could be observed at all, and it was WRONG.
+ * ⚠️ A floor only masks a difference it EXCEEDS, and this value is MEASURED
+ * against production, never estimated. It has been wrong once already: the
+ * original 2000 was chosen before the provider leg could be observed at all,
+ * and it turned out to be INERT — the work exceeded it, so the sleep never
+ * fired and it masked nothing.
  *
- * PRODUCTION MEASUREMENT, 2026-08-24 (real Twilio send, founder's number, LAN
- * production build):
- *   registered reset, end to end ....... 4722 ms   ← the ceiling to clear
- *     · throttle check (3 sequential DB round trips) .. 2981 ms  (63%)
- *     · record write + provider send ................. 1741 ms  (37%)
- *   unknown-number refusal, end to end . 2011–2928 ms (n=10)
- *   raw provider refusal leg ........... 352 ms median, 1562 ms max (n=12)
+ * PRODUCTION MEASUREMENT, 2026-08-26 (chunk 2.6d, real Twilio sends to the
+ * founder's number, LAN production build, floor temporarily lowered so the
+ * work was UNMASKED):
+ *   registered reset, end to end ....... 2640 · 2915 · 3621 ms   (n=3)
+ *     · throttle check ................. 1795 · 2060 · 2757 ms   ← ALL the jitter
+ *     · record write + provider send ... 955 · 965 · 970 ms      ← rock stable
+ *   unknown-number refusal ............. 1693–3514 ms, median 2086  (n=11)
  *
- * At 2000 the floor contributed ZERO on the send path — the work already
- * exceeded it, `remaining` went negative, and no sleep happened. It was inert
- * on BOTH legs (4 of 10 refusals also ran over), leaving roughly 1800–3200 ms
- * of existence-dependent signal fully exposed. 6000 clears the measured
- * ceiling with margin for the tail, and stays under Vercel's 10 s limit.
+ * ⚠️ MEASURE THIS WITH THE FLOOR LOWERED OR YOU WILL MEASURE THE FLOOR. A
+ * reset send timed against a binding floor returns floor+overhead no matter
+ * what the work cost — on 2026-08-25 a registered send read 6018 ms against a
+ * 6000 ms floor and looked like a ceiling that had gone UP. It was not a
+ * ceiling at all: an unknown number, doing far less work, returned 6016 ms in
+ * the same conditions. Pinning to that number would have recorded a value no
+ * send ever took — the inert-2000 error in a new costume.
  *
- * ⚠️ 63% OF WHAT THIS FLOOR PADS AROUND IS OUR OWN LATENCY, NOT THE PROVIDER.
- * checkOtpThrottle makes three SEQUENTIAL awaited round trips to Singapore on
- * the accepted path. Making the IP read and the global count concurrent (the
- * phone read must stay first, or the cooldown early-return that makes hammering
- * cheap to reject is lost) should let this drop to ~4000. That is a scheduled
- * follow-up chunk and a HARD PREREQUISITE OF 2.8b — a 6 s reset is acceptable
- * for a founder testing it, not for real users meeting it in the reset UI.
+ * 5000 clears the observed maximum (3621 ms) by 38%, and clears the worst case
+ * implied by combining both distributions (~4100 ms: the slowest observed
+ * throttle leg plus the stable ~965 ms send leg) by about 22%.
+ * ⚠️ RESIDUAL RISK, STATED: every measurement here is against a warm,
+ * long-running `next start`. A Vercel COLD START is unmeasured and would be
+ * slower. If this floor is ever seen to go inert in real deployment, raise it
+ * — do not assume these numbers transfer to a lambda.
+ *
+ * ⚠️ THE JITTER IS ENTIRELY OURS. The provider leg is stable to within 15 ms
+ * across sends; the throttle check swings by nearly a full second. Anything
+ * that shrinks this floor further has to attack checkOtpThrottle's remaining
+ * round trips, not the provider — see the single-query chunk in TASKS.md.
  */
-export const OTP_RESET_FLOOR_MS = 6000;
+export const OTP_RESET_FLOOR_MS = 5000;
 
 /** Seconds → milliseconds, so window arithmetic reads the same everywhere. */
 export const HOUR_MS = 60 * 60 * 1000;

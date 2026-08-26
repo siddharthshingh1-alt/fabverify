@@ -362,21 +362,26 @@ check(
  *
  * It used to assert the "not yet measured" marker was still in otpPolicy.ts,
  * and it was written to go red the day a production measurement replaced it.
- * It did, on 2026-08-24, against a real Twilio send on the founder's number:
+ * It did, on 2026-08-24, against a real Twilio send on the founder's number.
  *
- *   registered reset, end to end ... 4722 ms   ← the ceiling
- *   unknown-number refusal ......... 2011–2928 ms (n=10)
+ * ⚠️ RE-MEASURED 2026-08-26 (chunk 2.6d), AFTER the send path was
+ * parallelised. Ceiling now 3621 ms, down from 4722 ms:
  *
- * At the old floor of 2000 the sleep never fired at all on the send path —
- * the work already exceeded it — so the floor was INERT and the send-vs-refuse
- * residual was fully exposed. The floor is now set from that evidence.
+ *   registered reset, unmasked ..... 2640 · 2915 · 3621 ms  (n=3)
+ *   unknown-number refusal ......... 1693–3514 ms           (n=11)
+ *
+ * ⚠️ BOTH NUMBERS MUST MOVE TOGETHER, WHICH IS THIS CELL'S WHOLE JOB. Lowering
+ * OTP_RESET_FLOOR_MS without a fresh measurement turns this red. And measure
+ * with the floor LOWERED — a send timed against a binding floor returns
+ * floor+overhead regardless of the work, which on 2026-08-25 produced a 6018 ms
+ * reading that looked like a ceiling and was not one.
  *
  * ⚠️ THE ASSERTION IS ON THE CONSTANT, NOT ONLY THE COMMENT. A doc marker
  * alone would stay green if someone lowered the number, which is precisely the
  * regression worth catching.
  */
 const { OTP_RESET_FLOOR_MS } = await import("../app/lib/otpPolicy.ts");
-const MEASURED_CEILING_MS = 4722;
+const MEASURED_CEILING_MS = 3621;
 const otpPolicySource = readFileSync("app/lib/otpPolicy.ts", "utf8");
 check(
   "G4 ✅ THE PROVIDER-LEG TIMING RESIDUAL IS MEASURED, AND THE FLOOR CLEARS IT",

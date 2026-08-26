@@ -6,6 +6,39 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-26 · chunk 2.6d] — The OTP send path gets faster, and the floor comes down with real evidence behind it
+
+> **The headline is a measurement lesson, not a concurrency one.** Two pairs of sequential Supabase round trips now run concurrently. On localhost one of the two showed no improvement at all and looked like wasted work; in production it was half the win. A latency optimisation judged on localhost would have been abandoned.
+
+### Changed
+- `checkOtpThrottle` runs the IP read and the global count under one `Promise.all` ([I31]). ⚠️ The phone read stays **first, sequential and alone**, so a hammered request still costs ONE query — parallelising all three would turn a throttle into an amplifier on an unauthenticated path.
+- `recordOtpAttempt` runs the INSERT and the 48 h retention sweep under another `Promise.all` ([I32]).
+- **`OTP_RESET_FLOOR_MS`: 6000 → 5000**, and `MEASURED_CEILING_MS` 4722 → 3621, moved together in one commit as G4 requires.
+- `toDescendingTimes` extracted — the phone and IP reads had identical copies and now live in different places, which is exactly where two copies drift apart.
+
+### Measured (production, LAN build, real Twilio sends, floor lowered so the work was unmasked)
+
+| leg | 2.6c | 2.6d | delta |
+|---|---|---|---|
+| throttle check | 2981 ms | 2060 ms | **−921 ms** |
+| record + provider | 1741 ms | 965 ms | **−776 ms** |
+| **registered reset, total** | **4722 ms** | **2915 ms** | **−1807 ms** |
+
+Registered sends n=3: 2640 · 2915 · 3621 ms. Unknown-number refusals n=11: 1693–3514 ms, median 2086.
+
+### Fixed
+- ⚠️ **A MEASUREMENT THAT LOOKED USABLE AND MEASURED THE WRONG THING.** A registered send timed **6018 ms** against the 6000 ms floor and was briefly read as a ceiling that had risen. It was not a ceiling: an unknown number, doing far less work, returned **6016 ms** under the same conditions — the floor was setting the number, not the work. Recording 6018 as the ceiling would have pinned a value no send ever took, **the inert-2000 error in a new costume**. The floor must be lowered before re-measuring, then restored and re-proven.
+- ⚠️ **A NEW TEST CELL THAT COULD NOT HAVE FAILED.** The fail-closed assertion added for the concurrent pair was mutation-tested: rewriting the pair as `allSettled` with fulfilled-value fallbacks — the version that returns `{allowed:true}` during an outage — left it **still passing**, because a broken database URL makes the sequential phone read throw first and the concurrent pair is never reached. It is now labelled for what it proves, and the actual guard is a separate comment-stripped source assertion that **does** go red on that mutation.
+- ⚠️ **An ad-hoc measurement script polluted the live throttle.** It called `recordOtpAttempt` 21 times under one IP with no cleanup, exhausting the per-IP hourly cap of 20, which made the verification suite's later sends get refused — a green suite turned red for a reason unrelated to the code. Same rule the suites adopted after the `user_credentials` incident, in a new costume: **a script must not leave state it created behind.** Cleanup added.
+
+### Verified
+`verify-otp-send` **63/63** (56 + 7 new cells: D9–D13 scope-order, E3/E4 fail-closed) · `verify-password-reset` **42/42** · `verify-login-wiring` **38/38** · `tsc` clean · build exit 0 · floor re-proven binding after restore at 5011–5036 ms.
+
+### Known-open (recorded, not fixed)
+- **The remaining jitter is entirely ours.** The provider leg is stable to within 15 ms across sends; `checkOtpThrottle` swings 1795–2757 ms. The floor is now sized by our variance, not the provider's. Concurrency has taken what it can — going below ~5 s needs the **single-query rewrite**, its own chunk.
+- ⚠️ **Every number here comes from a warm, long-running `next start`. A Vercel cold start is unmeasured** and would be slower. If the floor is ever seen to go inert in real deployment, raise it.
+- **A 5 s reset is better than 6 s and is still slow.** Whether that ships to real users in 2.8b is a deliberate UX call, not something this chunk settles.
+
 ## [2026-08-24 · chunk 2.6c] — OTP request hardening: the send moves server-side, gets throttled, and the timing floor turns out to have been inert
 
 > **PRODUCTION-PROVEN, not merely built.** The chunk's code was written 2026-08-22 and parked in a WIP safety commit (`b6ca242`) that explicitly disclaimed being done. This entry is the real landing: the table exists, the suites are green, and the whole path was exercised on a real LAN production build against a real Twilio send.

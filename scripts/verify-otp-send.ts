@@ -468,9 +468,13 @@ check(
  * is "the hourly cap binds", so the suite reads the cap from the policy module
  * and drives to it.
  */
-const { OTP_PER_PHONE_HOURLY, OTP_RESEND_SECONDS, OTP_RESET_FLOOR_MS } = await import(
-  "../app/lib/otpPolicy.ts"
-);
+const {
+  OTP_PER_PHONE_HOURLY,
+  OTP_PER_PHONE_DAILY,
+  OTP_PER_IP_DAILY,
+  OTP_RESEND_SECONDS,
+  OTP_RESET_FLOOR_MS,
+} = await import("../app/lib/otpPolicy.ts");
 
 check(
   "D6 the client countdown and the server cooldown are the SAME constant",
@@ -520,6 +524,129 @@ check(
   "D8 ⚠️ the throttle message does NOT look like a provider problem",
   !looksLikeProviderProblem(throttleMessage),
   JSON.stringify(throttleMessage)
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+section("[D2] ⚠️ SCOPE ORDER — the queries run together, the DECISIONS do not");
+
+/**
+ * ⚠️ ADDED IN 2.6d. THE POINT IS THE ORDER, NOT THE REFUSAL.
+ *
+ * 2.6d made the IP read and the global count concurrent. Running the QUERIES
+ * together must not reorder the DECISIONS: the checks are still evaluated
+ * phone-cooldown → phone-hourly → phone-daily → ip-hourly → ip-daily →
+ * global-daily, so `scope` and `retryAfterSeconds` stay byte-identical to the
+ * sequential version. A reordering here would silently report the WRONG limit
+ * and hand the user a wrong retry time — quiet, and invisible to every other
+ * assertion in this suite.
+ *
+ * ⚠️ EACH CASE MAKES TWO LIMITS BIND AT ONCE, WHICH IS WHAT MAKES IT
+ * DISCRIMINATING. A test where only one limit binds passes under ANY ordering
+ * and proves nothing. Here the wrong order produces a different, specific,
+ * observable answer.
+ *
+ * `scope` is deliberately NOT returned over HTTP (it is operational detail —
+ * see the route), so this calls the seam directly. process.env must be primed
+ * first: a bare node script does not load .env.local the way Next.js does, and
+ * the module fails closed at load without SESSION_TOKEN_SECRET.
+ */
+process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
+process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_KEY;
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = ANON_KEY;
+process.env.SESSION_TOKEN_SECRET = TOKEN_SECRET;
+
+// Only checkOtpThrottle is imported — it IS the thing under test. The hash
+// stays the suite's own re-derivation (see "THE HASH, RE-DERIVED
+// INDEPENDENTLY"), so the fixtures do not agree with the implementation by
+// construction.
+const { checkOtpThrottle } = await import("../app/lib/otpThrottle.server.ts");
+
+const scopeIpHash = ipHash("198.51.100.77");
+const deleteScopeIpRows = () =>
+  rest(`otp_requests?ip_hash=eq.${scopeIpHash}`, { method: "DELETE" });
+
+/** Bulk-seed rows at explicit timestamps — one round trip, not N. */
+async function seedRows(rows: Array<{ phone: string; ip: string | null; agoMs: number }>) {
+  await rest("otp_requests", {
+    method: "POST",
+    body: JSON.stringify(
+      rows.map((r) => ({
+        phone_hash: phoneHash(r.phone),
+        ip_hash: r.ip,
+        purpose: "login",
+        created_at: new Date(Date.now() - r.agoMs).toISOString(),
+      }))
+    ),
+  });
+}
+
+// ── CASE 1: all THREE per-number limits bind at once. Cooldown must win.
+const SCOPE_PHONE = "9876530001";
+await deleteRowsFor(SCOPE_PHONE);
+await seedRows(
+  // 10 rows in the last minute: within the 45 s cooldown, over the hourly cap
+  // of 5, and at the daily cap of 10 — all three bind simultaneously.
+  Array.from({ length: OTP_PER_PHONE_DAILY }, (_, i) => ({
+    phone: SCOPE_PHONE,
+    ip: null,
+    agoMs: i * 1000,
+  }))
+);
+const phoneDecision = await checkOtpThrottle({
+  phoneHash: phoneHash(SCOPE_PHONE),
+  ipHash: null,
+});
+// `scope` exists only on the refused arm of the union — narrow once, here.
+const phoneScope = phoneDecision.allowed ? "ALLOWED" : phoneDecision.scope;
+const phoneRetry = phoneDecision.allowed ? 0 : phoneDecision.retryAfterSeconds;
+check(
+  "D9 ⚠️ cooldown WINS when all three per-number limits bind — not hourly, not daily",
+  phoneScope === "phone-cooldown",
+  `scope=${phoneScope} (hourly and daily also bind here)`
+);
+check(
+  "D10 …and it still carries a positive retryAfterSeconds",
+  phoneRetry > 0,
+  `${phoneRetry}s`
+);
+await deleteRowsFor(SCOPE_PHONE);
+
+// ── CASE 2: BOTH per-IP limits bind at once. Hourly must win.
+// This is the cell that guards the concurrent pair: the IP read now resolves
+// alongside the global count, so nothing but evaluation order decides which
+// scope is reported.
+await deleteScopeIpRows();
+await seedRows(
+  // 60 rows in the last 10 minutes, each on a DIFFERENT number so the
+  // per-number caps stay clear: over the 20/hr IP cap AND at the 60/day one.
+  Array.from({ length: OTP_PER_IP_DAILY }, (_, i) => ({
+    phone: `987654${String(1000 + i)}`,
+    ip: scopeIpHash,
+    agoMs: i * 10_000,
+  }))
+);
+const CLEAN_CALLER = "9876530002";
+await deleteRowsFor(CLEAN_CALLER);
+const ipDecision = await checkOtpThrottle({
+  phoneHash: phoneHash(CLEAN_CALLER),
+  ipHash: scopeIpHash,
+});
+const ipScope = ipDecision.allowed ? "ALLOWED" : ipDecision.scope;
+check(
+  "D11 ⚠️ ip-hourly WINS over ip-daily when both bind — the concurrent read did NOT reorder the decisions",
+  ipScope === "ip-hourly",
+  `scope=${ipScope} (ip-daily also binds here)`
+);
+check(
+  "D12 ⚠️ …and a per-IP refusal is NEVER reported as global-daily",
+  ipScope !== "global-daily",
+  `scope=${ipScope}`
+);
+await deleteScopeIpRows();
+await deleteRowsFor(CLEAN_CALLER);
+check(
+  "D13 the scope-order fixtures cleaned up after themselves",
+  (await (await rest(`otp_requests?ip_hash=eq.${scopeIpHash}&select=id`)).json()).length === 0
 );
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -619,6 +746,94 @@ check(
   "E2 ⚠️ the module REFUSES TO LOAD without SESSION_TOKEN_SECRET (no default key)",
   secretProof.includes("REFUSED"),
   secretProof
+);
+
+/**
+ * ⚠️ ADDED IN 2.6d — with an HONEST NOTE ON WHAT IT DOES AND DOES NOT PROVE.
+ *
+ * E1 above calls checkOtpThrottle with `ipHash: null`, which skips the IP read
+ * entirely, so it never touches the branch 2.6d changed. This cell supplies a
+ * NON-NULL ipHash so the full path is exercised, and asserts the check still
+ * THROWS rather than reporting ALLOWED.
+ *
+ * ⚠️ BUT IT IS NOT THE PROOF THAT Promise.all BEATS allSettled, AND SAYING SO
+ * WOULD BE THE 2.8a MISTAKE AGAIN — a green assertion that was never capable of
+ * going red. THIS WAS MUTATION-TESTED, NOT ASSUMED: rewriting the pair as
+ * allSettled with fulfilled-value fallbacks (the genuinely dangerous version,
+ * which returns `{allowed: true}` during an outage) leaves this cell STILL
+ * PASSING — because a broken database URL makes the SEQUENTIAL PHONE READ throw
+ * first, and the concurrent pair is never reached at all.
+ *
+ * So this cell proves the IP-carrying path fails closed under a TOTAL outage,
+ * which is the realistic incident. The specific allSettled regression is caught
+ * by E4 below, on comment-stripped source — the same technique W1 and G3 use
+ * for properties localhost cannot reach at runtime. Isolating a failure of ONLY
+ * the concurrent pair would need the phone read to succeed while the other two
+ * fail, which needs module stubbing this suite deliberately avoids.
+ *
+ * Same subprocess-with-a-cold-module-graph technique as E1: an in-process
+ * re-import keeps the cached db module and reports a false pass.
+ */
+let ipFailClosedProof = "";
+try {
+  ipFailClosedProof = execFileSync(
+    process.execPath,
+    [
+      "--conditions=react-server",
+      "--import",
+      "./scripts/register-ts-resolve.mjs",
+      "--input-type=module",
+      "-e",
+      `
+      const { checkOtpThrottle, hashPhone, hashIp } = await import("./app/lib/otpThrottle.server.ts");
+      try {
+        const decision = await checkOtpThrottle({
+          phoneHash: hashPhone("9999999999"),
+          ipHash: hashIp("203.0.113.9"),
+        });
+        console.log(decision.allowed ? "ALLOWED" : "REFUSED");
+      } catch {
+        console.log("THREW");
+      }
+      `,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NEXT_PUBLIC_SUPABASE_URL: brokenUrl,
+        SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY,
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ANON_KEY,
+        SESSION_TOKEN_SECRET: TOKEN_SECRET,
+      },
+    }
+  ).trim();
+} catch (error) {
+  ipFailClosedProof = `child failed: ${(error as Error).message.slice(0, 120)}`;
+}
+
+check(
+  "E3 ⚠️ the IP-CARRYING path also fails closed under a total outage — still THREW",
+  ipFailClosedProof.includes("THREW"),
+  `${ipFailClosedProof} — E1 uses ipHash:null; this one does not`
+);
+
+/**
+ * ⚠️ THE CELL THAT ACTUALLY CATCHES THE allSettled REGRESSION, and the one E3
+ * cannot be. Asserted on COMMENT-STRIPPED source because the code above
+ * deliberately names `Promise.allSettled` in a warning comment — a raw text
+ * search would report the very thing it is checking for. Same lesson as W1.
+ *
+ * MUTATION-TESTED: rewriting the concurrent pair as allSettled with
+ * fulfilled-value fallbacks turns this cell RED, where E3 stays green.
+ */
+const throttleCode = codeOf("app/lib/otpThrottle.server.ts");
+check(
+  "E4 ⚠️ the concurrent reads use Promise.all — allSettled appears NOWHERE in the executing code ([I31])",
+  throttleCode.includes("await Promise.all([") && !throttleCode.includes("allSettled"),
+  throttleCode.includes("allSettled")
+    ? "allSettled FOUND — a DB outage would be swallowed into an allow"
+    : "Promise.all, no allSettled"
 );
 
 // ─────────────────────────────────────────────────────────────────────────

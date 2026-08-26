@@ -172,6 +172,21 @@ function windowWait(times: number[], limit: number, windowMs: number, now: numbe
  * refuses. A future "registered numbers get a higher limit" tweak would
  * convert this into an enumeration oracle — do not add one.
  */
+/**
+ * Row timestamps → epoch millis, newest first, with unparseable values dropped.
+ *
+ * Extracted in 2.6d because the phone read and the IP read had identical
+ * copies, and the two now run in different places (one sequential, one inside
+ * a Promise.all) — which is exactly the shape where two copies drift apart.
+ * `windowWait` depends on the DESCENDING order; it is not cosmetic.
+ */
+function toDescendingTimes(isoTimes: string[]): number[] {
+  return isoTimes
+    .map((iso) => Date.parse(iso))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => b - a);
+}
+
 export async function checkOtpThrottle(params: {
   phoneHash: string;
   ipHash: string | null;
@@ -181,10 +196,9 @@ export async function checkOtpThrottle(params: {
   const dayAgo = new Date(now - DAY_MS).toISOString();
 
   // ONE read serves all three phone windows — see getOtpRequestTimes.
-  const phoneTimes = (await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo))
-    .map((iso) => Date.parse(iso))
-    .filter((t) => Number.isFinite(t))
-    .sort((a, b) => b - a);
+  const phoneTimes = toDescendingTimes(
+    await getOtpRequestTimes({ phoneHash: params.phoneHash }, dayAgo)
+  );
 
   // ── PER-NUMBER: the real control, checked first because it is the limit
   // an attacker actually meets and the cheapest to reject on.
@@ -203,13 +217,45 @@ export async function checkOtpThrottle(params: {
     return { allowed: false, retryAfterSeconds: phoneDaily, scope: "phone-daily" };
   }
 
-  // ── PER-IP: generous, and only when an IP was actually observed.
-  if (params.ipHash) {
-    const ipTimes = (await getOtpRequestTimes({ ipHash: params.ipHash }, dayAgo))
-      .map((iso) => Date.parse(iso))
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => b - a);
+  // ── THE CONCURRENT PAIR (chunk 2.6d, decision [I31]).
+  //
+  // ⚠️ EVERYTHING ABOVE THIS LINE IS DELIBERATELY SEQUENTIAL AND MUST STAY
+  // THAT WAY. The phone read runs FIRST and alone, and each per-number check
+  // returns before this point is reached, so a hammered request still costs
+  // exactly ONE query. Hoisting these two reads above the phone checks would
+  // make every hammered request cost three — turning a throttle into an
+  // amplifier on an unauthenticated path. That is the whole of [I31].
+  //
+  // ⚠️ AND IT IS THE PHONE-FIRST RULE THAT BOUNDS WHAT THIS PARALLELISM COSTS.
+  // The global count is the only query with no key to narrow it, and it now
+  // runs even when the IP limit is about to reject — work the old sequential
+  // order skipped. That is affordable ONLY because reaching here already
+  // requires clearing the per-number cooldown, hourly and daily caps, so the
+  // extra unkeyed counts are bounded by the per-IP hourly cap, not by how fast
+  // an attacker can send.
+  //
+  // ⚠️ Promise.all, NEVER Promise.allSettled. Both halves throw on a database
+  // failure, so this rejects, the route maps it to 503, and NO SMS IS SENT
+  // (D3, fail-closed). allSettled would swallow the rejection and convert a
+  // database outage into an allow — an unthrottled SMS cannon during exactly
+  // the incident you least want one.
+  //
+  // ⚠️ THE QUERIES RUN TOGETHER; THE DECISIONS DO NOT. They are still
+  // evaluated ip-hourly → ip-daily → global-daily below, so `scope` and
+  // `retryAfterSeconds` are byte-identical to the sequential version. The
+  // suite asserts this rather than trusting it — a reordering here would
+  // silently start reporting the wrong limit to the user.
+  const [ipTimes, globalToday] = await Promise.all([
+    // Only when an IP was actually observed. `null` (not an empty array) so
+    // "no IP to check" stays distinguishable from "an IP with no history".
+    params.ipHash
+      ? getOtpRequestTimes({ ipHash: params.ipHash }, dayAgo).then(toDescendingTimes)
+      : Promise.resolve(null),
+    countOtpRequestsSince(dayAgo),
+  ]);
 
+  // ── PER-IP: generous, and only when an IP was actually observed.
+  if (ipTimes !== null) {
     const ipHourly = windowWait(ipTimes, OTP_PER_IP_HOURLY, HOUR_MS, now);
     if (ipHourly !== null) {
       return { allowed: false, retryAfterSeconds: ipHourly, scope: "ip-hourly" };
@@ -221,9 +267,8 @@ export async function checkOtpThrottle(params: {
     }
   }
 
-  // ── GLOBAL: the spend ceiling. Checked LAST because it is the only query
-  // with no key to narrow it, and because it is the least likely to bind.
-  const globalToday = await countOtpRequestsSince(dayAgo);
+  // ── GLOBAL: the spend ceiling. Evaluated LAST — it is the least likely to
+  // bind, and the per-IP scopes must win when both would.
   if (globalToday >= OTP_GLOBAL_DAILY) {
     // ⚠️ LOUD ON PURPOSE. If this ever fires in production it means either an
     // attack or a launch, and both need a human to look — nobody can request a
@@ -247,6 +292,32 @@ export async function checkOtpThrottle(params: {
  * The sweep is awaited rather than floated for the [I25] reason — a floated
  * promise can be frozen away by the platform — but its own failure is
  * swallowed inside purgeOldOtpRequests.
+ *
+ * ⚠️ THE TWO RUN CONCURRENTLY (chunk 2.6d, decision [I32]), AND THE SENTENCE
+ * ABOVE IS WHAT MAKES THAT SAFE — read [I32] before touching either half.
+ *
+ * `purgeOldOtpRequests` catches everything internally (both the PostgREST
+ * error branch and a thrown exception), logs it as non-fatal, and returns
+ * void. It CANNOT reject. So this Promise.all can only ever reject on the
+ * RECORD — precisely the half that must fail closed, and the opposite reason
+ * from why [I31]'s pair in checkOtpThrottle is safe, where BOTH halves throw.
+ *
+ * ⚠️ IF A FUTURE EDIT MAKES purgeOldOtpRequests THROW, THIS BECOMES A BUG.
+ * A failed retention sweep would start rejecting here, which the route maps to
+ * a 503 with no SMS sent — so a cosmetic cleanup of "swallowed errors" would
+ * silently take out OTP login, signup AND reset. Keep the swallow, or
+ * un-parallelise in the same commit.
+ *
+ * ⚠️ The row sets are disjoint by construction — the DELETE targets
+ * `created_at < now − OTP_REQUEST_RETENTION_HOURS` and the INSERT adds a row
+ * at `now` — so the sweep cannot remove the row just written. That holds only
+ * while the retention window is comfortably positive; at or near zero the sets
+ * overlap and the counter silently stops counting.
+ *
+ * ⚠️ STILL AWAITED, deliberately. Promise.all awaits both, which preserves
+ * [I25]'s reason for awaiting the sweep at all: the platform may freeze the
+ * function after the response, and a floated promise is simply lost.
+ * Concurrency is the win here; fire-and-forget is not on the table.
  */
 export async function recordOtpAttempt(params: {
   phoneHash: string;
@@ -254,15 +325,16 @@ export async function recordOtpAttempt(params: {
   purpose: string;
   now?: number;
 }): Promise<void> {
-  await recordOtpRequest({
-    phoneHash: params.phoneHash,
-    ipHash: params.ipHash,
-    purpose: params.purpose,
-  });
-
   const cutoff = new Date(
     (params.now ?? Date.now()) - OTP_REQUEST_RETENTION_HOURS * HOUR_MS
   ).toISOString();
 
-  await purgeOldOtpRequests(cutoff);
+  await Promise.all([
+    recordOtpRequest({
+      phoneHash: params.phoneHash,
+      ipHash: params.ipHash,
+      purpose: params.purpose,
+    }),
+    purgeOldOtpRequests(cutoff),
+  ]);
 }

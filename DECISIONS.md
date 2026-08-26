@@ -365,4 +365,16 @@ Measured against production on 2026-08-24 (real Twilio send, founder's number, L
 
 **Migration cost: none** — pure application-level concurrency, no schema change, no DDL, no new dependency. `git revert` restores the prior behaviour exactly.
 
+⚠️ **OUTCOME, MEASURED 2026-08-26 — AND IT CONTRADICTS WHAT BOTH OF US EXPECTED MID-CHUNK.** On localhost this pair halved its leg (701 → 243 ms) while [I31]'s pair moved not at all (534 → 525 ms), which looked like [I31] had been a waste. **In production the opposite is true: BOTH pairs paid, and each saved almost exactly one round trip.** Same LAN build, same method, registered reset end to end:
+
+| leg | 2.6c | 2.6d | delta |
+|---|---|---|---|
+| throttle check ([I31]'s pair) | 2981 ms | 2060 ms | **−921 ms** |
+| record + provider ([I32]'s pair) | 1741 ms | 965 ms | **−776 ms** |
+| **total** | **4722 ms** | **2915 ms** | **−1807 ms** |
+
+**The floor dropped 6000 → 5000 and the measured ceiling 4722 → 3621 as a direct result.** ⚠️ **THE LESSON IS ABOUT WHERE YOU MEASURE, NOT ABOUT CONCURRENCY.** Localhost round trips are warm and cheap, so removing one is invisible there and the unkeyed global count dominates; production round trips to Singapore cost ~900 ms each, so removing one is the whole win. **A latency optimisation judged on localhost would have been abandoned as worthless.** Measure where the latency actually is.
+
+⚠️ **AND WHAT IS STILL NOT FIXED: the jitter is entirely ours.** The provider leg is stable to within **15 ms** across sends (955/965/970); the throttle check swings by nearly a full second (1795–2757 ms). The floor is now sized by OUR variance, not the provider's. Squeezing it further means attacking `checkOtpThrottle`'s two remaining sequential round trips — the single-query rewrite — not more parallelism. [I31] and this decision have taken what concurrency can take.
+
 *Append new decisions below this line with the next ID and a date.*
