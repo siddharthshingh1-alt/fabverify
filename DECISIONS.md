@@ -400,6 +400,13 @@ Verified against the installed supabase-js, not assumed:
 
 **The fix is the pattern 2.6c already chose:** a dedicated, isolated client for the provider call, never the shared one. 2.6c built `otpSendClient` for exactly this reason; 2.8a used `supabaseAdmin` instead, and the inconsistency was noted in TASKS.md without the consequence being understood. ⚠️ **THE GENERAL RULE: never call an `auth.*` method that can establish a session on a client whose privileges anything else depends on.** A client that authenticates and a client that authorises must not be the same object.
 
-⚠️ **WHY NOTHING CAUGHT IT: `verifyOtpServerSide` short-circuits on `!isProductionRuntime`**, so all 42 of 2.8a's assertions pass without the call ever executing. The branch has genuinely never run. A suite cannot test what a gate prevents it from reaching — which is why the production reset test is still owed, and why it is now expected to *pass* rather than to discover this.
+⚠️ **WHY NOTHING CAUGHT IT: `verifyOtpServerSide` short-circuits on `!isProductionRuntime`**, so all 42 of 2.8a's assertions pass without the call ever executing. The branch has genuinely never run. A suite cannot test what a gate prevents it from reaching — which is why the production reset test was still owed.
+
+✅ **CONFIRMED IN PRODUCTION 2026-08-27, ON ITS FIRST REAL EXECUTION.** A genuine reset ran end to end on the founder's number against the LAN production build, and the shared admin client survived it. Proven three independent ways rather than assumed:
+1. **The reset itself completing is the proof.** `resetPasswordByOtp` writes `user_credentials` — RLS **deny-all** — two statements after `verifyOtp`. A poisoned client would have failed that write, *after* the code was consumed. It succeeded.
+2. **A live deny-all probe hours later, in the SAME process**: a wrong-code reset submit returned **401**, not 503 — so `checkOtpVerifyThrottle`'s read of `otp_requests` (also deny-all) still bypasses RLS.
+3. `/api/test-db` **200** and `/api/manufacturers` returning **real rows** — a client downgraded to a user would see neither.
+
+⚠️ **AND THE SERVER LOG PROVED THE THING LOCALHOST STRUCTURALLY CANNOT.** After the reset the next authenticated request logged `[auth] resolved users.id=1ac55487… via OUR OWN TOKEN (sub=users.id) — no lookup needed`. That is the ladder's local branch accepting the token the reset minted, **including the epoch check** — the branch `auth.ts:144` gates on `NODE_ENV === "production"` and which no localhost suite can reach. Eviction is now proven in both directions: pre-reset tokens sit at epoch 0 against a stored 1, and the reset's own token was accepted in production.
 
 *Append new decisions below this line with the next ID and a date.*

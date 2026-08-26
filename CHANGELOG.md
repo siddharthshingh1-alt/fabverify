@@ -6,6 +6,31 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-27 · chunk 2.8b] — Password reset goes live, and the gate caught two takeover-class bugs on the way
+
+> **Users can now recover their own accounts.** Proven end to end on a real number against the LAN production build. The build itself is the smaller story: gating this chunk surfaced two bugs that would each have shipped, and one of them would have fired on the very production test that was about to run.
+
+### Added
+- `POST /api/auth/password-reset` — a thin adapter ([I28]). It delegates every decision: `resetPasswordByOtp` (2.8a) for gate/resolve/policy/write, `checkOtpVerifyThrottle` ([I33]) for the brute-force limit, `otpVerifyClient` ([I34]) for the provider call, `issueSessionToken` (2.5b) for the token.
+- `/reset-password` — the two-stage forgot-password screen, plus a **Forgot password?** link on `/login` rendered **unconditionally**, for the same enumeration reason the password field is.
+- `checkOtpVerifyThrottle` + `recordOtpVerifyAttempt` — 5 guesses per rolling 15 minutes, counted separately from sends.
+- `scripts/verify-otp-verify-throttle.ts` (15) and `scripts/verify-password-reset-route.ts` (34).
+
+### Fixed — both found by gating, not by testing
+- 🛑 **THE RESET SUBMIT WAS AN UNTHROTTLED ACCOUNT-TAKEOVER VECTOR.** Unauthenticated, gated only by a 6-digit code, and a success writes a password and bumps `token_epoch` — takeover that also evicts the real owner. **Nothing counted verify attempts:** `otp_requests` records sends, 2.7's counter is for password attempts on a different table. ⚠️ The pending anti-spraying chunk would **not** have covered it — different endpoint, different credential.
+- 🛑 **`verifyOtp` WAS POISONING THE SHARED ADMIN CLIENT** ([I34]). It calls `_saveSession`, which under `persistSession:false` still retains the session **in memory**, and `_getAccessToken()` returns `sessionToken ?? supabaseKey` — so a session outranks the service role key. One production reset would have downgraded every `db.ts` call in the process to that user, breaking the reset two statements later against deny-all RLS, *after* the code was consumed. **The production test about to be run is exactly what would have triggered it.**
+- ⚠️ **`verify-token-ladder.ts` Z1 counted the WHOLE `user_credentials` table** and began failing once a real credential existed that it did not create. Its DELETEs were already scoped so nothing was at risk, but the assertion described a platform with no real users. The sibling suites were scoped on 2026-08-24; this one was missed.
+
+### Verified in production (2026-08-27)
+`token_epoch` **0 → 1** · one send row, one verify row · `users` 11, `auth_identities` 1, `user_credentials` 1 — **no phantom account**. The admin client survived, proven three ways: the reset's own write to deny-all `user_credentials` succeeded; a later wrong-code submit returned **401 not 503** (deny-all `otp_requests` still readable) in the same process; `/api/manufacturers` still returns real rows. ⚠️ **And the server log proved what localhost structurally cannot** — `[auth] resolved … via OUR OWN TOKEN (sub=users.id)`, the ladder's local branch accepting the reset's token with its epoch check, on a branch gated behind `NODE_ENV === "production"`.
+
+### Four assertions that were wrong before they were right
+C1/C2 claimed a pre-reset token is refused by a real route. It was — but because `auth.ts:144` gates the **entire** token branch on production, so under `next dev` a freshly-minted **valid** token got 401 too. **C1 was a false pass that would have stayed green with the feature deleted.** D3 asserted whole-table ownership of `user_credentials` and failed against the founder's real credential. F3 compared source positions and failed on its own import list. E2 compared raw bodies and would have flaked: `retryAfterSeconds` legitimately differed by 1 s between two callers.
+
+### Known-open
+- 🛑 **Login-route anti-spraying — entry still unwritten, HARD MUST-DO BEFORE MERGE TO `main`.** `/api/auth/password-login` has per-account lockout only: no per-IP, no global, no alerting.
+- **A 5 s reset is what ships.** The D4 floor dominates. If that is too slow for real users, the single-query throttle rewrite is the next lever.
+
 ## [2026-08-26 · chunk 2.6d] — The OTP send path gets faster, and the floor comes down with real evidence behind it
 
 > **The headline is a measurement lesson, not a concurrency one.** Two pairs of sequential Supabase round trips now run concurrently. On localhost one of the two showed no improvement at all and looked like wasted work; in production it was half the win. A latency optimisation judged on localhost would have been abandoned.
