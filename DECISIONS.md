@@ -409,4 +409,41 @@ Verified against the installed supabase-js, not assumed:
 
 ⚠️ **AND THE SERVER LOG PROVED THE THING LOCALHOST STRUCTURALLY CANNOT.** After the reset the next authenticated request logged `[auth] resolved users.id=1ac55487… via OUR OWN TOKEN (sub=users.id) — no lookup needed`. That is the ladder's local branch accepting the token the reset minted, **including the epoch check** — the branch `auth.ts:144` gates on `NODE_ENV === "production"` and which no localhost suite can reach. Eviction is now proven in both directions: pre-reset tokens sit at epoch 0 against a stored 1, and the reset's own token was accepted in production.
 
+---
+
+## LOGIN ANTI-SPRAYING — DECISIONS (2026-08-27, chunk 2.10)
+
+**[I35] Password spraying is bounded by counting DISTINCT ACCOUNTS THAT FAILED from one IP — not by rate-limiting attempts per IP. This SUPERSEDES [I23]'s prohibition on per-IP limits.** (2026-08-27)
+
+⚠️ **[I23] SAID "PER-ACCOUNT ONLY. PER-IP IS NOT BUILT", AND THIS REVERSES THAT. Recorded loudly rather than quietly built** (Prime Directive #2). [I23] gave two reasons and exactly one of them still stands:
+- *"there is no shared state store — no Redis, and Vercel lambdas share no memory"* → **solved.** 2.6c built `otp_requests`.
+- *"shared egress IPs (an office, a mobile carrier NAT) mean one attacker behind the same address can lock out every real user, converting a brute-force defence into a denial-of-service tool"* → **still true, and this design does not accept it. It inverts it.**
+
+**THE INVERSION IS THE WHOLE CHUNK.** A naive per-IP attempt cap punishes the office and barely inconveniences the attacker. Counting *distinct accounts that failed* separates them by their defining shape:
+- **Spraying is one password against many accounts.** It produces many distinct accounts failing from one address, by definition. It cannot be performed without generating the signal.
+- **A NAT'd office is many people each on their OWN account, mostly SUCCEEDING.** Its failures are a person mistyping their own password.
+
+So legitimate shared-IP traffic does not generate the signal at all, and [I23]'s objection — correct about the thing it rejected — does not apply to this. **Never restate this as "we added per-IP rate limiting"; that is the design [I23] refused, and it refused it for good reason.**
+
+⚠️ **A SUCCESSFUL LOGIN CLEARS THAT ACCOUNT'S FAILURE ROWS FOR THAT IP, AND WITHOUT THIS THE CONTROL WOULD PUNISH LARGE OFFICES.** Found while specifying the NAT-safety TEST rather than after shipping: in a 200-person office, ten different people each mistyping once inside fifteen minutes is not implausible at all, so raw distinct-failure counting would trip on ordinary Monday-morning traffic. Clearing on success means only accounts that failed **and never succeeded** are counted — which a sprayer produces and an office does not. Scoped to `(phone, ip)`: a success from one address must not erase evidence from another. Mirrors [I23]'s own "cleared on success" semantics.
+
+**Threshold: 10 distinct failed accounts per rolling 15 minutes**, matching [I23]'s lockout and [I33]'s verify window so the platform imposes ONE outage length rather than three. **No raw per-IP attempt cap** — that is precisely what [I23] rejected, and any cap low enough to bind is low enough to hurt a real office.
+
+**Storage: `otp_requests`, `purpose = "login-fail"`. No DDL.** Safe by construction because [I33] made every existing reader take a **required** `purposes` parameter — a new purpose is inert to the send and verify counters, and the compiler enforces that nobody forgets. ⚠️ **The table is now a misnomer**: it holds OTP sends, reset-verify attempts and login failures. It is an auth rate-limit event log with a historical name. A rename is optional cleanup and is **not** worth another hand-run DDL on the critical path.
+
+**[I36] The anti-spray check FAILS OPEN, deliberately departing from D3 — and the asymmetry that justifies it does not generalise.** (2026-08-27)
+
+D3 is the standing rule: a throttle that cannot read its counter must refuse. It is right for the OTP send (a blip → no SMS) and righter still for the reset verify (a blip → no takeover). **It is wrong here, and applying it by reflex would have been the expensive mistake.**
+
+**Fail-closed on this check means a transient database blip locks every user out of the platform, on the primary authentication path.** Two things make failing open safe here in a way it never was for the OTP paths:
+
+1. **The fallback is not "no protection" — it is [I23].** Per-account lockout lives on `user_credentials`, a different read, and is untouched by this check failing. Failing open degrades to exactly the posture the platform has shipped and accepted since 2.7.
+2. ⚠️ **THE THROTTLE STORE AND THE CREDENTIAL STORE ARE THE SAME DATABASE.** If `otp_requests` is unreadable, `user_credentials` almost certainly is too — so `verifyPasswordCredential` cannot authenticate anyone and **the spray cannot succeed during the outage anyway.** Failing open hands an attacker nothing they could not obtain by taking the database down, which also defeats them. Fail-closed would trade a full login outage for zero security.
+
+⚠️ **IT MUST FAIL OPEN LOUDLY — `console.error`, never a swallowed catch.** A silent fail-open is indistinguishable from a control that was never built, and this one would decay into decoration exactly when it matters.
+
+⚠️ **DO NOT GENERALISE THIS.** The reasoning depends on (a) an independent control still standing and (b) the attack being impossible while the store is down. Neither holds for the OTP send or the reset verify, and both stay fail-closed. **When adding any future throttle, decide this fresh; "the login one fails open" is not a precedent.**
+
+**Global ceiling: LOG-ONLY, never blocking.** 2.6c's `OTP_GLOBAL_DAILY` blocks because unbounded SMS is a runaway *bill*. Login has no such cost — just compute, already bounded per-account and now per-IP — while a global login block is a **platform-wide outage an attacker can trigger cheaply.** Same risk reasoning, different costs, opposite answer. ⚠️ **Alerting is a log line and nothing more. Nobody watches logs**, so this is forensic evidence after the fact, not a response mechanism; external alerting needs a seam per [X5] and is not in this chunk.
+
 *Append new decisions below this line with the next ID and a date.*
