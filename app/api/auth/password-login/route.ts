@@ -3,6 +3,15 @@ import { dbErrorResponse } from "@/app/lib/apiError";
 import { verifyPasswordCredential } from "@/app/lib/authProvider.server";
 import { issueSessionToken } from "@/app/lib/sessionToken.server";
 import { PASSWORD_CREDENTIAL_TYPE, getUserCredential } from "@/app/lib/db";
+import {
+  callerIp,
+  checkLoginSprayThrottle,
+  clearLoginFailuresFor,
+  hashIp,
+  hashPhone,
+  logGlobalLoginFailureRate,
+  recordLoginFailure,
+} from "@/app/lib/otpThrottle.server";
 
 /**
  * LOG IN WITH PHONE + PASSWORD. Chunk 2.6a (M10) — the FIRST HTTP surface on
@@ -77,12 +86,67 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  // ── ANTI-SPRAY (chunk 2.10, [I35]/[I36]) ────────────────────────────────
+  //
+  // ⚠️ BEFORE THE ARGON2 VERIFY, DELIBERATELY. Each verify costs ~45 ms of
+  // memory-hard work at 19 MiB; a sprayer who reached this route would
+  // otherwise get that compute for free on every guess. This is the one place
+  // the ordering differs from [I25], which put the LOCKOUT check AFTER the
+  // verify — and the reasoning does not conflict: [I25] was avoiding a timing
+  // signal that varied by ACCOUNT (a locked account answering faster than an
+  // unlocked one). This check never looks at the account at all, so the only
+  // thing its timing reveals is the state of the caller's OWN address, which
+  // they created and already know.
+  //
+  // ⚠️ IT NEVER THROWS. checkLoginSprayThrottle fails OPEN and loudly ([I36]),
+  // because fail-closed here would lock every user out of the platform on a
+  // database blip — and buy nothing, since the same outage stops
+  // verifyPasswordCredential authenticating anyone. If it fails open, login
+  // degrades to exactly [I23]'s per-account lockout, which is untouched.
+  const ipHash = hashIp(callerIp(request.headers));
+  const phoneHash = hashPhone(phone.replace(/\D/g, "").slice(-10));
+
+  const spray = await checkLoginSprayThrottle({ ipHash });
+
+  if (!spray.allowed) {
+    // ⚠️ THE GENERIC 401, NOT A 429, AND THAT IS THE STRONGER CHOICE.
+    //
+    // A 429 would be enumeration-safe — the counter reads no account state, so
+    // it cannot differ between a registered and an unregistered number — but
+    // it would TELL A SPRAYER THEIR TECHNIQUE WAS DETECTED, handing them the
+    // signal to rotate addresses. Returning the same body as a wrong password
+    // reveals nothing at all: not the account, and not the control.
+    //
+    // ⚠️ THE COST, STATED RATHER THAN HIDDEN: a legitimate user caught behind
+    // a blocked shared address sees "invalid password" and gets no
+    // explanation. Accepted because clear-on-success ([I35]) makes that case
+    // very rare — an office only trips this if its people are failing and
+    // never succeeding — and because the alternative helps the attacker more
+    // than it helps that user. No Retry-After header, for the same reason.
+    return NextResponse.json(GENERIC_FAILURE, { status: 401 });
+  }
+
   try {
     // Lockout, argon2id verification and the enumeration equalisation all
     // happen inside this one call. Nothing about them is re-implemented here.
     const result = await verifyPasswordCredential(phone, password);
 
     if (!result.ok) {
+      // ⚠️ RECORDED AFTER THE VERIFY AND ONLY ON FAILURE — unavoidable, since
+      // the whole design counts accounts that FAILED. Same ordering [I23]'s
+      // own recordFailure already uses. Awaited for [I25]'s reason: the
+      // platform may freeze the function after the response, and a floated
+      // write is simply lost.
+      //
+      // ⚠️ `account-locked` IS COUNTED TOO. It is only reachable by a caller
+      // who supplied the CORRECT password ([I24]), so it is not a spray
+      // signal — but excluding it would create a branch where an attacker's
+      // attempt costs nothing, and the cost of counting it is that a locked-
+      // out owner adds one row for their own account. One account is never a
+      // spray.
+      await recordLoginFailure({ phoneHash, ipHash });
+      void logGlobalLoginFailureRate();
+
       if (result.reason === "account-locked") {
         // Reachable ONLY by a caller who supplied the correct password
         // ([I24]) — they have proven ownership, so telling them how long to
@@ -110,6 +174,14 @@ export async function POST(request: Request) {
     // byte-identical to the version 37 + 51 assertions were written against —
     // carrying the epoch out of it would be cheaper and would mean editing a
     // security-critical function for a convenience.
+    // ⚠️ FORGET THIS ACCOUNT'S FAILURES FROM THIS ADDRESS ([I35]). Without
+    // this the control punishes large offices: ten different people behind one
+    // NAT each mistyping once inside fifteen minutes is ordinary traffic, and
+    // only counting accounts that failed AND NEVER SUCCEEDED is what makes a
+    // threshold of 10 safe. Never throws — a housekeeping failure must not
+    // turn a proven-correct login into an error.
+    await clearLoginFailuresFor({ phoneHash, ipHash });
+
     const credential = await getUserCredential(result.user.id, PASSWORD_CREDENTIAL_TYPE);
 
     // Defensive, not expected: verification just succeeded against this row,
