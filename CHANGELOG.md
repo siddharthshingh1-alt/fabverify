@@ -6,6 +6,39 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-27 · chunk 2.10] — Password spraying is handled, by inverting the objection that blocked it for a week
+
+> **The last security chunk of M10**, and the "hard must-do before merge to `main`" the open-item register had demanded since 2.6a merged without it. Per-account lockout never sees a spray: one guess each against ten thousand accounts trips no single counter.
+
+### The design, and why it is not what [I23] refused
+[I23] rejected per-IP limiting for a good reason — a naive attempt cap behind an office or carrier NAT lets one attacker lock out every real user. This does not fight that objection, it **inverts** it: count **distinct accounts that FAILED** from one address. Spraying is one password against many accounts, so it produces that signal by definition and cannot be performed without it; a NAT'd office is many people on their own accounts mostly **succeeding**, and produces almost none. ⚠️ **Never restate this as "per-IP rate limiting"** — that is the design [I23] refused, and counting ATTEMPTS instead of DISTINCT FAILED ACCOUNTS silently becomes it.
+
+### Added
+- `checkLoginSprayThrottle` — 10 distinct failed accounts per rolling 15 minutes, matching [I23]'s lockout and [I33]'s verify window so the platform imposes one outage length.
+- Wired into `/api/auth/password-login`: **check before the argon2 verify** (a sprayer must not get 45 ms × 19 MiB free per guess), **record after, on failure only**, **clear on success**.
+- `scripts/verify-login-spray.ts` (16) and `scripts/verify-login-spray-route.ts` (20).
+- Storage reuses `otp_requests` with `purpose = "login-fail"`. **No DDL** — and inert to the OTP counters by construction, because [I33] made the `purposes` parameter **required**.
+
+### Decisions
+- **[I35]** supersedes [I23]'s per-IP prohibition, loudly. ⚠️ **Clear-on-success is load-bearing and was found by writing the NAT TEST, not the code**: ten people in a 200-person office each mistyping once inside fifteen minutes is ordinary traffic, so raw distinct-failure counting would have tripped on it.
+- **[I36]** the check **fails OPEN**, departing from D3 — fail-closed would lock every user out of the platform on a database blip and buy nothing, since the same outage stops `verifyPasswordCredential` authenticating anyone. **Must not be generalised**; the OTP send and reset verify stay fail-closed.
+- The block returns a **generic 401, not a 429**. A 429 is enumeration-safe but tells a sprayer they were detected and cues them to rotate addresses.
+
+### Verified in production (2026-08-27)
+A 12-number spray from the laptop blocked that address — probe → **401 in 0.6 s writing no row**, i.e. refused before the verify — and **while it stayed blocked, a real login from the founder's phone succeeded.** Since the check precedes the verify, a blocked address can never reach `verifyPasswordCredential`, so the success is itself proof of a different address. The phone's deliberate wrong-password attempt was recorded and then **cleared by its own success** — [I35] observed on live data. Credential untouched throughout (epoch 1, `failed_attempts` 0); no `ANTI-SPRAY CHECK UNAVAILABLE` line.
+⚠️ **What the run could not show directly:** the phone's `ip_hash` value, because the success deleted the row carrying it first. The property does not depend on the value, but the observation is an inference from control flow rather than a printed hash — recorded rather than glossed.
+
+### Mutation-tested, because green proves nothing until it can go red
+Counting attempts instead of distinct accounts → **B3 red**. Removing clear-on-success → **B1 red**. Failing closed → **D1 red**. Each reverted and re-run clean.
+⚠️ **And the HTTP NAT cell did not discriminate at first** — 20 attempts across only 2 real accounts never approaches a threshold of 10, and it passed with clear-on-success deleted. Restructured to sit one account either side of the line.
+
+### Fixed along the way — five suites, one bug class
+`verify-password-login` C5 and `verify-password-lockout` H1 scanned importers by **raw text**, so a documentation comment naming `verifyPasswordCredential` registered as a caller; both now strip comments (the W1 lesson from 2.6c, applied where missed), and the lockout suite was additionally still on `git grep`, which searches tracked files only. `verify-password-reset` H1 asserted **zero** route importers — 2.8b legitimately ended that and the tripwire fired correctly; now an allowlist of one. And `verify-password-lockout`, `verify-password-login` and `verify-set-password` all asserted the **whole** `user_credentials` table was empty at cleanup — the third, fourth and fifth suites carrying the 2026-08-22 bug class.
+
+### Known-open
+- ⚠️ **A login occasionally takes >15 s. Cause unknown, not reproduced.** Observed once during this test; the server completed the request correctly and six clean logins immediately afterwards ran 1.0–1.9 s. **Not an anti-spray bug** — the blocked path is the fast path at 1.0 s. "Provider spike" is the leading hypothesis, **not a finding**.
+- The `SPRAY PATTERN` line fires on **every** blocked attempt, not once per spray — attacker-driven log volume.
+
 ## [2026-08-27 · chunk 2.8b] — Password reset goes live, and the gate caught two takeover-class bugs on the way
 
 > **Users can now recover their own accounts.** Proven end to end on a real number against the LAN production build. The build itself is the smaller story: gating this chunk surfaced two bugs that would each have shipped, and one of them would have fired on the very production test that was about to run.
