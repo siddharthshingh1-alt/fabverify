@@ -1382,6 +1382,76 @@ export async function getOtpRequestTimes(
  * `head: true` with an exact count so no rows cross the wire; this is the one
  * query with no key to narrow it and it must not scale with volume.
  */
+/**
+ * The distinct account-hashes that have FAILED a login from one IP since a
+ * cutoff (chunk 2.10, [I35]).
+ *
+ * ⚠️ RETURNS THE HASHES, NOT A COUNT, because PostgREST cannot express
+ * COUNT(DISTINCT ...) and the caller needs the distinct set rather than a row
+ * total. Ten rows against one account is a brute-force attempt ([I23] handles
+ * that); ten rows against ten DIFFERENT accounts is a spray. Collapsing them
+ * to a row count would conflate the two and re-create the per-IP attempt cap
+ * [I23] rejected.
+ *
+ * ⚠️ THE LIMIT FAILS TOWARDS DETECTION, unlike getOtpRequestTimes' bound. If
+ * this truncates, the caller has far more than the threshold already, so a
+ * truncated read can only under-report a number that is past the line anyway
+ * — it can never turn a spray into an allow.
+ */
+export async function getFailedLoginAccountHashes(
+  ipHash: string,
+  sinceIso: string,
+  purpose: string
+): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("otp_requests")
+    .select("phone_hash")
+    .eq("ip_hash", ipHash)
+    .eq("purpose", purpose)
+    .gte("created_at", sinceIso)
+    .limit(500);
+
+  if (error) throw error;
+  return [...new Set((data ?? []).map((row) => row.phone_hash as string))];
+}
+
+/**
+ * Clear one account's login-failure rows for ONE IP (chunk 2.10, [I35]).
+ *
+ * ⚠️ WITHOUT THIS THE CONTROL PUNISHES LARGE OFFICES. Ten different people
+ * behind one NAT each mistyping once inside fifteen minutes is ordinary; only
+ * counting accounts that failed AND NEVER SUCCEEDED is what makes a threshold
+ * of 10 safe. Mirrors [I23]'s own clear-on-success semantics.
+ *
+ * ⚠️ SCOPED TO (phone, ip), NEVER TO THE PHONE ALONE. A success from the
+ * owner's home address must not erase the evidence an attacker is generating
+ * from somewhere else.
+ *
+ * ⚠️ SWALLOWS ITS OWN ERRORS, like purgeOldOtpRequests and for the same
+ * reason: it runs on the SUCCESS path of a login that has already been proven
+ * correct, and a housekeeping failure must never turn a good login into an
+ * error. Losing it only means the next spray check counts an account it should
+ * have forgotten — it fails towards refusing, never towards allowing.
+ */
+export async function clearLoginFailures(params: {
+  phoneHash: string;
+  ipHash: string;
+  purpose: string;
+}): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("otp_requests")
+      .delete()
+      .eq("phone_hash", params.phoneHash)
+      .eq("ip_hash", params.ipHash)
+      .eq("purpose", params.purpose);
+
+    if (error) console.error("[login] failure-row clear failed (non-fatal):", error.message);
+  } catch (error) {
+    console.error("[login] failure-row clear threw (non-fatal):", getErrorMessageLocal(error));
+  }
+}
+
 export async function countOtpRequestsSince(
   sinceIso: string,
   purposes: readonly string[]

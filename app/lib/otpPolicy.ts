@@ -192,6 +192,61 @@ export const OTP_VERIFY_WINDOW_MS = 15 * 60 * 1000;
 export const OTP_VERIFY_PER_IP_HOURLY = 30;
 
 /**
+ * ⚠️ LOGIN ANTI-SPRAYING (chunk 2.10, decisions [I35] + [I36]).
+ *
+ * The purpose recorded for a FAILED password login. Not an OtpPurpose and
+ * nothing to do with OTP — see the table note below.
+ */
+export const LOGIN_FAIL_PURPOSE = "login-fail";
+
+/**
+ * ⚠️ THIS COUNTS DISTINCT ACCOUNTS THAT FAILED FROM ONE IP. IT IS NOT A PER-IP
+ * ATTEMPT LIMIT, AND THE DIFFERENCE IS THE ENTIRE POINT ([I35]).
+ *
+ * [I23] refused per-IP rate limiting, correctly: shared egress IPs mean a naive
+ * attempt cap lets one attacker behind an office or carrier NAT lock out every
+ * real user, turning a brute-force defence into a denial-of-service tool.
+ *
+ * This does not fight that objection, it inverts it. Spraying is ONE password
+ * against MANY accounts, so it produces many distinct failing accounts from one
+ * address BY DEFINITION — it cannot be performed without generating the signal.
+ * A NAT'd office is many people on their OWN accounts, mostly SUCCEEDING. The
+ * two separate cleanly on shape rather than on volume.
+ *
+ * ⚠️ NEVER DESCRIBE THIS AS "PER-IP RATE LIMITING". That is the design [I23]
+ * rejected. If a future change starts counting ATTEMPTS instead of DISTINCT
+ * FAILED ACCOUNTS, it has silently become that design and re-acquired the DoS
+ * it was built to avoid.
+ *
+ * ⚠️ A SUCCESSFUL LOGIN CLEARS THAT ACCOUNT'S FAILURE ROWS FOR THAT IP, and
+ * the threshold is only defensible WITH that clearing. Ten different people in
+ * a 200-person office each mistyping once inside fifteen minutes is entirely
+ * plausible; without clearing, ordinary Monday-morning traffic would trip this.
+ * Counting only accounts that failed AND NEVER SUCCEEDED is what makes 10 safe.
+ *
+ * 15 minutes matches [I23]'s lockout and [I33]'s verify window, so the platform
+ * imposes ONE outage length rather than three.
+ */
+export const LOGIN_SPRAY_DISTINCT_ACCOUNTS = 10;
+export const LOGIN_SPRAY_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * ⚠️ A LOG THRESHOLD, NOT A CIRCUIT-BREAKER — it never blocks anything ([I36]).
+ *
+ * 2.6c's OTP_GLOBAL_DAILY blocks because unbounded SMS is a runaway BILL. Login
+ * has no such cost: just compute, already bounded per-account by [I23] and
+ * per-IP by the rule above. Meanwhile a global login block would be a
+ * platform-wide outage an attacker could trigger cheaply, on the primary
+ * authentication path. Same risk reasoning as 2.6c, different costs, opposite
+ * answer.
+ *
+ * ⚠️ AND IT IS ONLY A LOG LINE. NOBODY WATCHES LOGS. This is forensic evidence
+ * after the fact, not a response mechanism; real alerting needs an external
+ * integration behind a seam ([X5]) and is deliberately not in this chunk.
+ */
+export const LOGIN_FAIL_GLOBAL_ALERT_HOURLY = 200;
+
+/**
  * ⚠️ THE RESET-PATH TIMING FLOOR (decision D4, 2026-08-22) — the defence
  * against an existence oracle made of latency.
  *

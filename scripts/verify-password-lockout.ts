@@ -34,7 +34,8 @@
  * condition for item 1's outstanding production session.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const env = readFileSync(".env.local", "utf8");
@@ -530,14 +531,38 @@ check("G5 …and the correct password is refused once it does", g5.ok === false)
 // ─────────────────────────────────────────────────────────────────────────
 section("[H] ISOLATION — still no HTTP surface, still no login wiring");
 
-const grep = (pattern: string) => {
-  try {
-    return execFileSync("git", ["grep", "-l", pattern, "--", "app/"], {
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return "";
-  }
+/**
+ * ⚠️ A FILESYSTEM WALK OVER COMMENT-STRIPPED SOURCE — upgraded 2026-08-27 from
+ * a `git grep`, which was wrong in two independent ways that this project has
+ * now been bitten by BOTH of:
+ *
+ *   1. `git grep` searches TRACKED files only, so it stays green while a new
+ *      caller sits untracked. That is why verify-password-login.ts's C5 was
+ *      rewritten to walk the filesystem in 2.6a; this sibling was missed.
+ *   2. A raw text match counts a file that merely NAMES the symbol in prose.
+ *      On 2026-08-27 a documentation comment in otpThrottle.server.ts —
+ *      explaining why the anti-spray check may fail open ([I36]) — registered
+ *      as an un-lockout-ed caller of verifyPasswordCredential.
+ *
+ * Same lesson as W1 in the 2.6c suite: assert on what EXECUTES, never on what
+ * is written near it.
+ */
+const grep = (symbol: string, dir = "app"): string => {
+  const hits: string[] = [];
+  const walk = (d: string) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, entry.name).replace(/\\/g, "/");
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry.name)) {
+        const code = readFileSync(full, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^\s*\/\/.*$/gm, "");
+        if (code.includes(symbol)) hits.push(full);
+      }
+    }
+  };
+  walk(dir);
+  return hits.join("\n");
 };
 const importers = grep("verifyPasswordCredential")
   .split("\n")
@@ -622,9 +647,19 @@ check(
 // ── CLEANUP ──────────────────────────────────────────────────────────────
 await deleteCredentials(BUYER.id);
 await deleteCredentials(MAKER.id);
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS. This counted the WHOLE TABLE and
+ * began failing the moment a real credential existed that it did not create —
+ * the founder's enterprise password. Its DELETEs were already scoped by
+ * user_id, so nothing was ever at risk; the ASSERTION was simply describing a
+ * platform with no real users, and [I27] is converting every account onto a
+ * password. Same class as the 2026-08-22 incident: a suite must never assert
+ * ownership of rows it did not create. Fixed across the sibling suites on
+ * 2026-08-24; these two were missed and are caught here on 2026-08-27.
+ */
 check(
-  "Z1 cleanup: no credentials left behind",
-  (await sql("user_credentials?select=id")).length === 0
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (await sql(`user_credentials?user_id=in.(${BUYER.id},${MAKER.id})&select=id`)).length === 0
 );
 check(
   "Z2 auth_identities untouched (password writes none — I11)",

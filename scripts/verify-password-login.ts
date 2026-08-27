@@ -462,8 +462,19 @@ function filesImporting(symbol: string, dir = "app"): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name).replace(/\\/g, "/");
     if (entry.isDirectory()) hits.push(...filesImporting(symbol, full));
-    else if (/\.(ts|tsx)$/.test(entry.name) && readFileSync(full, "utf8").includes(symbol)) {
-      hits.push(full);
+    else if (/\.(ts|tsx)$/.test(entry.name)) {
+      // ⚠️ COMMENT-STRIPPED BEFORE MATCHING. A raw `.includes()` counts a file
+      // that merely NAMES the symbol in prose as an importer — which is how a
+      // documentation comment in otpThrottle.server.ts (explaining why the
+      // anti-spray check may fail open, [I36]) registered as an un-lockout-ed
+      // caller on 2026-08-27. Same lesson as W1 in the 2.6c suite: assert on
+      // what EXECUTES, never on what is written near it. The walk itself stays
+      // — it replaced a `git grep` that searched tracked files only and stayed
+      // green while a new route was untracked.
+      const code = readFileSync(full, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      if (code.includes(symbol)) hits.push(full);
     }
   }
   return hits;
@@ -535,7 +546,20 @@ check(
 // ── CLEANUP ──────────────────────────────────────────────────────────────
 await deleteCredentials(BUYER.id);
 await deleteCredentials(MAKER.id);
-check("Z1 cleanup: no credentials left behind", (await sql("user_credentials?select=id")).length === 0);
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS. This counted the WHOLE TABLE and
+ * began failing the moment a real credential existed that it did not create —
+ * the founder's enterprise password. Its DELETEs were already scoped by
+ * user_id, so nothing was ever at risk; the ASSERTION was simply describing a
+ * platform with no real users, and [I27] is converting every account onto a
+ * password. Same class as the 2026-08-22 incident: a suite must never assert
+ * ownership of rows it did not create. Fixed across the sibling suites on
+ * 2026-08-24; these two were missed and are caught here on 2026-08-27.
+ */
+check(
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (await sql(`user_credentials?user_id=in.(${BUYER.id},${MAKER.id})&select=id`)).length === 0
+);
 check(
   "Z2 auth_identities untouched (password writes none — I11)",
   (await sql("auth_identities?select=id")).length === 1

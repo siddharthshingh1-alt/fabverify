@@ -24,6 +24,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const env = readFileSync(".env.local", "utf8");
@@ -393,20 +395,54 @@ check(
 // ─────────────────────────────────────────────────────────────────────────
 section("[H] ISOLATION AND OUTAGE");
 
-const grep = (pattern: string) => {
-  try {
-    return execFileSync("git", ["grep", "-l", pattern, "--", "app/"], { encoding: "utf8" }).trim();
-  } catch {
-    return "";
-  }
+/**
+ * ⚠️ A FILESYSTEM WALK OVER COMMENT-STRIPPED SOURCE — upgraded 2026-08-27 from
+ * a `git grep`, which was wrong in two ways this project has now been bitten
+ * by both of: it searches TRACKED files only (so it stays green while a new
+ * caller sits untracked — the 2.8a lesson), and a raw text match counts a file
+ * that merely NAMES the symbol in a comment.
+ */
+const grep = (symbol: string, dir = "app"): string => {
+  const hits: string[] = [];
+  const walk = (d: string) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, entry.name).split("\\").join("/");
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry.name)) {
+        const code = readFileSync(full, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^\s*\/\/.*$/gm, "");
+        if (code.includes(symbol)) hits.push(full);
+      }
+    }
+  };
+  walk(dir);
+  return hits.join("\n");
 };
 const importers = grep("resetPasswordByOtp")
   .split("\n")
   .filter((f) => f && f !== "app/lib/authProvider.server.ts");
+/**
+ * ✅ INVERTED 2026-08-27 — the same fails-when-fixed pattern as G1/G2/G4, and
+ * it fired exactly as designed.
+ *
+ * This asserted ZERO route importers, which was true and load-bearing while
+ * 2.8a was seam-only: a reset function reachable over HTTP before it was
+ * proven would have been an unauthenticated credential-write with no gate.
+ * **Chunk 2.8b legitimately ended that condition** by adding the route — so
+ * the cell went red, correctly, and should have been inverted in 2.8b itself.
+ * It was missed there and caught here.
+ *
+ * ⚠️ THE PROPERTY THAT STILL MATTERS IS AN ALLOWLIST OF ONE. Exactly one route
+ * may reach this function, because that route is where the [I33] brute-force
+ * throttle lives. A second caller would be an un-throttled path to the same
+ * credential write — the hole 2.8b was gated on closing.
+ */
+const RESET_ALLOWED_IMPORTERS = ["app/api/auth/password-reset/route.ts"];
 check(
-  "H1 ⚠️ resetPasswordByOtp has ZERO route importers (2.8a is seam-only)",
-  importers.length === 0,
-  importers.join(", ") || "none"
+  "H1 ✅ resetPasswordByOtp has exactly ONE route importer — the throttled one ([I33])",
+  importers.length === 1 && importers.every((f) => RESET_ALLOWED_IMPORTERS.includes(f)),
+  importers.join(", ") || "none — was: 'ZERO importers (2.8a is seam-only)'"
 );
 
 // ⚠️ Subprocess with a cold module graph — an in-process re-import keeps the

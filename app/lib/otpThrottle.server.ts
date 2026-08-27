@@ -24,6 +24,10 @@ import {
   HOUR_MS,
   OTP_GLOBAL_DAILY,
   OTP_SEND_PURPOSES,
+  LOGIN_FAIL_GLOBAL_ALERT_HOURLY,
+  LOGIN_FAIL_PURPOSE,
+  LOGIN_SPRAY_DISTINCT_ACCOUNTS,
+  LOGIN_SPRAY_WINDOW_MS,
   OTP_VERIFY_PER_IP_HOURLY,
   OTP_VERIFY_PER_PHONE,
   OTP_VERIFY_PURPOSE,
@@ -36,7 +40,9 @@ import {
   OTP_RESEND_SECONDS,
 } from "./otpPolicy";
 import {
+  clearLoginFailures,
   countOtpRequestsSince,
+  getFailedLoginAccountHashes,
   getOtpRequestTimes,
   purgeOldOtpRequests,
   recordOtpRequest,
@@ -375,6 +381,149 @@ export async function recordOtpVerifyAttempt(params: {
     purpose: OTP_VERIFY_PURPOSE,
     now: params.now,
   });
+}
+
+/**
+ * MAY THIS IP ATTEMPT ANOTHER PASSWORD LOGIN? (chunk 2.10, [I35] + [I36])
+ *
+ * ⚠️ THIS COUNTS DISTINCT ACCOUNTS THAT FAILED, NOT ATTEMPTS. It is NOT per-IP
+ * rate limiting — that is the design [I23] rejected, because a naive attempt
+ * cap behind an office or carrier NAT locks out every real user. Spraying is
+ * one password against many accounts, so it produces many distinct failing
+ * accounts from one address by definition; a NAT'd office produces almost
+ * none, because its people are on their own accounts and mostly succeeding.
+ *
+ * ⚠️ FAILS OPEN, DELIBERATELY DEPARTING FROM D3 ([I36]) — AND LOUDLY.
+ * Every other throttle in this file THROWS when its counter is unreadable, and
+ * that is right for them: a blip costs an SMS, or an account. Here fail-closed
+ * would lock EVERY USER out of the platform on the primary auth path, and buy
+ * nothing:
+ *   1. the fallback is not "no protection", it is [I23]'s per-account lockout,
+ *      which lives on user_credentials and is untouched by this read failing;
+ *   2. this counter and the credential store are the SAME DATABASE — if this
+ *      read fails, verifyPasswordCredential cannot authenticate anyone either,
+ *      so the spray cannot succeed during the outage anyway.
+ *
+ * ⚠️ DO NOT COPY THIS INTO ANOTHER THROTTLE. The reasoning needs an
+ * independent control still standing AND the attack being impossible while the
+ * store is down. Neither holds for the OTP send or the reset verify.
+ *
+ * ⚠️ AND THE console.error IS PART OF THE CONTRACT, not debug noise. A silent
+ * fail-open is indistinguishable from a control that was never built.
+ *
+ * ⚠️ READS NO ACCOUNT STATE — not `users`, not `user_credentials`. Its answer
+ * is a pure function of this IP's own recent failures, so a refusal is
+ * identical for a registered and an unregistered number and cannot leak
+ * existence.
+ */
+export async function checkLoginSprayThrottle(params: {
+  ipHash: string | null;
+  now?: number;
+}): Promise<ThrottleDecision> {
+  // No observed IP means no bucket to count. Callers without one fall back to
+  // [I23]'s per-account lockout, exactly as they did before this chunk.
+  if (!params.ipHash) return { allowed: true };
+
+  const now = params.now ?? Date.now();
+  const windowStart = new Date(now - LOGIN_SPRAY_WINDOW_MS).toISOString();
+
+  let distinctAccounts: string[];
+  try {
+    distinctAccounts = await getFailedLoginAccountHashes(
+      params.ipHash,
+      windowStart,
+      LOGIN_FAIL_PURPOSE
+    );
+  } catch (error) {
+    console.error(
+      "[login] ⚠️ ANTI-SPRAY CHECK UNAVAILABLE — failing OPEN per [I36]. " +
+        "Per-account lockout ([I23]) is still in force; spray protection is NOT. " +
+        `Cause: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return { allowed: true };
+  }
+
+  if (distinctAccounts.length < LOGIN_SPRAY_DISTINCT_ACCOUNTS) return { allowed: true };
+
+  // ⚠️ LOUD ON PURPOSE. Reaching this means one address has failed against ten
+  // different accounts in fifteen minutes, which no legitimate client does.
+  // The phone hashes are NOT logged — the count is the signal, and the hashes
+  // are the closest thing this table has to PII.
+  console.error(
+    `[login] ⚠️ SPRAY PATTERN: ${distinctAccounts.length} distinct accounts failed ` +
+      `from one IP within ${LOGIN_SPRAY_WINDOW_MS / 60000} minutes. Refusing further attempts.`
+  );
+
+  return {
+    allowed: false,
+    retryAfterSeconds: Math.ceil(LOGIN_SPRAY_WINDOW_MS / 1000),
+    scope: "ip-hourly",
+  };
+}
+
+/**
+ * Record a FAILED password login (chunk 2.10, [I35]).
+ *
+ * ⚠️ CALLED AFTER THE VERIFY, ON FAILURE ONLY — unavoidable, since the whole
+ * design depends on knowing the outcome. That is the same ordering [I23]'s
+ * recordFailure already uses, so it is existing accepted precedent rather than
+ * a new risk. It does mean a caller who kills the connection mid-request could
+ * in principle guess unrecorded; in practice the handler still runs to
+ * completion server-side, and [I23]'s counter catches single-account abuse
+ * regardless.
+ */
+export async function recordLoginFailure(params: {
+  phoneHash: string;
+  ipHash: string | null;
+  now?: number;
+}): Promise<void> {
+  await recordOtpAttempt({
+    phoneHash: params.phoneHash,
+    ipHash: params.ipHash,
+    purpose: LOGIN_FAIL_PURPOSE,
+    now: params.now,
+  });
+}
+
+/**
+ * Forget one account's failures from one IP after a SUCCESSFUL login ([I35]).
+ *
+ * ⚠️ THIS IS WHAT MAKES A THRESHOLD OF 10 SAFE FOR A LARGE OFFICE. Without it,
+ * ten people behind one NAT each mistyping once would trip the control on
+ * ordinary traffic. Never throws — see clearLoginFailures.
+ */
+export async function clearLoginFailuresFor(params: {
+  phoneHash: string;
+  ipHash: string | null;
+}): Promise<void> {
+  if (!params.ipHash) return;
+  await clearLoginFailures({
+    phoneHash: params.phoneHash,
+    ipHash: params.ipHash,
+    purpose: LOGIN_FAIL_PURPOSE,
+  });
+}
+
+/**
+ * Global failed-login count in the last hour — for LOGGING ONLY ([I36]).
+ * Never blocks. Swallows its own errors: an unreadable alert counter must not
+ * affect a login.
+ */
+export async function logGlobalLoginFailureRate(now = Date.now()): Promise<void> {
+  try {
+    const total = await countOtpRequestsSince(new Date(now - HOUR_MS).toISOString(), [
+      LOGIN_FAIL_PURPOSE,
+    ]);
+    if (total >= LOGIN_FAIL_GLOBAL_ALERT_HOURLY) {
+      console.error(
+        `[login] ⚠️ GLOBAL FAILED-LOGIN RATE: ${total} in the last hour ` +
+          `(alert threshold ${LOGIN_FAIL_GLOBAL_ALERT_HOURLY}). NOT blocking — see [I36].`
+      );
+    }
+  } catch {
+    // Deliberately silent: this is an observability nicety, and a failure here
+    // must never influence an authentication decision.
+  }
 }
 
 /**

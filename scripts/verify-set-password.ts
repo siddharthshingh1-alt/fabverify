@@ -517,7 +517,21 @@ check(
 await deleteCredentials(BUYER.id);
 await deleteCredentials(MAKER.id);
 
-check("Z1 cleanup: user_credentials is empty again", (await allCredentials()).length === 0);
+/**
+ * ⚠️ SCOPED TO THIS SUITE'S OWN ACCOUNTS. This counted the WHOLE TABLE and
+ * began failing once a real credential existed that it did not create — the
+ * founder's enterprise password. The DELETEs above were already scoped by
+ * user_id, so nothing was at risk; the ASSERTION described a platform with no
+ * real users, and [I27] is converting every account onto a password. Same
+ * class as the 2026-08-22 incident. Fourth suite found carrying it; the others
+ * were fixed on 2026-08-24 and 2026-08-27.
+ */
+check(
+  "Z1 cleanup: no credentials left behind FOR THIS SUITE'S ACCOUNTS",
+  (await allCredentials()).filter(
+    (c: { user_id: string }) => c.user_id === BUYER.id || c.user_id === MAKER.id
+  ).length === 0
+);
 
 const fingerprintAfter = await usersFingerprint();
 check(
