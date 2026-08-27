@@ -6,6 +6,41 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-28 · chunk 2.9] — The M10 docs sweep. No code. M10 is complete.
+
+> **Docs only — zero code, zero suite runs**, agreed explicitly before starting. The rule that kept 2.8a's docs pass honest: if the sweep finds something needing a code change, it stops and reports rather than fixing it inside a documentation chunk. Nothing did.
+
+### The problem this fixed
+Twenty days of chunks were recorded by **appending** to status rows rather than rewriting them, so several documents ended up asserting the new truth and the old one at once. Three were outright self-contradictions:
+
+- `TASKS.md`'s M10 STATUS said **"2.8b … NOT BUILT"** three lines above **"2.8b DONE"**.
+- `PROJECT_MEMORY.md`'s reset row opened **"LIVE AND PRODUCTION-PROVEN (chunk 2.8b)"** and later, in the *same row*, said **"2.8b = route + UI + production test (NOT BUILT)"**.
+- The same file's password row still listed **"STILL OPEN, IN ORDER: 2.6d → 2.8b → 2.9"** after both had shipped.
+
+⚠️ **One was self-inflicted and is worth naming.** Marking 2.10 done spliced a new clause into the middle of an existing sentence, producing: *"…logged in normally **and 2.6a merged without the decision that was supposed to gate it.**"* Two unrelated clauses fused into nonsense. Repaired, and the original meaning preserved as an explicit history note.
+
+### Two files nobody had touched all milestone
+- ⚠️ **`docs/SECURITY/AUTHENTICATION.md` was the most stale document in the repository** — nineteen lines describing the pre-M10 world. It listed password login under **PLANNED**, said *"rate-limit OTP requests **when built**"*, and mentioned neither our own session token, `token_epoch`, lockout, reset, the throttles, nor anti-spraying. **It is the file a session opens to learn how authentication works.** Rewritten from scratch.
+- ⚠️ **`docs/SECURITY/AUTHORIZATION.md` named RLS as security layer #1**, contradicting **[I8]**, which retired RLS on 2026-07-29. Corrected, with the API-route checks named as the actual boundary and RLS struck through.
+- `docs/SECURITY/THREAT_MODEL.md`: the auth-abuse row listed rate limits as aspiration; now records what is built, adds password spraying, and adds SIM swap as **undefended and the floor under every account**.
+- `docs/ARCHITECTURE/MIGRATION.md` §4.2 was headed 🔴 and read *"nothing can authenticate with one … Next is 2.5"* — the state on 2026-08-08, twenty days stale. ⚠️ **§4.2.1's "the secret must be carried across the cutover, never regenerated" was preserved byte-identically**; it is the most valuable line in the file and was never stale.
+- `github/MILESTONES.md` still listed password login as remaining.
+
+### Carried forward, into PROJECT_MEMORY rather than TASKS alone
+The open items lived only in `TASKS.md`, which is not the file `CLAUDE.md` §1 says to read second. They now head **KNOWN ISSUES**:
+- 🛑 **Twilio is on a TRIAL account, so no real user can authenticate.** Everything M10 built was proven on the founder's own verified number and **is unreachable by a real user today**. ⚠️ It is not in the Launch-Ready milestone list — it sits in Phase A, which is why it keeps being missed.
+- Three gates before `main`: chunk 1.10's owed production session · the 29-error eslint decision · a deliberate merge knowing it deploys.
+- The >15 s login-latency anomaly, cause **unknown** and labelled a hypothesis.
+- `/api/dev-auth/lookup` unauthenticated; the outage-routes-users-into-onboarding bug; the spray log-volume note; signup-with-gate never run end-to-end; reset does not evict a stolen Supabase session; the SIM-swap floor.
+
+### DECISIONS gains a closing note
+[I1]–[I36], no gaps or duplicates. A table now records what supersedes what — **[I8] over [I7]**, **[I9] over [I6]**, **2.6a ending [I18]**, **[I35] over [I23]**, **[I36] excepting D3** — with the two live traps stated: never call [I35] "per-IP rate limiting", and never copy [I36]'s fail-open elsewhere.
+
+### One true story
+Every stale `NEXT: 2.6c / 2.6d / 2.8b` pointer removed. One floor value everywhere: **5000 ms**, not 6000. The 2.8a/2.8b split now reads *split, then completed*. Historical text kept wherever it teaches — the doc-drift incident, the PAUSED-block inversion, the twenty-day-stale migration paragraph — but marked unmistakably as history.
+
+**M10 is complete: 2.0–2.8b, 2.9, 2.10. Nothing is deployed.**
+
 ## [2026-08-27 · chunk 2.10] — Password spraying is handled, by inverting the objection that blocked it for a week
 
 > **The last security chunk of M10**, and the "hard must-do before merge to `main`" the open-item register had demanded since 2.6a merged without it. Per-account lockout never sees a spray: one guess each against ten thousand accounts trips no single counter.

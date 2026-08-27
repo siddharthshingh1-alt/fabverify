@@ -18,7 +18,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 #### 📍 STATUS — UPDATE THIS LINE EVERY SESSION
 **✅ ITEM 1 COMPLETE — all 10 chunks done (2026-08-05).** Started 2026-07-29. Last completed: **1.10**.
-**NEXT: Launch-Ready item 2 — Password login (M10), the migration safety net.**
+**✅ Launch-Ready item 2 — Password login (M10) — IS ALSO COMPLETE (2026-08-28).** See the 📍 M10 STATUS block below, and the 🏁 note under it for what is genuinely next.
 ⚠️ One task still open against item 1: the single combined production session recorded under chunk 1.10, which closes 1.8's first execution and 1.9's miss-then-fallback branch. Not a blocker for item 2, but do it before merging to `main`.
 
 ---
@@ -153,14 +153,28 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 > - [ ] ⚠️ **`verifyPassword` / `setPassword` are NOT stubbed on the seam** — a common misremembering. Chunk 1.4 deliberately declared NO password operations (see the `FUTURE (M10)` block at `authProvider.ts:34-46`). What 1.4 *did* future-proof is the NAME `AuthenticationResult` — named after authentication, not OTP — so a password result carries the same shape and **1.8's identity write and 1.9's resolution need no changes at all**. Chunk 2.3 is where the seam surface gets declared, and it is a real design step, not the removal of a placeholder.
 
 #### 📍 M10 STATUS — UPDATE EVERY SESSION
-**DONE: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.6c · 2.7 · 2.8a** (2.0+2.1 on 2026-08-06; 2.2–2.5a on 2026-08-08; 2.7 on 2026-08-20; **2.5b + 2.6a + 2.6b on 2026-08-21**; **2.8a on 2026-08-21, commit `267271c`**; **2.6c on 2026-08-24, commit `7941c46`** — superseding the WIP `b6ca242`)
+**DONE — ALL OF THEM: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.6c · 2.6d · 2.7 · 2.8a · 2.8b · 2.10** (2.0+2.1 2026-08-06 · 2.2–2.5a 2026-08-08 · 2.7 2026-08-20 · **2.5b + 2.6a + 2.6b 2026-08-21** · **2.8a 2026-08-21 `267271c`** · **2.6c 2026-08-24 `7941c46`**, superseding the WIP `b6ca242` · **2.6d 2026-08-26 `c7c0ec6`** · **2.8b 2026-08-27 `649a8e5`** · **2.10 2026-08-27 `2202a04`**)
 **✅ PASSWORD LOGIN IS LIVE AND PRODUCTION-PROVEN (2026-08-21).** A real password login on the founder’s enterprise account reached the dashboard with real data, on the LAN production build. The mandatory set-password gate was verified separately on localhost: forced redirect, abandon-and-return, no loop, error-then-retry.
-**✅ RESET LOGIC EXISTS TOO — 2.8 WAS SPLIT INTO 2.8a (seam, DONE) + 2.8b (route + UI, NOT BUILT).** See the 2.8a / 2.8b entries below.
-**✅ 2.6c IS DONE AND PRODUCTION-PROVEN (2026-08-24).** OTP request hardening: the send is server-side, throttled, enumeration-uniform, and the D4 timing floor is now MEASURED (4722 ms ceiling) and BINDING (6000 ms). Suites 56/56 · 42/42 · 38/38. Proven on the real LAN production build: SMS arrives · `verifyOtp` still succeeds after the server-side send change · set-password gate · password login · OTP fallback · throttle refuses the repeat.
+**✅ 2.8 WAS SPLIT INTO 2.8a (seam) + 2.8b (route + UI) — AND BOTH ARE NOW DONE.** 2.8a landed 2026-08-21 (`267271c`, 40/40); 2.8b landed 2026-08-27 and is production-proven. *(This line read "2.8b … NOT BUILT" until the 2.9 sweep — true when written, and left stale for a day while the block below already said DONE. Split, then completed.)*
+**✅ 2.6c IS DONE AND PRODUCTION-PROVEN (2026-08-24).** OTP request hardening: the send is server-side, throttled, enumeration-uniform, and the D4 timing floor was MEASURED (4722 ms ceiling) and made BINDING. ⚠️ **That floor is now 5000 ms, not the 6000 ms this chunk set** — 2.6d re-measured the ceiling down to 3621 ms and lowered it. Suites 56/56 · 42/42 · 38/38 at the time. Proven on the real LAN production build: SMS arrives · `verifyOtp` still succeeds after the server-side send change · set-password gate · password login · OTP fallback · throttle refuses the repeat.
 **✅ 2.6d DONE AND PRODUCTION-MEASURED (2026-08-26)** — registered reset 4722 → 2915 ms; floor 6000 → 5000, re-proven binding. Decisions [I31] + [I32].
 **✅ 2.8b DONE AND PRODUCTION-PROVEN (2026-08-27)** — password reset works end to end on a real number; epoch 0 → 1; the isolated verify client held on its first real execution ([I34]); no phantom account. Decisions [I33] + [I34].
 **✅ 2.10 DONE AND PRODUCTION-PROVEN (2026-08-27)** — login anti-spraying, the last SECURITY chunk and the "hard must-do before merge to `main`" the register demanded since 2.6a. Cross-IP blast radius proven on live data. Decisions [I35] + [I36].
-**NEXT: 2.9 — DOCS SWEEP. 🔴 NOT STARTED. It is the LAST M10 chunk, and the only one left.**
+**✅ 2.9 DONE 2026-08-28 — the docs sweep, and with it M10 IS COMPLETE.**
+
+---
+
+## 🏁 M10 IS COMPLETE (2026-08-28). WHAT IS ACTUALLY NEXT.
+
+⚠️ **THE NEXT PRIORITY IS NOT THE NEXT MILESTONE ITEM. IT IS THE TWILIO DECISION.**
+Everything M10 built — password login, reset, the throttles, the anti-spray control — **cannot be exercised by a single real user today**, because Twilio is on a TRIAL account that only sends to verified caller IDs. A real user on an arbitrary number cannot receive an OTP at all, so they cannot sign up, cannot log in, and cannot reset. It is a billing-and-config decision (upgrade Twilio, or build a 2Factor.in route), it is cheap, and it sits in **Phase A — not in the Launch-Ready list where anyone would look for it.**
+
+**THREE GATES BEFORE `main` (merging auto-deploys to Vercel):**
+1. **Chunk 1.10's owed production session** — closes 1.8's first execution and 1.9's miss-then-fallback branch.
+2. **The repo-wide eslint decision** — 29 pre-existing errors from a plugin bump. Fix, pin, or accept-and-record. `CLAUDE.md` §3 says the build passes clean; it does not.
+3. **A deliberate merge**, knowing it deploys.
+
+**THEN: Launch-Ready items 3–8** (RLS cleanup · photos → Storage · admin verification panel · order completion + delivery address · escrow simulated · error-handling polish). Item 1 ✅ and item 2 ✅ are done.
 
 > ## ✅ 2.6c IS DONE AND PRODUCTION-PROVEN (2026-08-24) — this block was the PAUSE record, kept inverted
 >

@@ -446,4 +446,36 @@ D3 is the standing rule: a throttle that cannot read its counter must refuse. It
 
 **Global ceiling: LOG-ONLY, never blocking.** 2.6c's `OTP_GLOBAL_DAILY` blocks because unbounded SMS is a runaway *bill*. Login has no such cost — just compute, already bounded per-account and now per-IP — while a global login block is a **platform-wide outage an attacker can trigger cheaply.** Same risk reasoning, different costs, opposite answer. ⚠️ **Alerting is a log line and nothing more. Nobody watches logs**, so this is forensic evidence after the fact, not a response mechanism; external alerting needs a seam per [X5] and is not in this chunk.
 
+---
+
+## 🏁 M10 CLOSING NOTE (2026-08-28, chunk 2.9) — READ THIS BEFORE TRUSTING AN EARLIER ENTRY
+
+**No decision above is deleted, and two have been overridden by later ones. If
+you land on either without reading its successor, you will build the wrong
+thing.**
+
+| Earlier | Status | Read instead |
+|---|---|---|
+| **[I7]** RLS is decorative — "not yet decided" | ✅ decided | **[I8]** — RLS formally RETIRED. Do not write `auth.uid()` policies. |
+| **[I6]** phone reassignment, "a `users.auth_user_id` column is the likely fix" | ✅ resolved | **[I9]** — an `auth_identities` TABLE, not a column. |
+| **[I18]** credential verification has ZERO route importers | ⚠️ **ended deliberately** | **2.6a** added the one legitimate client. The suites now assert an ALLOWLIST OF ONE, not zero. |
+| **[I23]** "PER-ACCOUNT ONLY. Per-IP is NOT built" | ⚠️ **SUPERSEDED** | **[I35]** — per-IP was refused for a good reason and is still refused. [I35] counts **distinct FAILED ACCOUNTS**, which is not the same design. Read both. |
+| **D3** every throttle fails CLOSED | ⚠️ **ONE EXCEPTION** | **[I36]** — the login anti-spray check fails OPEN, for reasons that **do not generalise**. The OTP send and reset verify remain fail-closed. |
+
+⚠️ **THE TWO LIVE TRAPS, STATED PLAINLY:**
+1. **Never describe [I35] as "per-IP rate limiting."** That is the design [I23]
+   refused, and it refused it correctly — a naive attempt cap behind an office
+   NAT lets one attacker lock out every real user. If a future change starts
+   counting ATTEMPTS rather than DISTINCT FAILED ACCOUNTS, it has silently
+   become that design and re-acquired the denial of service.
+2. **Never copy [I36]'s fail-open into another throttle.** It depends on two
+   things being simultaneously true: an independent control still standing
+   ([I23]'s per-account lockout), and the attack being impossible while the
+   store is down (same database as the credentials). Neither holds elsewhere.
+
+**M10 decisions, for orientation:** [I10]–[I22] (storage, hashing, policy,
+verification, the token) · [I23]–[I26] (lockout) · [I27]–[I29] (login wiring) ·
+[I30]–[I32] (OTP throttling and the D4 timing floor) · [I33]–[I34] (reset) ·
+[I35]–[I36] (anti-spraying).
+
 *Append new decisions below this line with the next ID and a date.*

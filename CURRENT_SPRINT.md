@@ -70,7 +70,38 @@ Locked decisions: **A12** parallel-run migration · **I8** RLS retired · **I9**
 ---
 
 ## SPRINT FOCUS
-**The API route auth-hardening batch.** Every API route used to trust a phone number sent in the request body or query string, so any caller could act as any account. Groups 1, 2a, 2b and 2c are built; the batch is not finished and nothing is committed.
+
+# 🏁 M10 IS COMPLETE (2026-08-28). NOTHING IS DEPLOYED.
+
+All fifteen chunks are done and production-proven — password login, our own
+session token, per-account lockout, server-side throttled OTP, password reset,
+and login anti-spraying. Everything lives on `auth-hardening-batch`; **`main`
+has none of it, and merging to `main` auto-deploys to Vercel.**
+
+## 🛑 WHAT IS ACTUALLY NEXT — AND IT IS NOT THE NEXT MILESTONE ITEM
+
+**Decide Twilio vs 2Factor.in. Before anything else.**
+Twilio is on a TRIAL account and sends only to verified caller IDs, so **a real
+user on an arbitrary number cannot receive an OTP at all** — they cannot sign
+up, cannot log in, cannot reset. Every control M10 built was proven on the
+founder's own number and **is unreachable by a real user today.** It is a
+billing-and-config decision, it is cheap, and ⚠️ **it is not in the Launch-Ready
+milestone list** — it sits in Phase A, which is exactly why it keeps getting
+missed.
+
+**Then the three gates before `main`:** chunk 1.10's owed production session ·
+the repo-wide eslint decision (29 errors from a plugin bump) · a deliberate
+merge taken knowing it deploys.
+
+**Then Launch-Ready items 3–8:** RLS cleanup · photos → Storage · admin
+verification panel · order completion + delivery address · escrow (simulated) ·
+error-handling polish. Items 1 and 2 are ✅.
+
+> *(Historical: this block read "SPRINT FOCUS — The API route auth-hardening
+> batch … the batch is not finished and nothing is committed." That was true in
+> late July. Groups 1/2a/2b/2c were finished and committed long before M10
+> began, and the line survived the entire milestone unnoticed — the same drift
+> the 2.8a incident below is about.)*
 
 ## ⚠️ READ THIS FIRST WHEN RESUMING
 

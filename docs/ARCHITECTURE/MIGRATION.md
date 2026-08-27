@@ -115,7 +115,7 @@ Add `auth_identities`; backfill Supabase identities for existing users; add pass
 ### Phase 2 — Dual-verify (weeks before migration)
 Stand up the new provider. `getIdentityFromToken()` tries the new issuer first and falls back to Supabase. Both token types resolve to the same `users` row via `auth_identities`. New logins receive new-provider tokens; existing Supabase sessions keep working untouched. **Nobody is logged out.** Hold this window long enough that most active users re-authenticate onto the new provider naturally.
 
-⚠️ **PARTIALLY DELIVERED EARLY BY M10 CHUNK 2.5b** (design locked 2026-08-08, code not yet built — see §4.2.1). Our own signed token *is* a second issuer, and the try-ours-then-fall-back-to-Supabase ladder *is* this mechanism. When Phase 2 formally arrives the ladder already exists and only gains providers. ⚠️ One difference worth noting: a token we issue ourselves carries `sub = users.id` and needs **no `auth_identities` lookup at all** — it resolves more directly than either existing branch (DECISIONS **[I11]**, **[I21]**).
+✅ **DELIVERED EARLY BY M10 CHUNK 2.5b — BUILT, PROVEN AND IN PRODUCTION** (design locked 2026-08-08; code landed 2026-08-21, commit `ad2c66f`, 156/156; the ladder's local branch has since resolved a real production login — see §4.2.1). Our own signed token *is* a second issuer, and the try-ours-then-fall-back-to-Supabase ladder *is* this mechanism. When Phase 2 formally arrives the ladder already exists and only gains providers. ⚠️ One difference worth noting: a token we issue ourselves carries `sub = users.id` and needs **no `auth_identities` lookup at all** — it resolves more directly than either existing branch (DECISIONS **[I11]**, **[I21]**).
 
 ### Phase 3 — Data migration (the RDS move)
 Logical replication Supabase → RDS; cut writes over in a low-traffic window. Because auth was decoupled in Phase 1, **this is now purely a data operation.** Sessions are unaffected — tokens do not live in the database.
@@ -149,8 +149,12 @@ Locked order. Each item's abstraction layer is built **before** its first implem
 
 ✅ **DONE 2026-08-05.** All 10 chunks complete. Consumer importers of Supabase: **5 → 0**; what remains is 2 factories + 3 seams (see §1.1, where the "ONE file" target is restated accurately). The identity path is **production-proven** with a real OTP — the server logged `via IDENTITY (auth_identities) — phone lookup agrees` resolving token `sub c3772075…` to `users.id 1ac55487…`. Phone matching remains fully intact as the fallback and is still the primary path for 9 of 11 accounts.
 
-### 4.2 Password login (M10) 🔴
-> **MULTI-SESSION BUILD, chunked 2026-08-05 into 2.0–2.9 — see `TASKS.md` for the ordered list and the 📍 M10 STATUS line.** Chunks 2.0/2.1 done 2026-08-06; **2.2/2.3/2.4 done 2026-08-08** — argon2id hashing ([I13]), `setPassword` on the seam, and `POST /api/account/password`. ⚠️ **A user can SET a password; nothing can authenticate with one, and no screen reaches the endpoint.** Next is 2.5, the token subsystem.
+### 4.2 Password login (M10) ✅ **COMPLETE 2026-08-28**
+> ✅ **COMPLETE 2026-08-28. All chunks done and production-proven: 2.0 · 2.1 · 2.2 · 2.3 · 2.4 · 2.5a · 2.5b · 2.6a · 2.6b · 2.6c · 2.6d · 2.7 · 2.8a · 2.8b · 2.9 · 2.10.** See `TASKS.md`'s 📍 M10 STATUS block for dates and commits.
+>
+> ⚠️ **THIS PARAGRAPH USED TO READ:** *"Chunks 2.0/2.1 done 2026-08-06; 2.2/2.3/2.4 done 2026-08-08 … A user can SET a password; nothing can authenticate with one, and no screen reaches the endpoint. Next is 2.5, the token subsystem."* That was the true state on 2026-08-08 and stayed on the page for twenty days after it stopped being true. Kept visible because it is the drift pattern this project keeps meeting: **a status sentence written in the present tense outlives the present.**
+>
+> **What actually shipped:** phone + password as the PRIMARY login with OTP as fallback · our own signed session token with `token_epoch` revocation · a mandatory set-password gate ([I27]) · per-account lockout ([I23]) · server-side throttled OTP send with a timing floor ([I30]) · password reset via OTP ([I33], [I34]) · login anti-spraying ([I35], [I36]). The chunk list grew past the original 2.0–2.9 — 2.6d (send-path latency) and 2.10 (anti-spraying) were added when the work demanded them.
 
 Hashes (argon2id) in **our own `user_credentials` table**, verification behind the seam. Login offers OTP **or** password.
 **This is the migration safety net, not just a feature** — a credential we own works identically before, during and after the move, and is the fallback if the token cutover goes wrong.
@@ -161,7 +165,7 @@ Hashes (argon2id) in **our own `user_credentials` table**, verification behind t
 ⚠️ **M10 PULLS PHASE 2 FORWARD.** Authentication must produce a SESSION, and Supabase will not sign a JWT for a credential it does not hold — while holding it there is precisely what M10 forbids. So M10 requires us to **issue and verify our own session tokens**, and to teach `getIdentityFromToken` to try our issuer first and fall back to Supabase. That is literally §3 Phase 2 (dual-verify), arriving early: roughly half of M10 is the token subsystem, not the credential. It is still correct to do first — a credential *and* a session we own is exactly what makes the RDS cutover survivable.
 
 #### 4.2.1 `SESSION_TOKEN_SECRET` — the cutover implications
-> Design locked 2026-08-08 (DECISIONS **[I19] [I20] [I21] [I22]**); code is chunk 2.5b, not yet built.
+> Design locked 2026-08-08 (DECISIONS **[I19] [I20] [I21] [I22]**); ✅ **built as chunk 2.5b and production-proven** — a real login resolved through the ladder's local branch, logged as `via OUR OWN TOKEN (sub=users.id) — no lookup needed`.
 
 Our own session token is a **signed JWT (HS256)** whose only dependency is `SESSION_TOKEN_SECRET`, a server-only environment variable. Four consequences for the migration, one of them load-bearing:
 

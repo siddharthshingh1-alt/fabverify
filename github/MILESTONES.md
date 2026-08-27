@@ -5,7 +5,7 @@
 Deployed, Supabase connected, db.ts, auth, per-user-type routing, core features on real DB, full vision locked, documentation system.
 
 ## M1 — Trustworthy Core (Phase A)
-Real escrow (partner), Storage for photos, WhatsApp notifications, admin verification panel, order completion + delivery address, password login, real SMS.
+Real escrow (partner), Storage for photos, WhatsApp notifications, admin verification panel, order completion + delivery address, **real SMS (Twilio is on a TRIAL account — this is the launch blocker: no real user can receive an OTP)**. ✅ **Password login is DONE** — M10 completed 2026-08-28, production-proven (login, reset, lockout, OTP throttling, anti-spraying).
 
 ## M2 — Trust Engine (Phase B)
 QR milestone scanning, geo-photo proof, SMV/capacity/tolerance engine, FabScore algorithm, real gov-DB verification APIs.
