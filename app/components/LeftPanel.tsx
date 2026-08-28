@@ -9,6 +9,7 @@ import type { Position, UserType } from '../context/UserContext'
 import screenConfig from '../config/screens'
 import { getBasePath, getOrdersSlug, getDiscoverySlug } from '../lib/routing'
 import { getUnreadCount } from '../chat/data'
+import { authFetch } from '../lib/apiClient'
 
 type NavItem = { href: string; icon: string; label: string }
 
@@ -94,7 +95,7 @@ export default function LeftPanel() {
     const auth = JSON.parse(localStorage.getItem('fabverify_auth') || '{}')
     if (!auth.phone) return
     let cancelled = false
-    fetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`)
+    authFetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data?.verification) setVerificationTier(data.verification.currentTier)

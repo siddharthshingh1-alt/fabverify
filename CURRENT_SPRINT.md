@@ -89,6 +89,28 @@ billing-and-config decision, it is cheap, and ⚠️ **it is not in the Launch-R
 milestone list** — it sits in Phase A, which is exactly why it keeps getting
 missed.
 
+## ✅ STEP 0 DONE (2026-08-29) — `/api/verification` auth conversion
+
+**The first build after M10, and it was a security fix, not a feature.** `/api/verification` had NO authentication on either
+handler: anyone could grant **Bronze** to any phone number ([M7]: Bronze is the minimum to transact), write applications with
+an arbitrary tier and arbitrary documents JSON, and read any account's verification state. Self-granting Silver/Gold was NOT
+reachable — the auto-approve branch is hardcoded to bronze — so it was a tier-grant and disclosure hole, not full escalation.
+
+Both handlers now go through `getVerifiedUser` + a **named, single-expression `mayActOnAccount` gate deliberately shaped so
+item 5's admin panel extends it with one `||`** rather than unpicking inlined comparisons. Tier allowlist added, placed after
+the auth gate. Error handling combined into the same edit per the TASKS.md instruction. Built in two parts (call sites →
+`authFetch` first, additive; route second), each leaving the app working.
+
+Verified on localhost: 401 unauthenticated · 403 wrong owner · 200 owner · 400 bad tier · **rejections wrote nothing** ·
+**the founder's enterprise account untouched throughout** · silver still does not auto-approve ([M8] intact) · 503 on DB
+outage · build + `tsc` + eslint clean. Full record and three carried-forward flags: TASKS.md, the STEP 0 entry.
+
+⚠️ **Carried forward, do not lose:** GET still returns a false `200 "unverified"` if the DB dies *after* the auth gate — the
+`db.ts` swallow sites are item 8's other half, and the `try/catch` added here only becomes load-bearing once they land.
+
+⚠️ **Also corrected in the same commit: the item-8 register was SEVEN ROUTES out of date** — it listed 9 routes needing
+`dbErrorResponse`; a per-handler audit of all 23 found **4**. Same drift class as the 2.8a incident.
+
 **Then the three gates before `main`:** chunk 1.10's owed production session ·
 the repo-wide eslint decision (29 errors from a plugin bump) · a deliberate
 merge taken knowing it deploys.
@@ -143,7 +165,7 @@ error-handling polish. Items 1 and 2 are ✅.
 ## KNOWN NON-BLOCKERS (recorded, deliberately not fixed)
 - Order status transitions are party-checked but have no state machine — a buyer can advance a milestone, a manufacturer can cancel.
 - Order-number generation can collide (`Date.now()` slice). DB-level fix, deferred.
-- 6 routes still unconverted: `dev-auth/lookup`, `verification`, `waitlist`, `test-db`, and `manufacturers` + `manufacturers/[id]` (the last two stay **public by decision** — browse without auth, act with it).
+- 5 routes still unconverted: `dev-auth/lookup`, `waitlist`, `test-db`, and `manufacturers` + `manufacturers/[id]` (the last two stay **public by decision** — browse without auth, act with it). *(`verification` was on this list until 2026-08-29, when it was converted — it was an unauthenticated tier-grant path.)*
 
 ## DEV ENVIRONMENT NOTES
 - **Blanket 404s on every API route** = `.next` left in a production-build state after running `next build` then `next dev`. Fix: stop the server, `rm -rf .next`, restart. Happened twice.

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import ThreePanelLayout from "../ThreePanelLayout";
 import TopBar from "../TopBar";
 import { useUser, type UserType } from "../../context/UserContext";
+import { authFetch } from "../../lib/apiClient";
 
 const BOTTOM_NAV = [
   { icon: "🏠", label: "Home", href: "/dashboard" },
@@ -789,7 +790,7 @@ export default function Verification() {
       return;
     }
     try {
-      const res = await fetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`);
+      const res = await authFetch(`/api/verification?phone=${encodeURIComponent(auth.phone)}`);
       if (res.ok) {
         const { verification } = await res.json();
         setVerificationData(verification);
@@ -811,7 +812,7 @@ export default function Verification() {
     if (!auth.phone) return;
     setBronzeSubmitting(true);
     try {
-      await fetch("/api/verification", {
+      await authFetch("/api/verification", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: auth.phone, tier: "bronze", documents: {} }),

@@ -32,7 +32,7 @@
 | `sample_briefs` | ✅ | |
 | `enquiries` | ✅ | |
 | `fabscore_history` | ✅ | table exists; no algorithm writes to it yet |
-| `verification_applications` | ✅ | |
+| `verification_applications` | ✅ | ⚠️ **Written through `/api/verification`, which was UNAUTHENTICATED until 2026-08-29** — anyone could file an application against any phone with an arbitrary `tier` string and arbitrary `documents` JSON, and auto-grant **Bronze**. Converted to `getVerifiedUser` + a named `mayActOnAccount` ownership gate + a `bronze/silver/gold` tier allowlist. **Silver/Gold rows sit at `pending` forever by design** — nothing can approve them until the admin panel (Launch-Ready item 5), which is what `updateVerificationApplicationStatus` + `updateVerificationTier` exist for. |
 | `waitlist` | ✅ | |
 | `auth_identities` | ✅ | ⚠️ **STILL 1 ROW as of 2026-08-05 — written by 1.8, READ by 1.9, and the identity path is PRODUCTION-PROVEN.** The single row (founder's enterprise account) resolved a real production OTP login end to end: the server logged `via IDENTITY (auth_identities) — phone lookup agrees`, token `sub c3772075…` → `users.id 1ac55487…`. ⚠️ **1.8's WRITE has still never executed** — it only fires on a real-token request for an account with no row, and no such login has happened yet. The artisan (`users.id c9545590…` / auth uid `de9c220c…`) remains deliberately unlinked as its single-use test target. Historical note below kept for context. ⚠️ **STILL 1 ROW as of 2026-07-31 — re-confirmed after the chunk 1.7 production signup. NOTHING in the app reads or writes it yet; 1.8 is what starts writing.** The new artisan account (`users.id c9545590-6d92-4085-b319-64740e20eb30`, auth uid `de9c220c-f1ed-4541-bbea-3bc67644403b`) has a REAL Supabase identity and NO row here — deliberately kept as **chunk 1.8's verification target**. ⚠️ 1.8 must write `user_id = c9545590…` (our `users.id`) and `provider_uid = de9c220c…` (the auth uid / token `sub`); these are independent UUIDs and conflating them builds 1.8 on a key that matches nothing. Account totals now: `users` **11**, `auth.users` **4**, orphaned auth users still **2**. **Created 2026-07-30 (chunk 1.2), backfilled in 1.3.** Backfill result: **1 identity of 10 accounts** (the founder's enterprise account, the only one with both a real OTP auth user and a profile row). The other **9 are dev-bypass (A10) accounts with no Supabase auth user** — correctly skipped, still phone-resolved. ⚠️ **Therefore the phone FALLBACK is the primary resolution path in this environment, which is what chunk 1.9 must get right.** ⚠️ The two sides store different phone formats — `users.phone` bare 10-digit, Supabase auth `91`+10 with no `+` — so matching MUST normalise to the last 10 digits (as `normalisePhone` does); an exact-string match links nothing and silently reports success. The durable link between a `users` row and the provider identity that authenticated it (DECISIONS **I9**, resolves **I6**). `id`, `user_id → users(id)` **ON DELETE CASCADE**, `provider`, `provider_uid`, `created_at`, `UNIQUE (provider, provider_uid)` + `idx_auth_identities_user_id` (Postgres does not auto-index FK columns). RLS on with **zero policies** = deny-all — verified by an anon `INSERT` returning `42501`; the anon key must never read this table. In both `supabase/migrations/002_auth_identities.sql` and `supabase/schema.sql`. Filled by 1.3 (backfill), written by 1.8, read by 1.9. |
 
@@ -246,6 +246,39 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 ---
 
 ## KNOWN ISSUES / TECH DEBT
+
+### ✅ CLOSED 2026-08-29 — `/api/verification` was an unauthenticated tier-grant path
+
+**Both handlers had NO authentication of any kind.** Reachable with no credentials, against any phone number: grant **Bronze**
+to a stranger's account (under [M7] Bronze is the minimum to transact), write an application with an arbitrary `tier` string and
+arbitrary `documents` JSON, and read back any account's verification state including that documents payload. **Self-granting
+Silver/Gold was NOT reachable** — the auto-approve branch is hardcoded to `bronze` — so it was a tier-grant and disclosure hole,
+not a full privilege escalation. Recorded that way deliberately; overstating it would have been its own bug.
+
+Now: `getVerifiedUser` → `authErrorResponse` → **a named, single-expression `mayActOnAccount(caller, targetPhone)` gate** →
+work inside `try/catch` → `dbErrorResponse`. `normalisePhone` on **both** sides (the chunk 1.3 10-vs-91 trap). Tier allowlist
+after the auth gate. The four client call sites moved to `authFetch` first, as a separate additive part.
+
+⚠️ **The gate is named and structurally typed so item 5's admin panel extends it with one `||`** — an admin acts on someone
+ELSE's account, the opposite rule — rather than unpicking inlined comparisons at three call sites.
+
+🔴 **STILL OPEN, inherited not introduced: GET returns a false `200 "unverified"` if the database dies AFTER the auth gate.**
+The 503 that was proven comes from `getVerifiedUser`; beneath it `getVerificationStatus` and `getLatestVerificationApplication`
+both `if (error) return null`. **The `try/catch` on that handler cannot fire today and becomes load-bearing only when the
+`db.ts` swallow-site chunk lands** (Launch-Ready item 8's other half). Excluded deliberately — shared `db.ts` functions, and
+changing their semantics inside a security commit is the scope creep 2.6c refused.
+
+⚠️ **Cosmetic, pre-existing, not fixed:** the POST response reports the application as `status: "pending"` even when it was
+just auto-approved — `submitVerificationApplication` returns its snapshot before the approval UPDATE runs. No caller reads it
+today; item 5's panel will.
+
+⚠️ **Test data:** the dev-bypass account **`9999999991` is now `bronze` with a pending `silver` application** (reversible).
+The founder's enterprise account was never used for a write — it appears only in 403 tests, which write nothing by definition,
+and was re-read before and after to prove it.
+
+⚠️ **The same commit corrected a SEVEN-ROUTE drift in the item-8 register.** It claimed 9 routes still needed
+`dbErrorResponse`; a per-handler audit of all 23 routes found **4** (`dev-auth/lookup`, `manufacturers`, `manufacturers/[id]`,
+`waitlist`). Seven had been converted during Group 2 and the list never moved — the 2.8a failure mode again.
 
 ### 🛑 THE LAUNCH BLOCKER — READ THIS BEFORE ANY "WHAT'S NEXT" CONVERSATION
 

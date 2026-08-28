@@ -6,6 +6,40 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-29 · Step 0] — `/api/verification` auth conversion: an unauthenticated tier-grant path, closed
+
+> The first build after M10, and it is a security fix rather than a feature. Taken ahead of Launch-Ready items 3–8 because it was a live unauthenticated write path that granted a verification tier, sitting on the branch heading for `main`.
+
+### Fixed
+- **`/api/verification` had NO authentication on either handler.** Reachable with no credentials, against **any phone number**: grant **Bronze** to a stranger's account (under [M7] Bronze is the minimum to transact); write an application with an arbitrary `tier` string and arbitrary `documents` JSON, setting the victim's `verification_status`; and read back any account's verification state **including the documents payload**. ⚠️ **Self-granting Silver/Gold was NOT reachable** — the auto-approve branch is hardcoded to `bronze`. Stated that way deliberately: it is a tier-grant and disclosure hole, **not** a full privilege escalation, and overstating it would have been its own bug.
+- Both handlers now: `getVerifiedUser` → `authErrorResponse` → ownership gate → work inside `try/catch` → `dbErrorResponse`.
+
+### Added
+- **`mayActOnAccount(caller, targetPhone)` — a NAMED, single-expression ownership gate.** Shaped this way on purpose: the admin verification panel (item 5) needs the OPPOSITE rule, an admin acting on someone ELSE's account, and that must be one `||` here rather than an unpicking of inlined comparisons at three call sites. Typed structurally as `{ phone: string }` so an admin column widens it without touching the signature. Follows the existing `isPartyToOrder` pattern in `orders/[id]`.
+- **Tier allowlist** (`bronze`/`silver`/`gold`, per [M8]), placed **after** the auth gate so an unauthenticated caller learns nothing about which tiers exist. The value was previously persisted unvalidated — item 5's panel reads that column to decide what it is approving.
+- `try/catch` + `dbErrorResponse` on the GET; POST's `getErrorMessage` → 500 swapped for `dbErrorResponse`. Combined into this edit per the standing TASKS.md instruction ("convert error handling and auth in the same edit, not as a second pass").
+
+### Changed
+- **The four client call sites moved to `authFetch`** — `LeftPanel:98`, `VerificationPage:793` and `:815`, `verification/identity:3023`. ⚠️ **None used `authFetch` before**; converting the route without this would have 401'd every verification read and write. Shipped as a separate additive part first, proven neutral (identical `200`, byte-identical JSON) while the route still ignored the header.
+- **`getUserByPhone` removed from both handlers** — `getVerifiedUser` already resolved the row, so it was a second round trip for an answer already held. Its 404 goes with it: an authenticated caller has a `users` row by construction.
+
+### Verified (localhost, dev bypass)
+- GET: no header **401** · wrong owner **403** · owner **200** · no phone param **400**.
+- POST: no header **401** · attacker→victim bronze **403** · tier `"platinum"` **400** · missing tier **400** · owner bronze **200** `autoApproved: true` · owner **silver → `autoApproved: false`, tier stayed bronze, application pending** ([M8] intact).
+- **Rejections wrote nothing** — both accounts re-read after every reject, identical to baseline. **The founder's enterprise account stayed `tier=none status=unverified` throughout**; the only write went to the dev-bypass test account.
+- DB outage → **503**, no raw exception text. `.env.local` restored **byte-identical** (md5 `d771e757aa2c5f994f9899661690ba65`).
+- Neighbouring routes unregressed (orders 401/200/403 · conversations 200 · manufacturers 200 public). `tsc` silent · `npm run build` exit 0, 162 pages · eslint clean on `route.ts`, with the 2+2 errors in the two page files confirmed **pre-existing at HEAD by stashing and re-linting**.
+
+### Carried forward — three flags, recorded so they are not lost
+- 🔴 **GET still returns a false `200 "unverified"` if the database dies AFTER the auth gate.** The proven 503 comes from `getVerifiedUser`; beneath it `getVerificationStatus` and `getLatestVerificationApplication` both `if (error) return null`. **The `try/catch` added to that handler cannot fire today — it becomes load-bearing when the `db.ts` swallow-site chunk lands** (item 8's other half). Excluded deliberately: shared `db.ts` functions, and changing their semantics inside a security commit is the scope creep 2.6c refused.
+- ⚠️ **Pre-existing cosmetic bug, not introduced and not fixed:** the POST response reports the application as `status: "pending"` even when just auto-approved — `submitVerificationApplication` returns its snapshot before the approval UPDATE. No caller reads it today; item 5's panel will.
+- ⚠️ **Test data changed:** dev-bypass account `9999999991` is now `bronze` with a pending `silver` application. Reversible.
+
+### Also fixed — a seven-route documentation drift
+- **The item-8 register claimed 9 routes still needed `dbErrorResponse`. A per-handler audit of all 23 routes found 4** (`dev-auth/lookup` POST, `manufacturers` GET, `manufacturers/[id]` GET, `waitlist` POST). Seven were converted during the Group 2 batch and the list never moved. The **CORE T6 GAP** entry was stale in the same direction — every handler it named as unguarded now has both `try/catch` and `dbErrorResponse`. ⚠️ Same failure mode as the 2.8a incident, in the direction that costs rework: a session trusting the register would have "fixed" what was already fixed. Both entries **corrected in place, not deleted**, so the trap leaves a trace.
+
+---
+
 ## [2026-08-28 · chunk 2.9] — The M10 docs sweep. No code. M10 is complete.
 
 > **Docs only — zero code, zero suite runs**, agreed explicitly before starting. The rule that kept 2.8a's docs pass honest: if the sweep finds something needing a code change, it stops and reports rather than fixing it inside a documentation chunk. Nothing did.

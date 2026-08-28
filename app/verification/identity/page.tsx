@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "../../context/UserContext";
 import type { UserType } from "../../context/UserContext";
+import { authFetch } from "../../lib/apiClient";
 
 // ─────────────────────────────────────────────────────────────
 // Step configuration
@@ -3019,7 +3020,7 @@ function IdentityVerificationWizard() {
       applicationSubmittedRef.current = true;
       const auth = JSON.parse(localStorage.getItem("fabverify_auth") || "{}");
       if (auth.phone) {
-        fetch("/api/verification", {
+        authFetch("/api/verification", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
