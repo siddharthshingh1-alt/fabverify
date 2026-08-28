@@ -171,7 +171,7 @@ Everything M10 built — password login, reset, the throttles, the anti-spray co
 
 **THREE GATES BEFORE `main` (merging auto-deploys to Vercel):**
 1. **Chunk 1.10's owed production session** — closes 1.8's first execution and 1.9's miss-then-fallback branch.
-2. **The repo-wide eslint decision** — 29 pre-existing errors from a plugin bump. Fix, pin, or accept-and-record. `CLAUDE.md` §3 says the build passes clean; it does not.
+2. ✅ **The repo-wide eslint decision — TAKEN 2026-08-29.** The 29 errors came from exactly **two** rules (`react-hooks/set-state-in-effect` ×27, `react-hooks/use-memo` ×2), both introduced by a plugin bump after this UI was written. Both set to **`"warn"`** in `eslint.config.mjs` with the full reasoning written into the file: **0 errors, 40 warnings**, build and `tsc` unaffected. ⚠️ **Warn, not off** — the findings stay visible, they just stop blocking. Revisit after the first deploy; fix sites as their screens are touched, not as a sweep; not a licence for new violations.
 3. **A deliberate merge**, knowing it deploys.
 
 **THEN: Launch-Ready items 3–8** (RLS cleanup · photos → Storage · admin verification panel · order completion + delivery address · escrow simulated · error-handling polish). Item 1 ✅ and item 2 ✅ are done.

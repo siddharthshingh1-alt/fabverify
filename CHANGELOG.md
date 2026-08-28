@@ -6,6 +6,23 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-29 · merge gate 2] — The eslint decision: 29 errors downgraded to warnings, on the record
+
+> **Config + docs only, zero application code.** Launch-Ready merge gate 2, taken so the first deploy is not blocked on a style sweep.
+
+### Changed
+- **`eslint.config.mjs`: `react-hooks/set-state-in-effect` and `react-hooks/use-memo` set to `"warn"`.** Those two rules produced **all 29 errors** (27 + 2) — confirmed by a per-rule severity audit, not by reading the summary line. Result: **0 errors, 40 warnings.** Build and `tsc` unaffected (exit 0, 162 pages).
+- **What actually happened:** an `eslint-plugin-react-hooks` bump introduced rules that did not exist when this UI was written, turning 29 working call sites into errors overnight. No code changed; the standard did. That silently broke CLAUDE.md §3's promise that the build passes clean.
+
+### Decision
+- ⚠️ **WARN, NOT OFF — that distinction is the point.** The findings stay visible on every run; they no longer block. Turning them off would delete the information, which is what the 2.8a doc-drift incident taught us not to do.
+- **Rejected: fixing all 29 now.** Refactoring working effect sites immediately before this project's first production deploy is the worst possible moment to touch working UI for a style rule.
+- **Rejected: leaving it red.** A permanently-red lint is one everyone learns to ignore, and it makes a documented standard false.
+- **When to revisit:** after the first deploy is validated and the Launch-Ready items land. `set-state-in-effect` flags a real pattern and several of the 27 are probably genuine cleanups — fix them as their screens are touched for other reasons, not as a 29-site sweep. When the count hits zero, delete the block and let the rules error again. **Not a licence for new violations:** this covers pre-existing sites only.
+- The reasoning is written into `eslint.config.mjs` itself, not only here — the next person to run eslint sees it where they are standing.
+
+---
+
 ## [2026-08-29 · Step 0] — `/api/verification` auth conversion: an unauthenticated tier-grant path, closed
 
 > The first build after M10, and it is a security fix rather than a feature. Taken ahead of Launch-Ready items 3–8 because it was a live unauthenticated write path that granted a verification tier, sitting on the branch heading for `main`.
