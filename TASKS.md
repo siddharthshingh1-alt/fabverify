@@ -584,7 +584,32 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
 ---
 
 ## PHASE A — Make what exists trustworthy
-- [ ] Real SMS: upgrade Twilio to paid OR build 2Factor.in custom API route (India, cheaper). Decide + implement.
+- [ ] 🛑 **REAL SMS — THE LAUNCH BLOCKER. Path decided 2026-08-28; DLT registration STARTED; the code chunk is NOT started and must not begin until DLT clears.**
+  > **Today no real user can authenticate at all.** Twilio is on a TRIAL account and sends only to verified caller IDs, so a person on an arbitrary number cannot receive an OTP — cannot sign up, log in, or reset. **Everything M10 built was proven on the founder's own number and is unreachable by anyone else.**
+
+  **THE CHOSEN PATH: Supabase Send SMS Hook → OUR OWN Next.js API route → an Indian provider.**
+  - ⚠️ **THE DECIDING FACT: Supabase still GENERATES and VERIFIES the OTP itself.** The hook receives the already-generated code (`{ user, sms: { otp } }`) and is responsible for **delivery only**. So `verifyOtp` (browser + server), session issuance, the token ladder, signup's Supabase auth user and `auth_identities` are **all untouched**. This is what makes it one endpoint instead of a login-path rewrite.
+  - ⚠️ **THE HOOK MUST BE OUR OWN ROUTE — NOT an Edge Function, NOT a Postgres function with `pg_cron`.** MIGRATION.md forbids both ("none of it migrates"). The docs' *examples* use exactly those two, so the documented happy path would have violated our own migration rules. The auth-hooks overview states: *"You can use any HTTP endpoint as a Hook, including an endpoint in your application."* ⚠️ **That single sentence carries the whole plan, and the `send-sms-hook` page is SILENT on it rather than agreeing** — founder to eyeball it before any build. Secured by the Standard Webhooks spec (`webhook-id` / `webhook-timestamp` / `webhook-signature`, `whsec_` secret). Free and Pro plans.
+  - **Provider: UNDECIDED — MSG91 vs 2Factor.in.** Founder's call. MSG91 has the deeper Supabase documentation; either works, only the API the route POSTs to changes.
+
+  **REJECTED, with reasons, so nobody re-opens them:**
+  - ⚠️ **Upgrading Twilio alone is UNPROVEN, not proven-bad.** Supabase lets you customise the SMS *template body*, but **no documented way to pass a DLT entity ID, template ID or registered header** through its Twilio integration was found. Do not spend money on this assuming it works.
+  - **Calling an Indian provider directly (bypassing Supabase Auth) was rejected** — it would move OTP generation *and* verification to us, so Supabase would never mint a session, and we would have to issue our own everywhere. That is **A12 Phase 3/4 arriving early and unplanned**, 2–3 chunks on the login path. The hook gets the same outcome for one endpoint.
+
+  **DLT REGISTRATION — the long pole, founder-owned, STARTED 2026-08-28.** Required regardless of provider; without it Indian carriers silently drop the messages.
+  - **Entity (PE ID)** — registered on an operator DLT portal. Needs GST, business PAN, incorporation proof, authorised-signatory letter.
+  - **Header `FABVRF`** — 6-char alphanumeric, registered **transactional/service**. ⚠️ **Never promotional** — OTPs on a promotional header get filtered, and that failure looks exactly like "the code never arrived".
+  - **Content template — LOCKED, register verbatim:**
+    `{#var#} is your FabVerify verification code. Do not share it with anyone.`
+    Sent form is 72 chars, pure GSM-7, **1 segment**, 88 units of headroom.
+  - ⚠️ **THE TEMPLATE DELIBERATELY STATES NO VALIDITY PERIOD, AND THAT IS A DECISION.** An earlier draft read "Valid for 10 minutes." It was dropped for two reasons: a duration in the template **couples DLT to the OTP-expiry setting**, so changing the expiry later means re-registering and waiting for approval again; and it would have pressured us to shorten the expiry **during the exact window when delivery reliability is unproven** — a code that expires before it arrives is indistinguishable from one that never came. **Prove delivery first, tune the expiry later, never re-register.**
+
+  ⚠️ **THE MESSAGE TEXT NOW LIVES IN OUR REPO, NOT IN SUPABASE'S TEMPLATE.** With the hook enabled, Auth → Templates is out of the path — our route composes the body. So the string above becomes a **load-bearing constant with an assertion**: it must match the DLT registration byte-for-byte, and appending to it both breaks DLT matching and doubles the per-message cost past 160 GSM-7 units.
+
+  **THE HOOK ROUTE IS ITS OWN FUTURE CHUNK — do not fold it into anything else.** It is a **new UNAUTHENTICATED INBOUND WEBHOOK**, i.e. a security surface this project does not add casually. It gets a decision entry (signature verification, replay window, what happens when the provider fails, whether delivery failure is fail-open or fail-closed) and its own verification suite, before any wiring.
+
+  **Verify:** a real OTP delivered to a **NON-verified number** (a friend's phone, never used on the platform) on the LAN production build, who then completes signup and reaches a dashboard. ⚠️ That single test also closes the outstanding *"new-user signup through the [I27] gate has never been run end-to-end"* item. Test across **Jio / Airtel / VI** — carriers can accept a message and silently drop it.
+  **Open question, low priority:** the Supabase OTP-expiry setting is dashboard-only and its value is unknown. It no longer affects the template, but `otpPolicy.ts` reasons about the reset-verify limit against a code lifetime "on the order of an hour" — confirm and correct that comment if it differs.
 - [ ] Supabase Storage: replace base64 photo storage in `messages.media_url` and everywhere photos are stored. Migrate the pattern in `db.ts` + upload flow.
 - [ ] Admin verification approval panel: list pending Silver/Gold applications; approve/reject; on approve, set tier + `*_verified_at` + sync `manufacturer_profiles.verification_tier`.
 - [ ] Order completion flow: mark delivered → final milestone → (simulated) final release → order status closed.

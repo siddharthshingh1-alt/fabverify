@@ -252,7 +252,22 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 🛑 **TWILIO IS ON A TRIAL ACCOUNT, SO NO REAL USER CAN AUTHENTICATE. THIS IS THE SINGLE THING STANDING BETWEEN THIS PLATFORM AND ITS FIRST REAL USER.**
 A trial account sends only to *verified caller IDs*. A real person on an arbitrary number **cannot receive an OTP at all** — so they cannot sign up, cannot log in, and cannot reset a password. **Everything M10 built is unreachable by them.** All of it — password login, reset, the throttles, the anti-spray control — was proven on the founder's own verified number.
 ⚠️ **IT IS NOT IN THE LAUNCH-READY MILESTONE LIST**, which is exactly why it keeps being missed: it lives in Phase A. Anyone scanning the milestone for blockers will not see it.
-**The fix is cheap:** upgrade Twilio to paid, or build a 2Factor.in route (India, cheaper). It is a billing-and-config decision, not a build. **Make it before building anything else.**
+**THE PATH IS DECIDED (2026-08-28) AND DLT REGISTRATION HAS STARTED. The code chunk has NOT begun and must not begin until DLT clears.**
+
+**Supabase Send SMS Hook → OUR OWN Next.js API route → an Indian provider (MSG91 or 2Factor.in, founder's call).**
+
+- ⚠️ **Supabase still GENERATES and VERIFIES the OTP.** The hook handles **delivery only** — it receives the already-generated code. So `verifyOtp`, session issuance, the token ladder, signup's Supabase auth user and `auth_identities` are **all untouched**. That is why this is one endpoint rather than a login-path rewrite.
+- ⚠️ **The hook MUST be our own route — never an Edge Function or `pg_cron`**, both of which MIGRATION.md forbids. The docs' examples use exactly those, so the documented happy path would have broken our own migration rules.
+- ⚠️ **Upgrading Twilio alone is UNPROVEN** — no documented way was found to pass DLT entity/template/header parameters through Supabase's Twilio integration. Do not spend money assuming it works.
+- ⚠️ **Calling a provider directly was REJECTED** — it moves OTP generation *and* verification to us, so Supabase never mints a session, dragging A12 Phase 3/4 forward unplanned (2–3 chunks on the login path).
+
+**DLT (the long pole, founder-owned, started 2026-08-28):** entity/PE ID · header **`FABVRF`** (transactional, ⚠️ never promotional) · content template **LOCKED**:
+`{#var#} is your FabVerify verification code. Do not share it with anyone.` — 72 chars, GSM-7, 1 segment.
+⚠️ **It states NO validity period on purpose:** a duration would couple DLT to the OTP-expiry setting, so changing the expiry later would mean re-registering and waiting for approval again — and it would have pressured us to shorten the expiry while delivery reliability is still unproven.
+
+⚠️ **THE MESSAGE TEXT NOW LIVES IN OUR REPO, NOT SUPABASE'S TEMPLATE.** With the hook enabled our route composes the body, so that string becomes a load-bearing constant with an assertion: it must match the DLT registration byte-for-byte, and appending to it breaks DLT matching *and* doubles per-message cost past 160 GSM-7 units.
+
+**The hook route is its own future chunk** — a new **unauthenticated inbound webhook**, i.e. a security surface, so it gets a decision entry and a verification suite before any wiring. Full plan and verification steps: **TASKS.md, Phase A, "REAL SMS".**
 
 ### Carried forward from M10 (2026-08-28) — these survive the milestone, do not lose them
 

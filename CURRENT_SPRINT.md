@@ -80,7 +80,7 @@ has none of it, and merging to `main` auto-deploys to Vercel.**
 
 ## 🛑 WHAT IS ACTUALLY NEXT — AND IT IS NOT THE NEXT MILESTONE ITEM
 
-**Decide Twilio vs 2Factor.in. Before anything else.**
+**✅ DECIDED 2026-08-28: Supabase Send SMS Hook → our own Next.js route → an Indian provider (MSG91 vs 2Factor.in still the founder's call). DLT registration STARTED — that is the long pole, and no code begins until it clears.** Full plan: TASKS.md Phase A "REAL SMS"; summary: PROJECT_MEMORY Known Issues.
 Twilio is on a TRIAL account and sends only to verified caller IDs, so **a real
 user on an arbitrary number cannot receive an OTP at all** — they cannot sign
 up, cannot log in, cannot reset. Every control M10 built was proven on the
