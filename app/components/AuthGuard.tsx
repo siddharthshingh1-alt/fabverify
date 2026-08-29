@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import GuardFallback from "./GuardFallback";
+import {
+  claimGuardRedirect,
+  clearGuardRedirects,
+  recoverToLogin,
+} from "../lib/guardRecovery";
 import { useRouter, usePathname } from "next/navigation";
 import { getSession } from "../lib/authProvider";
 import { authFetch } from "../lib/apiClient";
@@ -116,6 +122,7 @@ export default function AuthGuard({
       // directory, and re-evaluated on every navigation because `pathname`
       // is an effect dependency.
       if (isPublicPath(pathname)) {
+        clearGuardRedirects();
         setAuthorised(true);
         return;
       }
@@ -132,11 +139,18 @@ export default function AuthGuard({
 
       if (!local) {
         setAuthorised(false);
-        router.replace("/login");
+        // Loop budget: a guard that bounces to /login, lands on a page that
+        // bounces straight back, and repeats, is the blank-flicker failure.
+        // Each lap remounts this component, so no per-mount timer can see it.
+        if (claimGuardRedirect()) router.replace("/login");
+        else recoverToLogin("authguard-no-profile-loop");
         return;
       }
 
       // Stage 1 passed — render immediately, no spinner flash.
+      // Clearing here is what stops ordinary navigation (which legitimately
+      // passes through several guards) accumulating into a false loop trip.
+      clearGuardRedirects();
       setAuthorised(true);
 
       // ── STAGE 1b: THE MANDATORY PASSWORD GATE (chunk 2.6b, [I27]) ──────
@@ -161,7 +175,8 @@ export default function AuthGuard({
       if (mode === "profile") {
         if (readPasswordGate() === "missing") {
           setAuthorised(false);
-          router.replace("/onboarding/password");
+          if (claimGuardRedirect()) router.replace("/onboarding/password");
+          else recoverToLogin("authguard-password-gate-loop");
           return;
         }
 
@@ -176,7 +191,8 @@ export default function AuthGuard({
             markHasPassword(body.hasPassword);
             if (!body.hasPassword) {
               setAuthorised(false);
-              router.replace("/onboarding/password");
+              if (claimGuardRedirect()) router.replace("/onboarding/password");
+              else recoverToLogin("authguard-password-status-loop");
             }
           })
           .catch(() => {
@@ -204,7 +220,8 @@ export default function AuthGuard({
         if (cancelled) return;
         if (result.status === "none") {
           setAuthorised(false);
-          router.replace("/login");
+          if (claimGuardRedirect()) router.replace("/login");
+          else recoverToLogin("authguard-no-session-loop");
         }
       });
       // No .catch needed: getSession never rejects, it reports { status:
@@ -228,9 +245,15 @@ export default function AuthGuard({
     };
   }, [pathname, mode, router]);
 
+  // ⚠️ NOT A BARE `null` ANY MORE. GuardFallback still renders nothing for
+  // the first 600ms, so the original intent below is fully preserved and no
+  // spinner flashes on a normal navigation — but it can no longer be the
+  // TERMINAL state. A guard that never resolves now says so instead of
+  // showing a blank screen forever. See app/lib/guardRecovery.ts.
+  //
   // Render nothing while bouncing — never flash protected chrome at someone
   // who is on their way to /login.
-  if (!authorised) return null;
+  if (!authorised) return <GuardFallback reason="authguard" />;
 
   return <>{children}</>;
 }

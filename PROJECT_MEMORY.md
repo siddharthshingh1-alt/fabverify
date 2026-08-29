@@ -247,6 +247,22 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 
 ## KNOWN ISSUES / TECH DEBT
 
+### 🛑 OPEN — BLANK SCREEN ON FIRST LOGIN FOR EVERY NON-ENTERPRISE USER TYPE (found 2026-08-29, MERGE BLOCKER)
+
+**A real first login on the artisan reached a blank screen and stayed there.** No error, no spinner, no redirect, no recovery. Found by chunk 1.10's production test — **the first ever production login on a non-enterprise account.**
+
+⚠️ **THE AUTH HALF PASSED COMPLETELY.** `via PHONE FALLBACK` then `via IDENTITY` in the server log; `auth_identities` written (**1.8's first-ever execution**); password set. The break is entirely client-side render.
+
+⚠️ **WHY EVERY EARLIER PRODUCTION TEST MISSED IT: they all ran on the founder's ENTERPRISE account, and `/enterprise/dashboard` uses `useEnterpriseAccess` — the one dashboard that does NOT use `useTypeGuard`.** All of M10 was proven on the single account type that routes around the bug. **This is why a fix must be proven on a non-enterprise type; testing on enterprise proves nothing.**
+
+**Blast radius: all six non-enterprise types on first login** (artisan, brand, jobworker, manufacturer, mill, supplier). The trigger is the [I27] gate, which fires for any account with no credential — every real user's first login.
+
+⚠️ **THE TRIGGER IS RE-ARMABLE, NOT SINGLE-USE:** delete the account's `user_credentials` row and the gate fires again. (The artisan's *identity* linkage was single-use and is spent; the blank screen does not need it.) ⚠️ **A `buyer` account is a FALSE-PASS TRAP** — `UserContext` defaults `userType` to `'buyer'`, so a buyer test goes green with the bug fully intact. **Test on non-buyer AND non-enterprise.**
+
+✅ **PART 1 IS DONE (2026-08-30) — the guard safety net.** `guardRecovery.ts` + `GuardFallback.tsx`; all three guards wired. A guard may render `null` only while a decision is pending: `0-600ms` null (**unchanged fast path**), then spinner, then a recoverable error. The hooks cannot render, so they guarantee their `null` is transient. Plus a `sessionStorage` **loop budget** (4/4s), because a per-mount timer cannot see a loop — every lap remounts the guard. On trip: mirrors cleared, hard nav to `/login?recovered=<guard>`. 18/18. **No page files touched (132 `return null` sites across 124 files).**
+
+🛑 **PART 2 — THE ROOT CAUSE — IS STILL OPEN.** Leading hypothesis: a redirect loop (the server log goes **completely silent after the password POST**, and neither `/login` nor a failed stage-1 check makes an authenticated call). An earlier hypothesis — `fabverify_user_type` never written — was **withdrawn**: the OTP path calls `applyIdentity(dbUser)` before redirecting.
+
 ### ✅ CLOSED 2026-08-29 — `/api/verification` was an unauthenticated tier-grant path
 
 **Both handlers had NO authentication of any kind.** Reachable with no credentials, against any phone number: grant **Bronze**

@@ -6,6 +6,38 @@ Format: `## [date/session] — title` then bullets grouped by Added / Changed / 
 
 ---
 
+## [2026-08-30 · blank-screen fix, Part 1] — The guard safety net: a blank screen is now impossible by construction
+
+> **MERGE BLOCKER, found by the chunk 1.10 production test.** Part 1 of two. Variant-independent — it does not diagnose the root cause, it makes any such failure visible instead of silent. Part 2 (the root cause) is still open.
+
+### The incident
+- A real first login on the artisan (`9654324268`) — the **first ever production test on a NON-ENTERPRISE account** — reached a **blank screen** and stayed there. No error, no spinner, no redirect. Retrying reproduced it exactly.
+- ⚠️ **The auth half PASSED.** `via PHONE FALLBACK` then `via IDENTITY` in the server log, `auth_identities` written at 19:35:07 (**1.8's first-ever execution**), `user_credentials` written at 19:35:28. Three of chunk 1.10's five proofs are done. The failure is entirely in the client render layer.
+- ⚠️ **WHY IT WAS NEVER CAUGHT: every prior production test ran on the founder's ENTERPRISE account, and `/enterprise/dashboard` is the ONE dashboard that uses `useEnterpriseAccess` instead of `useTypeGuard`.** All of M10 was proven on the single account type that routes around the bug.
+- **Blast radius: all six non-enterprise types (artisan, brand, jobworker, manufacturer, mill, supplier), on first login specifically** — the [I27] password gate fires for any account with no credential, which is every real user's first login.
+
+### Fixed — the guards can no longer render nothing forever
+- **`app/lib/guardRecovery.ts` (new)** — the floor under all three client guards.
+- **`app/components/GuardFallback.tsx` (new)** — `0-600ms` bare `null` (**the original fast path, unchanged — no spinner flash on normal navigation**), then spinner, then a real error card with a working way out.
+- **`AuthGuard`** renders `GuardFallback` instead of a bare `null`; **`useTypeGuard` / `useEnterpriseAccess`** cannot render, so instead they **guarantee their `null` is transient** via a stuck timer that always ends in a navigation.
+- ⚠️ **NO PAGE FILES TOUCHED. There are 132 `if (!authorized) return null` sites across 124 files** — changing them was never an option, and they were not the bug. The fix works entirely inside the guards.
+
+### Added — the loop budget (an addition beyond the approved decisions, approved separately)
+- ⚠️ **A PER-MOUNT TIMER CANNOT CATCH A REDIRECT LOOP.** Every lap remounts the guard, so each mount is short-lived and no stuck-timer ever fires — the user sees a blank flicker forever while no single component waits long enough to notice. The counter must outlive the component, so it lives in `sessionStorage`: **4 redirects / 4s**, cleared on every successful resolve so ordinary navigation cannot accumulate into a false trip.
+- On trip, `recoverToLogin(reason)` clears the identity mirrors and hard-navigates to **`/login?recovered=<which-guard>`**. It clears the mirrors deliberately — reaching there means the guards cannot agree who the user is, so leaving them in place would loop straight back. It does **NOT** revoke the server session: a client guard is not an authorisation boundary, and nothing is destroyed.
+- **The `?recovered=` reason may pin the root-cause variant on its own**, without any console reading.
+
+### Verified
+- **`scripts/verify-guard-recovery.ts` 18/18** — timing constants, budget exhaustion, clearing on success, window expiry, recovery (navigates, carries the reason, clears every mirror, leaves unrelated keys, resets the budget), and blocked-storage degradation (a guard must never throw).
+- `tsc` silent, build exit 0 at 162 pages, eslint **0 errors**, five routes 200, auth matrix unchanged (401s), and the new strings confirmed present in the shipped client bundles.
+- ⚠️ **The TIMING behaviour is React in a browser and HTTP cannot exercise it** — the same limitation `verify-login-wiring.ts` records for `AuthGuard`. Proven by the browser run on a non-enterprise account, not here.
+
+### Still open
+- **Part 2 — the root cause.** Leading hypothesis is a redirect loop: the log falls **completely silent after the password POST**, and both `/login` and a failed stage-1 check make no authenticated calls, which fits a `dashboard -> /login -> dashboard` loop. ⚠️ An earlier hypothesis (`fabverify_user_type` never written) was **recorded and then withdrawn** — the OTP path calls `applyIdentity(dbUser)` before redirecting, which writes it.
+- ⚠️ **THE MERGE STAYS BLOCKED until Part 2 lands AND is proven on a non-enterprise first login.**
+
+---
+
 ## [2026-08-29 · merge gate 2] — The eslint decision: 29 errors downgraded to warnings, on the record
 
 > **Config + docs only, zero application code.** Launch-Ready merge gate 2, taken so the first deploy is not blocked on a style sweep.

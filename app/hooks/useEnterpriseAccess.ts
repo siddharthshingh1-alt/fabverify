@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../context/UserContext";
+import {
+  GUARD_STUCK_AFTER_MS,
+  claimGuardRedirect,
+  clearGuardRedirects,
+  recoverToLogin,
+} from "../lib/guardRecovery";
 
 /**
  * Gates access to /enterprise/* pages.
@@ -28,13 +34,27 @@ export function useEnterpriseAccess() {
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    if (!mounted) return;
+    // Same floor as useTypeGuard — see the note there and in
+    // app/lib/guardRecovery.ts. Enterprise was the ONE account type that
+    // routed around the 2026-08-29 blank screen (it uses this hook rather than
+    // useTypeGuard), which is exactly why every production test until then
+    // passed. It gets the same safety net so that exemption cannot hide the
+    // next one.
+    const stuck = setTimeout(() => {
+      recoverToLogin("enterprise-guard-unresolved");
+    }, GUARD_STUCK_AFTER_MS);
+
+    if (!mounted) return () => clearTimeout(stuck);
 
     if (!user.isEnterprise) {
-      router.replace("/dashboard");
-      return;
+      if (claimGuardRedirect()) router.replace("/dashboard");
+      else recoverToLogin("enterprise-guard-redirect-loop");
+      return () => clearTimeout(stuck);
     }
+
+    clearGuardRedirects();
     setAuthorized(true);
+    return () => clearTimeout(stuck);
   }, [mounted, user, router]);
 
   return authorized;
