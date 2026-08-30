@@ -78,6 +78,46 @@ session token, per-account lockout, server-side throttled OTP, password reset,
 and login anti-spraying. Everything lives on `auth-hardening-batch`; **`main`
 has none of it, and merging to `main` auto-deploys to Vercel.**
 
+## 🏁 SESSION HANDOFF (2026-08-30) — THE NEXT SESSION IS THE FIRST DEPLOY
+
+**READ THIS FIRST. The next session's job is ONE thing: the deliberate merge to `main`, which auto-deploys to Vercel.** It was left to a fresh session on purpose — a first deploy wants clear eyes, not the tail of a long debugging session.
+
+### GATE SHEET
+| Gate | Status |
+|---|---|
+| 1. Chunk 1.10 production session | **5 of 5 proven** — pending the founder's final confirmation that sign-out leaves **0** localStorage keys (fix landed in `40b7486`; everything else passed) |
+| 2. Repo-wide eslint decision | ✅ **DONE** — `4861b28`, 29 errors → warnings, reasoning in `eslint.config.mjs` |
+| 3. A deliberate merge | ⏳ **the only thing left** |
+
+**What chunk 1.10 proved, so nobody re-runs it:** 1.9's miss-then-fallback branch (`via PHONE FALLBACK`, single-use state, spent correctly) · 1.8's first-ever identity write (`auth_identities` 1 row → 2) · `apiClient`'s seam token attach in production · `AuthGuard`'s production branch (stage 2 ran for the first time and did not bounce a valid session) · sign-out: no-token API **401**, direct dashboard URL **bounced**, and — the one that matters — **replaying the pre-sign-out access token returned 401, proving sign-out ends the session SERVER-SIDE. Issue B holds in production.**
+
+### ⚠️ BEFORE MERGING — RE-VERIFY, DO NOT TRUST THIS FILE
+1. **`SESSION_TOKEN_SECRET` on Vercel.** Confirm with `npx vercel env ls production`. It was added 2026-08-29 (Production scope). ⚠️ **Without it the Vercel build FAILS** — 15 of 23 routes import `auth.ts` → `authProvider.server.ts` → `sessionToken.server.ts`, which throws at module load. Proven: `SESSION_TOKEN_SECRET="" npm run build` → exit 1. **This is the SAFE failure mode** — a failed build means the deploy is rejected and the current production version keeps serving.
+2. **Confirm the gates from git, not from prose.** `git log --oneline -5` against this block.
+3. **Clean build LAST:** `rm -rf .next && npm run build` — exit 0, 162 pages. ⚠️ Build after the final file lands, never before (that mistake shipped `26b3cd6` with a tree that did not build).
+
+### THE MERGE
+`git checkout main` → `git pull origin main` → `git merge auth-hardening-batch` → `git push origin main` ← **THIS IS THE DEPLOY.** `main` is 0 behind, so it fast-forwards; no merge commit, no conflicts.
+
+### 6-POINT PRODUCTION VERIFICATION (on `fabverify.vercel.app`, after the build goes green)
+1. **Login page loads AND shows a password field** — `main` has never had one; fastest proof the right code shipped.
+2. **No 500s:** an authenticated route unauthenticated returns **401, not 500**. A 500 means the module-load throw fired, i.e. the secret is wrong or too short.
+3. **Real OTP login** on the founder's verified number → dashboard with real data.
+4. **Password login** on the enterprise account.
+5. ⚠️ **The dev bypass must be DEAD:** `123456` as the OTP **must fail**. If it works, stop — the hostname gate is not holding.
+6. **Unauthenticated `GET /api/verification?phone=…` → 401** (the Step 0 fix).
+Do 1, 2 and 5 immediately; 3 and 4 within minutes.
+
+### ⚠️ WHAT THE DEPLOY DOES AND DOES NOT CHANGE
+- **It does NOT open the front door.** Twilio is still on TRIAL, so no real user on an arbitrary number can receive an OTP — they cannot sign up, log in, or reset. That is unchanged by merging and is still the launch blocker (DLT registration, founder-owned, in progress).
+- **That is also what makes this the safest first deploy available:** there is no traffic to break. Deploy into the quiet rather than waiting for the branch to grow.
+- 🔴 **9 dashboards are blank on mobile** — **pre-existing on `main`, ships today, NOT a regression from this branch.** It does not block the merge. It is HIGH priority for its own chunk (see Phase A in TASKS.md) and must be fixed **before DLT clears and real users arrive**.
+
+### AFTER THE MERGE, in order
+Three easy error-handling routes (`manufacturers`, `manufacturers/[id]`, `waitlist`) → the `db.ts` swallow sites → **the mobile fix** (decide Option A vs B first) → Launch-Ready items 3-8.
+
+---
+
 ## 🛑 WHAT IS ACTUALLY NEXT — AND IT IS NOT THE NEXT MILESTONE ITEM
 
 **✅ DECIDED 2026-08-28: Supabase Send SMS Hook → our own Next.js route → an Indian provider (MSG91 vs 2Factor.in still the founder's call). DLT registration STARTED — that is the long pole, and no code begins until it clears.** Full plan: TASKS.md Phase A "REAL SMS"; summary: PROJECT_MEMORY Known Issues.
