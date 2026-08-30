@@ -28,6 +28,8 @@ export const GUARD_SPINNER_AFTER_MS = 600;
 /** Past this, the guard has failed to reach a decision. Show a real error. */
 export const GUARD_STUCK_AFTER_MS = 2500;
 
+import { clearPasswordGate } from "./passwordGate";
+
 const LOOP_KEY = "fabverify_guard_redirects";
 
 /** More than this many guard-issued redirects inside the window means the
@@ -175,6 +177,11 @@ export function recoverToLogin(reason: string) {
   ];
   try {
     MIRRORS.forEach((key) => localStorage.removeItem(key));
+    // The password-gate mirror is owned by passwordGate.ts, so it is cleared
+    // through that module rather than by adding a ninth string here -- a
+    // second copy of the key name is how a writer and a clearer drift apart.
+    // Same omission this list originally shared with UserContext.signOut.
+    clearPasswordGate();
   } catch {
     /* storage blocked — the navigation below still gets them out */
   }

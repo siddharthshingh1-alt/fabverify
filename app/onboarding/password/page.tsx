@@ -7,7 +7,7 @@ import { signOut as providerSignOut } from "@/app/lib/authProvider";
 import { MIN_PASSWORD_LENGTH } from "@/app/lib/passwordPolicy";
 import { getLandingRoute } from "@/app/lib/routing";
 import {
-  HAS_PASSWORD_KEY,
+  clearPasswordGate,
   markHasPassword,
 } from "@/app/lib/passwordGate";
 
@@ -166,7 +166,11 @@ export default function SetPassword() {
   const logOut = async () => {
     await providerSignOut();
     localStorage.removeItem("fabverify_auth");
-    localStorage.removeItem(HAS_PASSWORD_KEY);
+    // Through the module, not a second inlined removeItem. This screen was the
+    // ONLY place the key was ever cleared, and it did so by hand while
+    // clearPasswordGate() sat unused -- which is exactly how the main sign-out
+    // path came to miss it entirely.
+    clearPasswordGate();
     window.location.href = "/login";
   };
 

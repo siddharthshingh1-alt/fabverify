@@ -14,6 +14,7 @@ import { resolveAccount, type AccountType } from '../lib/accountType'
 // one below), so an unaliased seam import would be a duplicate declaration.
 // Same collision chunk 1.6 hit in login/page.tsx.
 import { signOut as providerSignOut } from '../lib/authProvider'
+import { clearPasswordGate } from '../lib/passwordGate'
 
 export type UserType =
   | 'buyer'
@@ -380,6 +381,22 @@ export function UserProvider({ children }: {
       // fixes — the API would keep authorising a signed-out user in dev, via
       // the dev header instead of the Bearer token.
       localStorage.removeItem('fabverify_auth')
+
+      // ALSO NOT in IDENTITY_MIRROR_KEYS, and it was simply missed until a
+      // sign-out check on 2026-08-30 found `fabverify_has_password` alone in
+      // an otherwise empty localStorage. clearPasswordGate() had existed since
+      // chunk 2.6b and was called by NOTHING -- written for this and never
+      // wired in.
+      //
+      // Not a bypass: the gate is re-derived from the server at login
+      // (passwordGateDestination) and on every app entry (AuthGuard stage 1b),
+      // and both overwrite this mirror with the new account's truth. What the
+      // stale key actually cost was a leak -- it survived sign-out and told
+      // anyone on that device whether the last user had a password -- plus a
+      // wider fail-open window: while the status endpoint is unreachable, both
+      // corrections are skipped by design, so a stale "1" could briefly spare
+      // the NEXT user the set-password screen.
+      clearPasswordGate()
     } catch {}
   }
 

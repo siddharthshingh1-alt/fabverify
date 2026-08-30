@@ -154,6 +154,40 @@ t6.settle();
 await wait(D * 8);
 check("a resolved guard survives a long idle page view (THE SHIPPED SYMPTOM)", navigatedTo === null);
 
+// -------------------------------------------------------------------------
+// [H] THE PASSWORD-GATE MIRROR MUST NOT SURVIVE RECOVERY.
+//
+// Found by a real sign-out check on 2026-08-30: localStorage was empty EXCEPT
+// for fabverify_has_password. clearPasswordGate() had existed since chunk 2.6b
+// and was called by nothing. recoverToLogin shared the same omission.
+//
+// Not a bypass -- the gate is re-derived from the server at login and on every
+// app entry -- but it leaked whether the last user on the device had a
+// password, and it widened the fail-open window while the status endpoint is
+// unreachable.
+// -------------------------------------------------------------------------
+console.log("");
+console.log("[H] PASSWORD-GATE MIRROR - cleared by recovery");
+g.sessionStorage = new MemStore();
+g.localStorage = new MemStore();
+const ls = g.localStorage as MemStore;
+
+ls.setItem("fabverify_auth", "x");
+ls.setItem("fabverify_profile", "x");
+ls.setItem("fabverify_has_password", "1");
+ls.setItem("unrelated_key", "keep-me");
+navigatedTo = null;
+recoverToLogin("mirror-test");
+check("fabverify_has_password is cleared by recoverToLogin", ls.getItem("fabverify_has_password") === null);
+check("no fabverify_* key survives recovery", ls.keys().filter((k) => k.startsWith("fabverify_")).length === 0);
+check("unrelated keys still survive", ls.getItem("unrelated_key") === "keep-me");
+
+// A "0" (definitely has none) must clear too -- not just the "1" case.
+ls.setItem("fabverify_has_password", "0");
+navigatedTo = null;
+recoverToLogin("mirror-test-zero");
+check("the \"0\" state is cleared as well as \"1\"", ls.getItem("fabverify_has_password") === null);
+
 console.log("\n[F] STORAGE BLOCKED — a guard must never throw");
 g.sessionStorage = new ThrowingStore();
 let threw = false;
