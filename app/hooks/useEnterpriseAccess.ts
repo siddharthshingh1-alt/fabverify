@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../context/UserContext";
 import {
-  GUARD_STUCK_AFTER_MS,
+  armGuardStuckTimer,
   claimGuardRedirect,
   clearGuardRedirects,
   recoverToLogin,
@@ -39,22 +39,23 @@ export function useEnterpriseAccess() {
     // routed around the 2026-08-29 blank screen (it uses this hook rather than
     // useTypeGuard), which is exactly why every production test until then
     // passed. It gets the same safety net so that exemption cannot hide the
-    // next one.
-    const stuck = setTimeout(() => {
-      recoverToLogin("enterprise-guard-unresolved");
-    }, GUARD_STUCK_AFTER_MS);
+    // next one — and the same synchronous settle(), because it shipped the
+    // same cleanup-only regression.
+    const timer = armGuardStuckTimer("enterprise-guard-unresolved");
 
-    if (!mounted) return () => clearTimeout(stuck);
+    if (!mounted) return () => timer.cancel();
 
     if (!user.isEnterprise) {
+      timer.settle();
       if (claimGuardRedirect()) router.replace("/dashboard");
       else recoverToLogin("enterprise-guard-redirect-loop");
-      return () => clearTimeout(stuck);
+      return () => timer.cancel();
     }
 
+    timer.settle();
     clearGuardRedirects();
     setAuthorized(true);
-    return () => clearTimeout(stuck);
+    return () => timer.cancel();
   }, [mounted, user, router]);
 
   return authorized;

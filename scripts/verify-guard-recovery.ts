@@ -44,6 +44,7 @@ Object.defineProperty(g.window, "location", {
 
 const mod = await import("../app/lib/guardRecovery.ts");
 const { claimGuardRedirect, clearGuardRedirects, recoverToLogin,
+        armGuardStuckTimer,
         GUARD_SPINNER_AFTER_MS, GUARD_STUCK_AFTER_MS } = mod;
 
 console.log("\n[A] TIMING CONSTANTS — the fast path must be preserved");
@@ -91,6 +92,67 @@ check("clears every identity mirror", local.keys().filter(k => k.startsWith("fab
 check("leaves unrelated keys alone", local.getItem("unrelated_key") === "keep-me");
 check("clears the loop budget so /login is not another lap",
   (g.sessionStorage as MemStore).getItem("fabverify_guard_redirects") === null);
+
+// -------------------------------------------------------------------------
+// [G] WHEN THE STUCK TIMER FIRES - the assertions that were MISSING.
+//
+// This section exists because its absence shipped a regression. The first cut
+// of this suite was 18/18 green while the guards contained a defect that
+// signed users out 2.5s after a SUCCESSFUL resolve. Every assertion tested
+// WHAT recoverToLogin does; none tested WHEN it is called. A green suite that
+// does not cover the risky part buys false confidence, which is worse than no
+// suite at all.
+//
+// The timing lives in armGuardStuckTimer precisely so it can be asserted here
+// without React. `delayMs` is a parameter so these run in milliseconds.
+// -------------------------------------------------------------------------
+console.log("");
+console.log("[G] STUCK TIMER - fires ONLY when genuinely undecided");
+const D = 40;
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+g.sessionStorage = new MemStore();
+g.localStorage = new MemStore();
+
+navigatedTo = null;
+const t1 = armGuardStuckTimer("should-not-fire", D);
+t1.settle();
+await wait(D * 3);
+check("settled timer does NOT navigate (THE REGRESSION ASSERTION)", navigatedTo === null);
+check("settle() records the decision", t1.isSettled === true);
+
+navigatedTo = null;
+armGuardStuckTimer("should-fire", D);
+await wait(D * 3);
+check("un-settled timer DOES navigate (safety net still works)", (navigatedTo ?? "").includes("recovered=should-fire"));
+
+navigatedTo = null;
+const t3 = armGuardStuckTimer("cancelled", D);
+t3.cancel();
+await wait(D * 3);
+check("cancelled timer does NOT navigate (unmount path)", navigatedTo === null);
+
+navigatedTo = null;
+const t4 = armGuardStuckTimer("double-settle", D);
+t4.settle();
+t4.settle();
+await wait(D * 3);
+check("settle() is idempotent and still does not fire", navigatedTo === null);
+
+navigatedTo = null;
+const t5 = armGuardStuckTimer("late-settle", D);
+await wait(D * 3);
+const firedAt = navigatedTo;
+t5.settle();
+check("settling AFTER it fired does not undo or re-fire", navigatedTo === firedAt && (firedAt ?? "").includes("late-settle"));
+
+// The exact shape of the shipped bug: decide immediately, then sit on the page
+// far longer than the threshold, with no re-render and no unmount.
+navigatedTo = null;
+const t6 = armGuardStuckTimer("dashboard-sit", D);
+t6.settle();
+await wait(D * 8);
+check("a resolved guard survives a long idle page view (THE SHIPPED SYMPTOM)", navigatedTo === null);
 
 console.log("\n[F] STORAGE BLOCKED — a guard must never throw");
 g.sessionStorage = new ThrowingStore();

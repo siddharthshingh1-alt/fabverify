@@ -6,7 +6,7 @@ import { useUser } from "../context/UserContext";
 import type { UserType } from "../context/UserContext";
 import { getBasePath } from "../lib/routing";
 import {
-  GUARD_STUCK_AFTER_MS,
+  armGuardStuckTimer,
   claimGuardRedirect,
   clearGuardRedirects,
   recoverToLogin,
@@ -37,30 +37,36 @@ export function useTypeGuard(expected: UserType | UserType[]) {
     //
     // Every caller does `if (!authorized) return null`, and there are 122 of
     // them — far too many to change, and they are not the bug. The bug was
-    // that `authorized` could stay false FOREVER (mounted never true, or
-    // userType never resolving to the expected value), which rendered a blank
-    // screen with no error, no spinner and no way out. This hook cannot
-    // render, so instead it guarantees the null is TRANSIENT: it will always
-    // end in a navigation. See app/lib/guardRecovery.ts.
-    const stuck = setTimeout(() => {
-      recoverToLogin("typeguard-unresolved");
-    }, GUARD_STUCK_AFTER_MS);
+    // that `authorized` could stay false FOREVER, rendering a blank screen
+    // with no error, no spinner and no way out. This hook cannot render, so
+    // instead it guarantees the null is TRANSIENT: it always ends in a
+    // navigation. See app/lib/guardRecovery.ts.
+    //
+    // ⚠️ settle() IS CALLED SYNCHRONOUSLY ON EVERY DECISION BRANCH, never left
+    // to the cleanup. The first version of this hook disarmed only in cleanup,
+    // which does not run while a user sits on a resolved page — so the timer
+    // fired anyway and signed people out 2.5s after the dashboard loaded.
+    const timer = armGuardStuckTimer("typeguard-unresolved");
 
-    if (!mounted) return () => clearTimeout(stuck);
+    // Undecided: mounted has not happened yet, so the timer stays ARMED. This
+    // is the one branch that must not settle.
+    if (!mounted) return () => timer.cancel();
 
     const allowed = Array.isArray(expected) ? expected.includes(user.userType) : user.userType === expected;
     if (!allowed) {
+      timer.settle();
       // Loop budget: cross-type bounces that never converge (A sends you to B,
-      // B sends you back to A) remount this hook every lap, so the timer above
-      // can never fire. The counter outlives the component and sees it.
+      // B sends you back to A) remount this hook every lap, so a per-mount
+      // timer can never see it. The counter outlives the component.
       if (claimGuardRedirect()) router.replace(`${getBasePath(user.userType)}/dashboard`);
       else recoverToLogin("typeguard-redirect-loop");
-      return () => clearTimeout(stuck);
+      return () => timer.cancel();
     }
 
+    timer.settle();
     clearGuardRedirects();
     setAuthorized(true);
-    return () => clearTimeout(stuck);
+    return () => timer.cancel();
   }, [mounted, user, expected, router]);
 
   return authorized;

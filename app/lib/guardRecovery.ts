@@ -96,6 +96,54 @@ export function clearGuardRedirects() {
 }
 
 /**
+ * THE STUCK TIMER, as a primitive rather than an inline setTimeout.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE INLINE VERSION SHIPPED A REGRESSION. The first
+ * cut armed a setTimeout inside each guard's effect and disarmed it only in
+ * the effect's CLEANUP. A React cleanup runs when the effect re-runs or the
+ * component unmounts — neither of which happens while a user simply sits on a
+ * dashboard. So the guard resolved correctly, rendered the page, and then the
+ * timer fired anyway 2.5s later and signed the user out. The symptom was
+ * "dashboard loads, then bounces to /login a few seconds later", and it
+ * affected EVERY guarded page load, not just the failure it was written for.
+ *
+ * ⚠️ THE RULE: a decision must disarm the timer SYNCHRONOUSLY, at the moment
+ * it is made. Never rely on a cleanup to cancel something that must not fire.
+ *
+ * Two independent stops, deliberately: clearTimeout AND a `settled` flag the
+ * callback re-checks. Either alone would be enough in theory; the pair means a
+ * timer that somehow survives cancellation still cannot act on a settled
+ * guard.
+ *
+ * `delayMs` is a parameter so the timing itself is testable without waiting
+ * out the real threshold — the assertion that was missing when this shipped.
+ */
+export function armGuardStuckTimer(reason: string, delayMs: number = GUARD_STUCK_AFTER_MS) {
+  let settled = false;
+
+  const handle = setTimeout(() => {
+    if (settled) return;
+    recoverToLogin(reason);
+  }, delayMs);
+
+  return {
+    /** A decision was reached — the guard resolved, or issued a redirect. */
+    settle() {
+      settled = true;
+      clearTimeout(handle);
+    },
+    /** The guard is going away without deciding (unmount / effect re-run). */
+    cancel() {
+      clearTimeout(handle);
+    },
+    /** Test seam: has a decision been recorded? */
+    get isSettled() {
+      return settled;
+    },
+  };
+}
+
+/**
  * The terminal recovery for a guard that cannot resolve or is looping.
  *
  * ⚠️ IT SIGNS THE USER OUT OF CLIENT STATE, DELIBERATELY. Reaching here means
