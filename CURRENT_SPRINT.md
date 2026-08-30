@@ -85,7 +85,7 @@ has none of it, and merging to `main` auto-deploys to Vercel.**
 ### GATE SHEET
 | Gate | Status |
 |---|---|
-| 1. Chunk 1.10 production session | **5 of 5 proven** — pending the founder's final confirmation that sign-out leaves **0** localStorage keys (fix landed in `40b7486`; everything else passed) |
+| 1. Chunk 1.10 production session | ✅ **CLOSED 2026-08-30 — all 5 proofs, no asterisk.** Sign-out confirmed to leave **0** localStorage keys after `40b7486`. |
 | 2. Repo-wide eslint decision | ✅ **DONE** — `4861b28`, 29 errors → warnings, reasoning in `eslint.config.mjs` |
 | 3. A deliberate merge | ⏳ **the only thing left** |
 
