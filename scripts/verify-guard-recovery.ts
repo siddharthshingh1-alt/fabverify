@@ -105,3 +105,8 @@ check("recovery still navigates when localStorage throws", !threw2 && (navigated
 
 console.log(`\n──────── ${pass}/${pass + fail} ────────`);
 if (fail > 0) process.exit(1);
+
+// Top-level await above requires this file to be a MODULE. It has only a
+// dynamic import(), which does not make it one, so the build type-check fails
+// without this line. (Caught by a clean rebuild after the file was added.)
+export {};
