@@ -605,9 +605,9 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
 
 ---
 
-## 🔴 HIGH PRIORITY — 9 MARKETPLACE DASHBOARDS RENDER BLANK ON MOBILE (found 2026-08-30)
+## ✅ FIXED 2026-08-31 — 9 MARKETPLACE DASHBOARDS RENDERED BLANK ON MOBILE (found 2026-08-30)
 
-- [ ] 🔴 **NINE DASHBOARDS ARE A BLANK SCREEN ON ANY PHONE. PRE-EXISTING ON `main` — IT SHIPS TODAY.**
+- [x] ✅ **FIXED — Option A, one default mobile branch in `ThreePanelLayout`, opt-OUT. 13/13 measured checks pass.**
   > **The cause is one CSS class.** `app/components/ThreePanelLayout.tsx` has `className="hidden md:flex"` on the root container of **both** return branches. `hidden` is `display:none`; `md:flex` restores it only at **≥768px**. Below that the entire dashboard shell is painted out. Nothing throws, nothing 404s, the console is clean and the server log is healthy — the DOM is present and invisible.
 
   **THE HOUSE PATTERN, AND WHY TWO PAGES ESCAPE.** The convention is a desktop shell plus a **sibling mobile block**: `<ThreePanelLayout .../>` followed by `<div className="flex flex-col pb-20 md:hidden">` carrying a compact header and the SAME `centrePanel` / `rightPanel` variables, restacked. **Only `brand/dashboard` and `enterprise/dashboard` have that block.** The other nine never got the mobile half.
@@ -626,6 +626,37 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
   **HOW IT WAS FOUND, because the diagnosis went wrong first and that is worth keeping.** It surfaced as a blank screen after a real production first login (chunk 1.10's session) and was chased for several rounds as an **auth/guard bug** — redirect loops, unpopulated mirrors, a stuck guard. It was none of those. The founder solved it in one step by **switching the phone's Chrome to desktop mode**, where the dashboard rendered perfectly. ⚠️ **THE LESSON: "does this page render at all at this viewport width" is a round-one question, not a round-five one.** The investigation went to the auth layer because that is where the recent interesting changes were — availability bias, not evidence. A browser resize would have cost seconds.
 
   ⚠️ **AN EARLIER THEORY WAS WRONG AND IS RECORDED SO IT IS NOT REPEATED:** the blank was attributed to "six of seven user types, enterprise exempt because it uses `useEnterpriseAccess` instead of `useTypeGuard`". **Enterprise escapes because it has a mobile block, not because of its guard hook** — the two were coincident and a causal story was read into it. It also could not explain `brand`, which escapes too and was never checked. *(The guard work it prompted — Part 1 / Part 1a — is still worth having on its own terms: a guard that can render nothing forever is a real latent trap. It just was not this bug's fix.)*
+
+  ### ✅ THE FIX AS BUILT (2026-08-31) — decisions D1b / opt-out / bottom / one-header
+
+  **`ThreePanelLayout` gained a default mobile branch plus a `mobile?: boolean` prop, defaulting to `true`.** A page with its own `md:hidden` block passes `mobile={false}`; **23 files, 28 call sites** did. The nine dashboards (and `PositionDashboards.tsx`) pass nothing and get a working phone view. **New file: `app/components/MobileBottomNav.tsx`.**
+
+  ⚠️ **OPT-OUT, NOT OPT-IN, AND THE REASON IS THIS BUG.** Opting in would have preserved the exact failure being fixed: a new dashboard that forgot the prop would be blank again. Opting out means the worst a forgetful page can do is render a plain-but-working mobile view. Same doctrine as the layout's own signed-out branch — chrome is decided in the layout, never delegated to every page to remember.
+
+  **FOUR THINGS THE PLAN ABOVE GOT WRONG, kept because each cost real time:**
+  1. ⚠️ **"The two pages with bespoke mobile views keep overriding" was FALSE — they would have DOUBLED UP.** Existing mobile blocks are siblings *outside* the layout, so the layout cannot detect them; without an explicit opt-out all 23 would have rendered their dashboard twice. This is the actual cost of Option A and it was not in the plan.
+  2. ⚠️ **The two existing mobile blocks are TWO patterns, not one.** `enterprise/dashboard` restacks the same `centrePanel`/`rightPanel`; **`brand/dashboard` re-authors its content** (greeting, `seasonSection`, `AttentionSection`, its own nav). The default generalises **enterprise**, the lighter and more mechanical of the two.
+  3. ⚠️ **A nav built naively from `screenConfig.leftNav` would 404 on most personas.** The config carries a `fabmerchLabel` and `samplesLabel` for all ten, but **only `/brand` has `fabmerch`, and only 4 personas have `samples`** — `LeftPanel`'s `HAS_SAMPLES` and `fabmerchHref` exist to paper over exactly that. Every one of the five slots was checked against the filesystem instead: `dashboard`, the persona's orders slug, the persona's discovery slug, `enquiries`, `profile` — all resolve for all ten. `fabmerch` was deliberately dropped: `LeftPanel` resolves it to `${basePath}/profile` for talent, which would have duplicated the Profile slot on four personas.
+  4. ⚠️ **The DashboardKit was ALREADY responsive** — `StatGrid` is `grid-cols-2 lg:grid-cols-4`, `TableShell` wraps its 640px min-width in `overflow-x-auto`. Nothing was hiding these dashboards except one class on the layout root. **This was an unhiding, not a rebuild** — the plan's framing implied far more work than existed.
+
+  **TWO `TopBar` BUGS FOUND BY MEASURING, both invisible until now because this bar had only ever rendered inside a shell that was `display:none` below 768px:**
+  - 🔴 **`h-16` clipped its own title.** The greeting wraps to two lines at mobile width; measured overflow **+14px at 375px, +33px at 320px**. Now `min-h-16` with mobile padding and a `text-base md:text-xl` title. **This was not in the register at all.**
+  - 🔴 **The notification dropdown ran off the LEFT edge, not the right** — it is right-anchored to a bell that sits near the viewport edge once the 260px sidebar is gone. Measured **26px cut at 375px, 41px at 360px, 81px at 320px**; fine only at 414px+. ⚠️ **A width clamp DID NOT FIX IT** — at 375px `min(320px, 100vw-32px)` is still 320px, leaving 18px cut. **The anchor was the problem, not the width.** Now `fixed inset-x-4` on mobile with every `md:` class restoring the original desktop geometry exactly. ⚠️ It never caused horizontal page scroll, which is why it survived: the symptom was silently unreachable content, not a visibly broken page.
+
+  ⚠️ **KNOWN AND ACCEPTED: `centre` NOW MOUNTS TWICE** on the nine, once in the CSS-hidden desktop shell and once in the mobile branch. This is the house pattern — `brand` and `enterprise` have always done it — but it is **new for these nine on desktop as well as mobile**, so any `useEffect` or fetch inside a centre panel now runs twice. Harmless today (these panels render static constants); **revisit before a centre panel does real data fetching.**
+
+  ⚠️ **COSMETIC, NOT BROKEN — the shared sub-pages keep their buyer-shaped nav.** Ten components under `app/components/pages/` hardcode their own buyer `BOTTOM_NAV` (Home/Orders/Discover/Merch/Profile) and opted out, so an artisan tapping Enquiries sees buyer labels there. **Verified harmless:** the generic routes are persona-aware redirect shims — as an artisan, `/dashboard → /artisan/dashboard`, `/orders → /artisan/orders`, `/manufacturers → /artisan/buyers`, `/profile → /artisan/profile`, `/fabmerch → /brand/fabmerch` (correct, the shared marketplace). Nothing 404s and the user always lands back in their own namespace. Folding those ten onto `MobileBottomNav` would delete 10 copies of the same array — worth doing, not worth blocking the beta.
+
+  **VERIFIED 2026-08-31 — 13/13, measured in headless Chrome over CDP at real viewport widths, not inspected by eye:**
+  - **All nine dashboards at 375px:** 739–984 chars of real content, exactly 1 visible nav with 5 links, `scrollWidth` 375 (no sideways page scroll), header clip 0.
+  - **Navigate away and back via the new nav** (artisan): dashboard → Enquiries → Orders → Home, each landing on the right path with content and the nav intact; `aria-current` correct on Home.
+  - **Per-persona labels correct:** artisan/manufacturer get `Orders`+`Buyers`; `talent/qc` gets `Jobs`+`Clients`. All hrefs under the persona's own base path.
+  - **Dropdown after the fix:** fits at 320 / 360 / 375 / 414 with 0px overflow on both edges.
+  - **Desktop regression at 1280px:** desktop shell `flex`, **0** bottom navs rendered, `TopBar` back to exactly **64px**, no horizontal scroll.
+  - **`brand` and `enterprise` opt-outs:** 1 nav each, no duplicate default view.
+  - Build **exit 0, 162 static + 27 dynamic** (unchanged) · `tsc` silent · eslint **0 errors** on all changed files.
+
+  ⚠️ **STILL OWED — THE FOUNDER'S OWN TEST BAR, AND IT IS NOT OPTIONAL.** Everything above is headless Chrome at an emulated 375px. **It has NOT been opened on a real phone, in portrait, not in desktop mode.** Do that on at least one talent type and one marketplace type before the beta invite.
 
   **Verify:** every affected dashboard renders real content at 375px viewport width on a real phone, not only in desktop mode. Test on at least one talent type and one marketplace type.
 

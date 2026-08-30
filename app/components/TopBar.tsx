@@ -149,12 +149,20 @@ export default function TopBar({
 
   return (
     <>
+      {/*
+        ⚠️ `min-h-16`, NOT `h-16`. MEASURED, not guessed: at a fixed 64px the
+        greeting wraps to two lines at mobile width and the header clips its
+        own title — 14px cut at 375px, 33px at 320px. It went unnoticed
+        because this bar was only ever rendered inside a shell that was
+        `display:none` under 768px. Now that the mobile view renders it, the
+        height has to follow the content.
+      */}
       <div
-        className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border-dark px-6"
+        className="sticky top-0 z-10 flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border-dark px-4 py-3 md:px-6 md:py-0"
         style={{ backgroundColor: "#07122a" }}
       >
-        <div>
-          <h1 className="font-display text-xl font-bold text-white">
+        <div className="min-w-0">
+          <h1 className="font-display text-base font-bold text-white md:text-xl">
             {title}
           </h1>
           {subtitle && (
@@ -210,15 +218,29 @@ export default function TopBar({
 
             {showNotifications && (
               <div
-                className="hide-scrollbar overflow-y-auto rounded-xl border border-border-dark bg-card"
+                /*
+                  ⚠️ THE OVERFLOW WAS OFF THE LEFT EDGE, NOT THE RIGHT, and
+                  clamping the width alone does NOT fix it. This panel is
+                  right-anchored to the bell; once the 260px sidebar is gone
+                  the bell sits near the viewport edge, so a 320px panel
+                  hanging left of it runs off screen. Measured before the
+                  fix: 26px cut at 375px, 41px at 360px, 81px at 320px, fine
+                  only at 414px+. A width clamp still left 18px cut at 375px,
+                  because at that size `min(320px, 100vw-32px)` is still
+                  320px — the anchor was the problem, not the width.
+
+                  So on mobile it is `fixed` with BOTH edges pinned to the
+                  viewport (`inset-x-4`), which cannot overflow at any width.
+                  Every `md:` class restores the original desktop geometry
+                  exactly: absolute, 56px down, 16px in, 320px wide.
+
+                  It never caused horizontal page scroll, so the symptom was
+                  silently unreachable content rather than a visibly broken
+                  page — which is why it survived this long.
+                */
+                className="hide-scrollbar fixed inset-x-4 top-20 z-[999] max-h-[70vh] overflow-y-auto rounded-xl border border-border-dark bg-card md:absolute md:inset-x-auto md:right-4 md:top-14 md:w-80"
                 style={{
-                  position: "absolute",
-                  top: "56px",
-                  right: "16px",
-                  width: "320px",
-                  maxHeight: "70vh",
                   boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-                  zIndex: 999,
                 }}
               >
                 <div className="flex items-center justify-between border-b border-border-dark px-4 py-3">

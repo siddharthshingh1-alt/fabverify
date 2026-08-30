@@ -988,6 +988,7 @@ export default function Orders() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{orderSummaryPanel}</div>}
       />

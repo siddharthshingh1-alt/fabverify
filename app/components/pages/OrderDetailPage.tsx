@@ -1026,6 +1026,7 @@ export default function OrderDetail() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />

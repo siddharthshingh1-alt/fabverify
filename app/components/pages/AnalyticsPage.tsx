@@ -1268,6 +1268,7 @@ function BuyerAnalytics() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />
@@ -1828,6 +1829,7 @@ function SupplierAnalytics() {
 
   return (
     <ThreePanelLayout
+      mobile={false}
       centre={centrePanel}
       right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
     />
@@ -1991,6 +1993,7 @@ function TalentPerformance() {
 
   return (
     <ThreePanelLayout
+      mobile={false}
       centre={centrePanel}
       right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
     />
@@ -2148,6 +2151,7 @@ function QcPerformance() {
 
   return (
     <ThreePanelLayout
+      mobile={false}
       centre={centrePanel}
       right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
     />

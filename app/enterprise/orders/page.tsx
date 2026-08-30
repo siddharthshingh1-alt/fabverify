@@ -302,6 +302,7 @@ export default function BulkOrderKanban() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         left={<EnterpriseLeftPanel />}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}><SeasonSummaryPanel /></div>}

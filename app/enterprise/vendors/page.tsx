@@ -558,6 +558,7 @@ export default function VendorMaster() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         left={<EnterpriseLeftPanel />}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}><VendorStatsPanel /></div>}

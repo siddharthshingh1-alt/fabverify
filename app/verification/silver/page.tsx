@@ -848,6 +848,7 @@ export default function SilverVerification() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />

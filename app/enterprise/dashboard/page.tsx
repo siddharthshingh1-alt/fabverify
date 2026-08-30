@@ -358,6 +358,7 @@ export default function EnterpriseDashboard() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         left={<EnterpriseLeftPanel />}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}

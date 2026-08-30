@@ -1782,6 +1782,7 @@ export default function TeamManagement() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         left={<EnterpriseLeftPanel />}
         centre={centrePanel}
         right={

@@ -657,6 +657,7 @@ function TalentFabMerchProfile() {
 
   return (
     <ThreePanelLayout
+      mobile={false}
       centre={centrePanel}
       right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
     />
@@ -1271,6 +1272,7 @@ export default function FabMerch() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={<div style={{ padding: "20px" }}>{rightPanel}</div>}
       />

@@ -676,6 +676,7 @@ function CreditAndScorePage() {
   return (
     <>
       <ThreePanelLayout
+        mobile={false}
         centre={centrePanel}
         right={
           <div style={{ padding: "20px" }}>
@@ -1019,6 +1020,7 @@ function TalentScorePage() {
 
   return (
     <ThreePanelLayout
+      mobile={false}
       centre={centrePanel}
       right={
         <div style={{ padding: "20px" }}>
