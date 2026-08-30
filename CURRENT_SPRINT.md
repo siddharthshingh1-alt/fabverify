@@ -168,6 +168,11 @@ error-handling polish. Items 1 and 2 are ✅.
 - 5 routes still unconverted: `dev-auth/lookup`, `waitlist`, `test-db`, and `manufacturers` + `manufacturers/[id]` (the last two stay **public by decision** — browse without auth, act with it). *(`verification` was on this list until 2026-08-29, when it was converted — it was an unauthenticated tier-grant path.)*
 
 ## DEV ENVIRONMENT NOTES
+
+- 🛑 **A PRODUCTION BUILD SERVED FROM LOCALHOST CANNOT TEST ANY AUTHENTICATED FLOW.** `apiClient.ts` decides "am I in dev" by HOSTNAME; `auth.ts` decides by `NODE_ENV`. Under `next start` on `localhost` they disagree: the client sends `x-dev-phone` with no Bearer token, the server requires a Bearer token and ignores the header, and **every authenticated call 401s silently**. It cost a full verification round on 2026-08-30 — the mandatory [I27] password gate appeared not to fire, which looked like a serious bug and was actually the test rig. Use `next dev` on localhost, or a production build on the LAN IP with a real session. Full entry in TASKS.md.
+- ⚠️ **A prerendered HTML 200 proves NOTHING about whether the app works.** A stale `next start` serves the document fine while 404ing every JS chunk — the page loads and cannot hydrate. **Always check the assets:** fetch the chunk URLs the HTML references and confirm they are 200, not just the page.
+- ⚠️ **`pkill` does not kill these processes on Windows.** A silent `EADDRINUSE` leaves the OLD server answering, which looks exactly like a broken build. Kill by port: `Get-NetTCPConnection -LocalPort 3000 -State Listen` then `Stop-Process -Id <pid> -Force`.
+
 - **Blanket 404s on every API route** = `.next` left in a production-build state after running `next build` then `next dev`. Fix: stop the server, `rm -rf .next`, restart. Happened twice.
 - Testing against a broken database: set `NEXT_PUBLIC_SUPABASE_URL` to a **valid URL with an unresolvable hostname** (`https://<ref>-BROKEN.supabase.co`). A malformed URL makes `createClient` throw at module load and proves nothing. **Restore it afterwards** — the real value is `https://ehoifdlresiazmwxsdqy.supabase.co`.
 - Switching accounts needs a manual site-data clear; there is still no desktop sign-out.
