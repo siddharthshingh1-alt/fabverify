@@ -141,7 +141,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
   - ⚠️ **PRODUCTION BRANCHES NOT YET EXERCISED.** Two of the three call sites are behind production-only gates — `AuthGuard` stage 2 returns early on `isDevHost()`, and `apiClient`'s token branch is the `else` of `isDev`. **Localhost cannot reach either.** What is unproven: a real session attaching a Bearer token, and the guard NOT bouncing a valid session. Same class of gap as 1.5/1.9. Closed by the single combined production session below.
   - **Depends on:** 1.4, 1.5. **Blocks:** nothing.
 
-- [ ] **ONE PRODUCTION SESSION CLOSES EVERY REMAINING GAP IN ITEM 1** (recorded 2026-08-05). Log in as the artisan **`9654324268`** via `npm run build && npm start` + the LAN IP (**re-confirm the IP with `Get-NetIPAddress` — it is DHCP and changed from `172.23.18.191` to `172.23.18.8` between sessions**). One session proves five things: dashboard data loads → `apiClient`'s seam token attach (1.10) · guarded pages do not bounce → `AuthGuard` seam (1.10) · log says `via PHONE FALLBACK` for `c9545590…` → **1.9's unproven miss-then-fallback branch** · sign out → storage empty + API 401 → `UserContext` seam (1.10) + Issue B · log in again → `via IDENTITY` → **1.8's first-ever execution** and the self-healing loop. The artisan's unlinked state is a **single-use** test condition — do not spend it on a lesser test.
+- [~] **ONE PRODUCTION SESSION CLOSES EVERY REMAINING GAP IN ITEM 1 — 4 OF 5 PROVEN (2026-08-29 / 2026-08-30). ONE ITEM STILL OWED.**
+  > Original requirement: log in as the artisan `9654324268` on a LAN production build (`npm run build && npm start` + the LAN IP, re-confirmed each time — it is DHCP and has now moved twice: `172.23.18.191` → `172.23.18.8` → `10.123.90.8`). Five proofs required.
+
+  ✅ **PROVEN — 1.9's miss-then-fallback branch** (2026-08-29). Server log: `via PHONE FALLBACK — no identity link used for this request` for `c9545590…`. **The single-use unlinked state was spent here and spent correctly.**
+  ✅ **PROVEN — 1.8's first-ever execution** (2026-08-29). `auth_identities` row written at `19:35:07` (`provider=supabase`, `uid=de9c220c…`); table went 1 row → 2. The next request resolved `via IDENTITY (auth_identities) — phone lookup agrees`, closing the self-healing loop.
+  ✅ **PROVEN — `apiClient`'s seam token attach (1.10's production branch)** (2026-08-30, Run B). Authenticated calls succeeded against a real Bearer token on a non-localhost host, and the dashboard rendered **with real data** (visible in the phone's desktop mode). This branch had never executed before — localhost cannot reach it.
+  ✅ **PROVEN — `AuthGuard`'s production branch does not bounce a valid session** (2026-08-30, Run B). On the LAN host `isDevHost()` is false, so **stage 2 ran for the first time ever** and correctly let the session through. Also proven in the same run: the [I27] password gate fired on a passwordless account, the set-password screen rendered, and the credential saved (`01:11:20`).
+
+  🔴 **STILL OWED — the 5th proof: sign out → `localStorage` empty + API returns 401.** That is the `UserContext` seam (1.10) plus **Issue B** (sign-out genuinely ends the session). **Neither run tested it.** ⚠️ Issue B was verified in July, but on localhost — the production path is what 1.10 asks for.
+  - **It does NOT need the single-use state** (already spent, and irrelevant to this check) and it does **not** need DLT. The artisan now also has a password, so login can be by OTP or password.
+  - **Cheapest way to close it: use a LAPTOP on the LAN IP**, not the phone — a real host so production config applies, but with DevTools to inspect `localStorage`. The real OTP still arrives on the founder's phone and can be typed on the laptop.
+  - **Steps:** log in → sign out → confirm `localStorage` has **0 keys** → confirm an API read returns **401**. ~10 minutes.
+  ⚠️ **The blank screen seen during these runs was NOT an auth failure** — it is the pre-existing mobile-layout bug logged under Phase A. Auth, guards, token attach and data all behaved correctly throughout; the dashboard was rendered and invisible.
 
 **Rules for every chunk:** stop the dev server before `npm run build`; build must pass clean; verify BEFORE committing; commit to a branch, never push `main` (it auto-deploys); update the 📍 STATUS line above as the last act of the session.
 
@@ -172,7 +184,7 @@ Everything M10 built — password login, reset, the throttles, the anti-spray co
 🛑 **NEW MERGE BLOCKER (2026-08-29): BLANK SCREEN ON FIRST LOGIN FOR ALL SIX NON-ENTERPRISE TYPES.** Found by chunk 1.10's production test — the first production login ever run on a non-enterprise account. The auth half PASSED (PHONE FALLBACK to IDENTITY, 1.8's first write); the client render layer breaks. **Every earlier production test ran on ENTERPRISE, the one dashboard using `useEnterpriseAccess` instead of `useTypeGuard`** — which is why M10 shipped clean and this hid. ✅ **Part 1 (guard safety net) DONE 2026-08-30, 18/18.** 🛑 **Part 2 (root cause) OPEN.** ⚠️ **The fix must be proven on a NON-BUYER, NON-ENTERPRISE first login** — buyer is a false-pass trap (`UserContext` defaults `userType` to `'buyer'`). Trigger is re-armable: delete the `user_credentials` row. Full record: PROJECT_MEMORY + CHANGELOG.
 
 **THREE GATES BEFORE `main` (merging auto-deploys to Vercel):**
-1. **Chunk 1.10's owed production session** — closes 1.8's first execution and 1.9's miss-then-fallback branch.
+1. [~] **Chunk 1.10's owed production session — 4 of 5 PROVEN (2026-08-29 / 2026-08-30).** 1.9's fallback branch, 1.8's first write, `apiClient`'s token attach and `AuthGuard`'s production branch are all closed. 🔴 **Still owed: sign out → storage empty + API 401** (`UserContext` seam + Issue B). ~10 minutes on a laptop at the LAN IP. See the chunk entry above.
 2. ✅ **The repo-wide eslint decision — TAKEN 2026-08-29.** The 29 errors came from exactly **two** rules (`react-hooks/set-state-in-effect` ×27, `react-hooks/use-memo` ×2), both introduced by a plugin bump after this UI was written. Both set to **`"warn"`** in `eslint.config.mjs` with the full reasoning written into the file: **0 errors, 40 warnings**, build and `tsc` unaffected. ⚠️ **Warn, not off** — the findings stay visible, they just stop blocking. Revisit after the first deploy; fix sites as their screens are touched, not as a sweep; not a licence for new violations.
 3. **A deliberate merge**, knowing it deploys.
 
@@ -584,6 +596,30 @@ That is **literally DECISIONS A12 Phase 2 (dual-verify), arriving early.** Conse
 ### Then: deploy + production smoke-test.
 
 ---
+
+## 🔴 HIGH PRIORITY — 9 MARKETPLACE DASHBOARDS RENDER BLANK ON MOBILE (found 2026-08-30)
+
+- [ ] 🔴 **NINE DASHBOARDS ARE A BLANK SCREEN ON ANY PHONE. PRE-EXISTING ON `main` — IT SHIPS TODAY.**
+  > **The cause is one CSS class.** `app/components/ThreePanelLayout.tsx` has `className="hidden md:flex"` on the root container of **both** return branches. `hidden` is `display:none`; `md:flex` restores it only at **≥768px**. Below that the entire dashboard shell is painted out. Nothing throws, nothing 404s, the console is clean and the server log is healthy — the DOM is present and invisible.
+
+  **THE HOUSE PATTERN, AND WHY TWO PAGES ESCAPE.** The convention is a desktop shell plus a **sibling mobile block**: `<ThreePanelLayout .../>` followed by `<div className="flex flex-col pb-20 md:hidden">` carrying a compact header and the SAME `centrePanel` / `rightPanel` variables, restacked. **Only `brand/dashboard` and `enterprise/dashboard` have that block.** The other nine never got the mobile half.
+
+  **THE NINE:** `artisan/dashboard` · `manufacturer/dashboard` · `mill/dashboard` · `supplier/dashboard` · `jobworker/dashboard` · `talent/designer/dashboard` · `talent/master/dashboard` · `talent/merchandiser/dashboard` · `talent/qc/dashboard` · plus `components/pages/PositionDashboards.tsx`. *(23 of the 33 `ThreePanelLayout` consumers do have a mobile block; these are the gap.)*
+
+  ⚠️ **PRE-EXISTING, NOT A REGRESSION — THIS IS THE MERGE-RELEVANT FACT.** `main`'s `ThreePanelLayout` line 19 carries the identical class, and on `main` the same five marketplace dashboards have zero mobile blocks. The `auth-hardening-batch` branch **touched none of those pages** (the only diff in that tree is `app/talent/layout.tsx`, +9 lines of AuthGuard). The branch's one change to `ThreePanelLayout` was additive — a second return branch for the signed-out public shell, which copied the existing class. **It does not block the auth merge: the defect is identical before and after.**
+
+  ⚠️ **HIGH PRIORITY ANYWAY: THIS IS A MOBILE-FIRST MARKET.** Artisans, job workers and small manufacturers are on phones, not desktops. Nine blank dashboards is arguably more damaging to a real user than anything in Launch-Ready items 3-8. **Practically moot only while Twilio is on trial** — no real user can sign up, so nobody can reach these screens. **That runway closes the moment DLT clears.** Fix before real users arrive.
+
+  🔴 **THE FIX IS A DESIGN DECISION AND IS NOT YET MADE. Do not start coding it.**
+  - **Option A — a default mobile branch inside `ThreePanelLayout`.** Fixes all ten in ONE file; the two pages with bespoke mobile views keep overriding. ⚠️ Requires deciding **what the default mobile chrome is** — header content, whether `rightPanel` appears at all, padding for a bottom nav. That is a product call, not a CSS tweak.
+  - **Option B — copy the sibling block into the nine pages.** Mechanical, matches the existing convention exactly, needs no new decisions. ⚠️ Nine copies of the same chrome, which will drift.
+  - ⚠️ **NOT AN OPTION: simply changing `hidden md:flex` to `flex`.** That renders the fixed three-column shell (260px + fluid + 280px) at 320px wide — a different broken screen, not a fix.
+
+  **HOW IT WAS FOUND, because the diagnosis went wrong first and that is worth keeping.** It surfaced as a blank screen after a real production first login (chunk 1.10's session) and was chased for several rounds as an **auth/guard bug** — redirect loops, unpopulated mirrors, a stuck guard. It was none of those. The founder solved it in one step by **switching the phone's Chrome to desktop mode**, where the dashboard rendered perfectly. ⚠️ **THE LESSON: "does this page render at all at this viewport width" is a round-one question, not a round-five one.** The investigation went to the auth layer because that is where the recent interesting changes were — availability bias, not evidence. A browser resize would have cost seconds.
+
+  ⚠️ **AN EARLIER THEORY WAS WRONG AND IS RECORDED SO IT IS NOT REPEATED:** the blank was attributed to "six of seven user types, enterprise exempt because it uses `useEnterpriseAccess` instead of `useTypeGuard`". **Enterprise escapes because it has a mobile block, not because of its guard hook** — the two were coincident and a causal story was read into it. It also could not explain `brand`, which escapes too and was never checked. *(The guard work it prompted — Part 1 / Part 1a — is still worth having on its own terms: a guard that can render nothing forever is a real latent trap. It just was not this bug's fix.)*
+
+  **Verify:** every affected dashboard renders real content at 375px viewport width on a real phone, not only in desktop mode. Test on at least one talent type and one marketplace type.
 
 ## PHASE A — Make what exists trustworthy
 - [ ] 🛑 **REAL SMS — THE LAUNCH BLOCKER. Path decided 2026-08-28; DLT registration STARTED; the code chunk is NOT started and must not begin until DLT clears.**

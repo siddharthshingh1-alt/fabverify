@@ -247,6 +247,20 @@ Credit: FabFloat, FabPay Later, FabMaterial · Production: FabPLM, FabFloor, Fab
 
 ## KNOWN ISSUES / TECH DEBT
 
+### 🔴 OPEN — 9 MARKETPLACE DASHBOARDS ARE BLANK ON MOBILE (<768px). PRE-EXISTING ON `main`.
+
+**One CSS class.** `ThreePanelLayout.tsx` root: `className="hidden md:flex"` on both return branches. Below 768px the whole dashboard shell is `display:none`. Clean console, healthy server log, auth and data all fine — the DOM is there and invisible.
+
+**Affected:** artisan, manufacturer, mill, supplier, jobworker, all four talent dashboards, and `PositionDashboards.tsx`. **Unaffected:** brand and enterprise — the only two with the house `md:hidden` sibling block.
+
+⚠️ **PRE-EXISTING ON `main`, NOT A REGRESSION.** Same class on `main` line 19; same five dashboards missing mobile blocks there. The auth branch touched none of those pages. **Therefore it does NOT block the auth merge.**
+
+⚠️ **HIGH PRIORITY — mobile-first market.** Moot only while Twilio's trial blocks signups; that runway closes when DLT clears.
+
+🔴 **Fix not decided:** default mobile branch in the component (one file, needs a product call on default mobile chrome) vs copying the sibling block nine times (mechanical, will drift). **Never** just `hidden md:flex` → `flex` — that renders a 540px fixed shell at 320px.
+
+⚠️ **Found only after several rounds of chasing it as an auth/guard bug.** Solved by switching the phone to desktop mode. **"Does this render at this width" is a round-one question.** The earlier "enterprise is exempt because of `useEnterpriseAccess`" theory was **wrong** — enterprise escapes via its mobile block, and brand escapes too.
+
 ### 🛑 OPEN — BLANK SCREEN ON FIRST LOGIN FOR EVERY NON-ENTERPRISE USER TYPE (found 2026-08-29, MERGE BLOCKER)
 
 **A real first login on the artisan reached a blank screen and stayed there.** No error, no spinner, no redirect, no recovery. Found by chunk 1.10's production test — **the first ever production login on a non-enterprise account.**
