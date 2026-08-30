@@ -34,7 +34,7 @@ All 10 chunks done. **Zero application files import Supabase** (consumer importe
 > ⚠️ **THE RULE: run `git log --oneline -5` and compare it to the 📍 STATUS line as the FIRST act of every session.** Git is the ground truth for what *exists*; these files are the ground truth for what it *means*. When they disagree, **git wins and the doc is the bug.**
 > ⚠️ **AND: a chunk is not done until its STATUS line moves.** Same failure as the 2.2 and 2.5b traps in a new costume — there the code was uncommitted; here it was committed, proven, and undocumented.
 
-> ⚠️ **STILL OPEN AND EASY TO LOSE — the full register lives under chunk 2.9 in `TASKS.md`:** password **spraying** is undefended (2.7 is per-account only; per-IP deliberately unbuilt, [I23]) and **2.6a merged without the decision that was supposed to gate it** · `/api/dev-auth/lookup` is **still unauthenticated** and returns `select("*")` on `users` · a reset's epoch bump evicts **our** tokens only, so **a stolen Supabase session survives it** — never write "reset ends all your sessions" · **new-user signup is covered structurally by 2.6b's gate but has never been run end-to-end on a genuinely new account.**
+> ⚠️ **STILL OPEN AND EASY TO LOSE — the full register lives under chunk 2.9 in `TASKS.md`:** password **spraying** is undefended (2.7 is per-account only; per-IP deliberately unbuilt, [I23]) and **2.6a merged without the decision that was supposed to gate it** · `/api/dev-auth/lookup` is **still unauthenticated** and returns `select("*")` on `users` · 🔴 **`GET /api/sample-briefs`'s public branch returns buyer name, city AND PHONE to anonymous callers with no input at all** (found 2026-08-31, pre-existing, verified against `76b64f2`) · a reset's epoch bump evicts **our** tokens only, so **a stolen Supabase session survives it** — never write "reset ends all your sessions" · **new-user signup is covered structurally by 2.6b's gate but has never been run end-to-end on a genuinely new account.**
 
 ✅ **STATE OF PASSWORD LOGIN RIGHT NOW, so nobody misreads it:** a user can **SET** a password, **LOG IN** with one (`POST /api/auth/password-login` + the field on `/login`), and is **forced to set one** before reaching the app ([I27] gate). Repeated wrong guesses **lock the account for 15 minutes**. The server can also **RESET** a forgotten password from a fresh OTP (`resetPasswordByOtp`) — **but that function has no route and no screen yet (2.8b)**, so no user can reach it. *(This paragraph previously read "nothing can LOG IN." That was true until 2026-08-21 and is now three chunks out of date.)*
 
@@ -71,50 +71,83 @@ Locked decisions: **A12** parallel-run migration · **I8** RLS retired · **I9**
 
 ## SPRINT FOCUS
 
-# 🏁 M10 IS COMPLETE (2026-08-28). NOTHING IS DEPLOYED.
+# 🚀 M10 IS COMPLETE AND **DEPLOYED** (merged 2026-08-31). `5b7dfa3` IS LIVE.
 
 All fifteen chunks are done and production-proven — password login, our own
 session token, per-account lockout, server-side throttled OTP, password reset,
-and login anti-spraying. Everything lives on `auth-hardening-batch`; **`main`
-has none of it, and merging to `main` auto-deploys to Vercel.**
+and login anti-spraying. **All of it is now on `main` and serving from
+`fabverify.vercel.app`**, together with Item 1's auth seam. All 6 verification
+points passed on the live site.
 
-## 🏁 SESSION HANDOFF (2026-08-30) — THE NEXT SESSION IS THE FIRST DEPLOY
+⚠️ **`main` AUTO-DEPLOYS. IT IS NO LONGER A SAFE PLACE TO COMMIT — not even
+docs.** A docs-only push to `main` rebuilds and redeploys production. Work on a
+branch; merge deliberately, the way this one was.
 
-**READ THIS FIRST. The next session's job is ONE thing: the deliberate merge to `main`, which auto-deploys to Vercel.** It was left to a fresh session on purpose — a first deploy wants clear eyes, not the tail of a long debugging session.
+⚠️ **DEPLOYED IS NOT LAUNCHED, AND IT IS NOT EVEN BETA-READY.** Twilio is still
+on trial and 9 of 11 signup personas are a blank screen on a phone. See
+"BEFORE ANY BETA INVITE" in the handoff block below.
+
+*(Historical: this read "NOTHING IS DEPLOYED … `main` has none of it." True
+from 2026-08-28 until the merge on 2026-08-31.)*
+
+## 🚀 THE FIRST DEPLOY HAPPENED — 2026-08-31. `5b7dfa3` IS LIVE ON `fabverify.vercel.app`.
+
+**ALL THREE GATES ARE CLOSED. ALL 6 VERIFICATION POINTS PASSED.** Item 1 (durable auth link + auth seam) and M10 (password login) are **in production**, serving real traffic paths for the first time. `origin/main` moved `76b64f2` → `5b7dfa3` — **53 commits**, fast-forward, no merge commit.
+
+⚠️ **`main` NOW AUTO-DEPLOYS AND IS NO LONGER A SAFE PLACE TO COMMIT.** Every future push to `main` is a production deploy. Build on a branch; merge deliberately, exactly as this one was.
+
+⚠️ **THE DEPLOY DID NOT OPEN THE FRONT DOOR, AND THE BETA IS NOT UNBLOCKED.** Twilio is still on trial (verified caller IDs only) and **9 of 11 signup personas land on a blank screen on a phone**. See "BEFORE ANY BETA INVITE" below. Deploying and inviting are separate acts; only the first one is done.
+
+*(Historical: this block read "THE NEXT SESSION IS THE FIRST DEPLOY — the next session's job is ONE thing: the deliberate merge." That was true until 2026-08-31, when the merge was taken.)*
 
 ### GATE SHEET
 | Gate | Status |
 |---|---|
 | 1. Chunk 1.10 production session | ✅ **CLOSED 2026-08-30 — all 5 proofs, no asterisk.** Sign-out confirmed to leave **0** localStorage keys after `40b7486`. |
 | 2. Repo-wide eslint decision | ✅ **DONE** — `4861b28`, 29 errors → warnings, reasoning in `eslint.config.mjs` |
-| 3. A deliberate merge | ⏳ **the only thing left** |
+| 3. A deliberate merge | ✅ **CLOSED 2026-08-31 — TAKEN AND VERIFIED.** `git push origin main` → Vercel build ● Ready in 59s → all 6 points passed. |
 
 **What chunk 1.10 proved, so nobody re-runs it:** 1.9's miss-then-fallback branch (`via PHONE FALLBACK`, single-use state, spent correctly) · 1.8's first-ever identity write (`auth_identities` 1 row → 2) · `apiClient`'s seam token attach in production · `AuthGuard`'s production branch (stage 2 ran for the first time and did not bounce a valid session) · sign-out: no-token API **401**, direct dashboard URL **bounced**, and — the one that matters — **replaying the pre-sign-out access token returned 401, proving sign-out ends the session SERVER-SIDE. Issue B holds in production.**
 
-### ⚠️ BEFORE MERGING — RE-VERIFY, DO NOT TRUST THIS FILE
-1. **`SESSION_TOKEN_SECRET` on Vercel.** Confirm with `npx vercel env ls production`. It was added 2026-08-29 (Production scope). ⚠️ **Without it the Vercel build FAILS** — 15 of 23 routes import `auth.ts` → `authProvider.server.ts` → `sessionToken.server.ts`, which throws at module load. Proven: `SESSION_TOKEN_SECRET="" npm run build` → exit 1. **This is the SAFE failure mode** — a failed build means the deploy is rejected and the current production version keeps serving.
-2. **Confirm the gates from git, not from prose.** `git log --oneline -5` against this block.
-3. **Clean build LAST:** `rm -rf .next && npm run build` — exit 0, 162 pages. ⚠️ Build after the final file lands, never before (that mistake shipped `26b3cd6` with a tree that did not build).
+### ✅ WHAT WAS RUN, 2026-08-31 — the record, so nobody re-runs it
+**Pre-flight:** working tree clean · `auth-hardening-batch` 0/0 against its remote · no dev server on port 3000 · `SESSION_TOKEN_SECRET` confirmed present on Vercel, Production scope, via `npx vercel env ls production` (checked live, not from prose) · `origin/main` re-fetched and confirmed still at `76b64f2` immediately before the merge.
+**Clean build LAST:** `rm -rf .next && npm run build` → **exit 0**, route manifest **162 static + 27 dynamic**.
+**The merge:** `git checkout main` → `git pull origin main` (*"Already up to date"* — expected, `origin/main` was BEHIND local main by `9c09db8`) → `git merge auth-hardening-batch` → **fast-forward, single parent, no merge commit** → `git push origin main` → `76b64f2..5b7dfa3`.
+**The build:** Vercel picked it up automatically, `● Ready` in **59s**, aliased to `fabverify.vercel.app`.
 
-### THE MERGE
-`git checkout main` → `git pull origin main` → `git merge auth-hardening-batch` → `git push origin main` ← **THIS IS THE DEPLOY.** `main` is 0 behind, so it fast-forwards; no merge commit, no conflicts.
+⚠️ **ONE THING THE OLD PLAN GOT WRONG, WORTH KEEPING.** It said the push would move `origin/main` by **52** commits. It moved **53**. Local `main` had been sitting 1 commit ahead of `origin/main` (`9c09db8`, the July auth batch — committed to main locally, never pushed). It was already an ancestor of `auth-hardening-batch`, so nothing diverged and the fast-forward was unaffected — but **the count in a handoff doc was wrong because nobody had run `git rev-list --count origin/main..HEAD` against the actual remote.** Same class as every other drift incident in this file: a number written from memory instead of derived.
 
-### 6-POINT PRODUCTION VERIFICATION (on `fabverify.vercel.app`, after the build goes green)
-1. **Login page loads AND shows a password field** — `main` has never had one; fastest proof the right code shipped.
-2. **No 500s:** an authenticated route unauthenticated returns **401, not 500**. A 500 means the module-load throw fired, i.e. the secret is wrong or too short.
-3. **Real OTP login** on the founder's verified number → dashboard with real data.
-4. **Password login** on the enterprise account.
-5. ⚠️ **The dev bypass must be DEAD:** `123456` as the OTP **must fail**. If it works, stop — the hostname gate is not holding.
-6. **Unauthenticated `GET /api/verification?phone=…` → 401** (the Step 0 fix).
-Do 1, 2 and 5 immediately; 3 and 4 within minutes.
+### ✅ 6-POINT PRODUCTION VERIFICATION — ALL 6 PASSED (2026-08-31)
+| # | Check | Result |
+|---|---|---|
+| 1 | Login page loads **with a password field** | ✅ 200, field present. `main` had never had one — the fastest proof the right code shipped. |
+| 2 | Authenticated route unauthenticated → **401, not 500** | ✅ 401 on `orders` + `conversations`; 401 on a garbage Bearer token. **Zero 500s anywhere** — the module-load throw never fired, so the secret is correct and long enough. |
+| 3 | **Real OTP login** on `9773933279` | ✅ SMS arrived, code worked, dashboard with **real data rendered** (landing alone was not accepted). |
+| 4 | **Password login**, enterprise account | ✅ dashboard with data. |
+| 5 | ⚠️ **Dev bypass DEAD** — `123456` must fail | ✅ **failed, stayed on the OTP step.** Corroborated server-side: an `x-dev-phone` header on a production API route returns **401**, i.e. the server ignores it entirely. |
+| 6 | Unauth `GET /api/verification?phone=…` → 401 | ✅ 401. |
+**Also checked, because a prerendered 200 proves nothing:** all 10 JS chunks referenced by `/login` return **200**, so the page can actually hydrate.
 
-### ⚠️ WHAT THE DEPLOY DOES AND DOES NOT CHANGE
-- **It does NOT open the front door.** Twilio is still on TRIAL, so no real user on an arbitrary number can receive an OTP — they cannot sign up, log in, or reset. That is unchanged by merging and is still the launch blocker (DLT registration, founder-owned, in progress).
-- **That is also what makes this the safest first deploy available:** there is no traffic to break. Deploy into the quiet rather than waiting for the branch to grow.
-- 🔴 **9 dashboards are blank on mobile** — **pre-existing on `main`, ships today, NOT a regression from this branch.** It does not block the merge. It is HIGH priority for its own chunk (see Phase A in TASKS.md) and must be fixed **before DLT clears and real users arrive**.
+⚠️ **A TESTING TRAP FOUND WHILE VERIFYING POINT 2, worth keeping.** `GET /api/orders` with no token first returned **400**, not 401 — which looks like a broken auth gate. It is not: `app/api/orders/route.ts:17` returns 400 for a missing `phone` param **before** `getVerifiedUser` runs at line 21, so the request never reached the gate. **A 400 here means the test was malformed, not that auth is missing.** Always pass the route's required params when probing an auth gate, or you are testing the param validator.
 
-### AFTER THE MERGE, in order
-Three easy error-handling routes (`manufacturers`, `manufacturers/[id]`, `waitlist`) → the `db.ts` swallow sites → **the mobile fix** (decide Option A vs B first) → Launch-Ready items 3-8.
+### ⚠️ WHAT THE DEPLOY DID AND DID NOT CHANGE
+- **It did NOT open the front door.** Twilio is still on TRIAL, so no real user on an arbitrary number can receive an OTP — they cannot sign up, log in, or reset. Unchanged by the merge; still the launch blocker (DLT registration, founder-owned, in progress).
+- **That is exactly what made it the safest first deploy available:** there was no traffic to break. It was deployed into the quiet rather than waiting for the branch to grow.
+- 🔴 **9 dashboards are blank on mobile — THEY ARE NOW LIVE.** Pre-existing on `main`, NOT a regression from this branch, and it correctly did not block the merge. **It DOES block the beta.** See below.
+
+### 🛑 BEFORE ANY BETA INVITE — three things, in this order
+**Deploying and inviting are separate acts. Only the first is done.** A tester invited today would sail through login and signup on their phone (those pages render fine) and hit a **blank screen at the moment they arrive** — the worst possible shape of bug, and unfalsifiable feedback: a tester cannot tell "broken layout" from "my account is broken" from "this product is broken."
+1. 🔴 **THE MOBILE FIX (Option A).** `app/onboarding/type/page.tsx:88-100` maps **11 signup personas**; only `brand-buyer` and `enterprise-brand` end at a dashboard with a mobile block. **The other 9 land on a blank screen.** Needs a product decision on the default mobile chrome before any code — see the entry in TASKS.md.
+2. **Twilio verified caller IDs.** The friend's number **and** a second founder-controlled test number. Trial delivers only to verified IDs; an unverified number gets no SMS and ⚠️ `providerFallback.ts:25-30` records that whether the trial rejection even matches the fallback heuristic is **UNKNOWN**, so the likely experience is a silent dead end on "code sent". Verify, then **prove one real SMS lands before scheduling anything** — carriers can accept and silently drop.
+3. **Dry-run a fresh signup on the second number, founder first.** ⚠️ The [I27] set-password gate **has never been run end-to-end on a genuinely new account** (TASKS.md:556) — it is an inference from the gate's design, not an observation. The friend must not be its first execution.
+
+### AFTER THE MERGE — ORDER REVISED 2026-08-31, AND THE REASON IS THE BETA
+**The old order read:** three easy error-handling routes (`manufacturers`, `manufacturers/[id]`, `waitlist`) → the `db.ts` swallow sites → the mobile fix → Launch-Ready items 3-8. ⚠️ **That order was written before a beta tester existed.** It puts three low-risk cleanups ahead of the one defect that makes a phone-based beta impossible.
+**The order now:**
+1. 🔴 **THE MOBILE FIX (Option A)** — the beta blocker. Decision first, then code.
+2. **The two PII routes, together** — `dev-auth/lookup` and the `sample-briefs` public branch (below). Both hand out real people's contact details to anonymous callers, and a beta puts a real person's data behind them for the first time.
+3. Twilio verification + the founder's own fresh-signup dry run → **then** the beta invite.
+4. The three error-handling routes → the `db.ts` swallow sites → Launch-Ready items 3-8.
 
 ---
 
